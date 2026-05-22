@@ -26,7 +26,8 @@ const ResourcesContent  = dynamic(() => import("@/components/pages/ResourcesCont
 const EvaluationContent = dynamic(() => import("@/components/pages/EvaluationContent"), { ssr: false });
 
 // ─── 登录页（仅在未登录时显示）──────────────────────────────────────────────────
-const LoginContent = dynamic(() => import("@/components/LoginContent"), { ssr: false });
+const LoginContent  = dynamic(() => import("@/components/LoginContent"),  { ssr: false });
+const LandingContent = dynamic(() => import("@/components/LandingContent"), { ssr: false });
 
 const { Sider, Content } = Layout;
 const { Text } = Typography;
@@ -48,7 +49,8 @@ export default function AppShell({ children: _children }: { children: React.Reac
   const router = useRouter();
 
   // ── Auth state ────────────────────────────────────────────────────────────
-  const isLoggedIn = useAppStore((s) => s.isLoggedIn);
+  const isLoggedIn  = useAppStore((s) => s.isLoggedIn);
+  const showLanding = useAppStore((s) => s.showLanding);
   const userName   = useAppStore((s) => s.userName);
   const courseName = useAppStore((s) => s.courseName);
   const logout     = useAppStore((s) => s.logout);
@@ -140,9 +142,9 @@ export default function AppShell({ children: _children }: { children: React.Reac
     router.push(key);
   };
 
-  // ── 未登录时全屏显示登录页 ────────────────────────────────────────────────
+  // ── 未登录时：先显示落地页，点击登录后显示登录表单 ─────────────────────────
   if (!isLoggedIn) {
-    return <LoginContent />;
+    return showLanding ? <LandingContent /> : <LoginContent />;
   }
 
   return (

@@ -8,10 +8,14 @@ interface AppState {
   isLoggedIn: boolean;
   userName: string;
   courseName: string;
-  login: (userName: string, courseName: string) => void;
-  logout: () => void;
-  // ── Core data ─────────────────────────────────────────────────────────────
+  /** 真实登录后为后端返回的 UUID；演示模式固定为 "demo" */
   userId: string;
+  /** true = 显示产品落地页；false = 显示登录表单 */
+  showLanding: boolean;
+  login: (userName: string, courseName: string, userId?: string) => void;
+  logout: () => void;
+  setShowLanding: (v: boolean) => void;
+  // ── Core data ─────────────────────────────────────────────────────────────
   profile: StudentProfile | null;
   resources: LearningResource[];
   learningPath: LearningPath | null;
@@ -28,11 +32,22 @@ export const useAppStore = create<AppState>((set) => ({
   isLoggedIn: false,
   userName: "演示学生",
   courseName: "机器学习导论",
-  login: (userName, courseName) => set({ isLoggedIn: true, userName, courseName }),
-  logout: () =>
-    set({ isLoggedIn: false, profile: null, resources: [], learningPath: null, resourceTitles: {} }),
-  // ── Core data defaults ────────────────────────────────────────────────────
   userId: DEMO_USER_ID,
+  showLanding: true,
+  login: (userName, courseName, userId) =>
+    set({ isLoggedIn: true, userName, courseName, userId: userId || DEMO_USER_ID }),
+  logout: () =>
+    set({
+      isLoggedIn: false,
+      showLanding: true,
+      userId: DEMO_USER_ID,
+      profile: null,
+      resources: [],
+      learningPath: null,
+      resourceTitles: {},
+    }),
+  setShowLanding: (v) => set({ showLanding: v }),
+  // ── Core data defaults ────────────────────────────────────────────────────
   profile: null,
   resources: [],
   learningPath: null,
@@ -49,3 +64,4 @@ export const useAppStore = create<AppState>((set) => ({
       ],
     })),
 }));
+

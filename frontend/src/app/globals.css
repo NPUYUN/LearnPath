@@ -196,3 +196,390 @@ body {
 .ant-card-hoverable {
   transition: box-shadow 0.15s, transform 0.15s !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   落地页 (LandingContent)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 根容器 */
+.lp-root {
+  min-height: 100vh;
+  background: #070d1f;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.055) 1px, transparent 0);
+  background-size: 36px 36px;
+  color: #e8eaf0;
+  position: relative;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+}
+
+/* ── 光晕 orbs ── */
+.lp-orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  z-index: 0;
+}
+.lp-orb-1 {
+  width: 650px; height: 650px;
+  background: radial-gradient(circle, rgba(22,119,255,0.45) 0%, transparent 70%);
+  top: -200px; left: -200px;
+  animation: lpOrb1 14s ease-in-out infinite;
+}
+.lp-orb-2 {
+  width: 550px; height: 550px;
+  background: radial-gradient(circle, rgba(124,58,237,0.4) 0%, transparent 70%);
+  bottom: -180px; right: -120px;
+  animation: lpOrb2 18s ease-in-out infinite;
+}
+.lp-orb-3 {
+  width: 420px; height: 420px;
+  background: radial-gradient(circle, rgba(16,185,129,0.3) 0%, transparent 70%);
+  top: 50%; left: 55%;
+  transform: translate(-50%, -50%);
+  animation: lpOrb3 22s ease-in-out infinite;
+}
+
+@keyframes lpOrb1 {
+  0%, 100% { transform: translate(0,0) scale(1); }
+  33%       { transform: translate(70px, 50px) scale(1.06); }
+  66%       { transform: translate(-40px, 70px) scale(0.94); }
+}
+@keyframes lpOrb2 {
+  0%, 100% { transform: translate(0,0); }
+  50%       { transform: translate(-70px, -50px) scale(1.1); }
+}
+@keyframes lpOrb3 {
+  0%, 100% { transform: translate(-50%,-50%) scale(1); }
+  40%       { transform: translate(-45%,-56%) scale(1.12); }
+  70%       { transform: translate(-56%,-44%) scale(0.9); }
+}
+
+/* ── 顶部导航 ── */
+.lp-nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 64px;
+  height: 64px;
+  background: rgba(7,13,31,0.75);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.lp-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lp-nav-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: rgba(79,142,247,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lp-nav-name {
+  font-size: 19px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.lp-nav-sub {
+  font-size: 12px;
+  color: #4b5563;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+}
+.lp-login-btn {
+  background: linear-gradient(135deg, #1677ff 0%, #36cfc9 100%) !important;
+  border: none !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 0 18px rgba(22,119,255,0.35) !important;
+  transition: transform 0.18s, box-shadow 0.18s !important;
+}
+.lp-login-btn:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 24px rgba(22,119,255,0.55) !important;
+}
+
+/* ── Hero ── */
+.lp-hero {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 160px 40px 72px;
+}
+.lp-hero-badge {
+  display: inline-block;
+  padding: 6px 18px;
+  background: rgba(22,119,255,0.12);
+  border: 1px solid rgba(22,119,255,0.35);
+  border-radius: 24px;
+  font-size: 13px;
+  color: #7ab7ff;
+  margin-bottom: 30px;
+  backdrop-filter: blur(6px);
+}
+.lp-hero-title {
+  font-size: clamp(44px, 6.5vw, 88px);
+  font-weight: 900;
+  line-height: 1.15;
+  color: #fff;
+  margin-bottom: 20px;
+  letter-spacing: -0.03em;
+}
+.lp-gradient-text {
+  background: linear-gradient(135deg, #4f8ef7 0%, #36cfc9 45%, #a855f7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  background-size: 200% 200%;
+  animation: lpGradShift 5s ease infinite;
+}
+@keyframes lpGradShift {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.lp-hero-typed {
+  font-size: 22px;
+  font-weight: 500;
+  color: #c7d2fe;
+  margin-bottom: 14px;
+  min-height: 32px;
+  letter-spacing: 0.04em;
+}
+.lp-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: lpBlink 0.9s step-end infinite;
+  color: #4f8ef7;
+}
+@keyframes lpBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.lp-hero-sub {
+  font-size: 16px;
+  color: #6b7280;
+  line-height: 1.9;
+  margin-bottom: 48px;
+}
+.lp-hero-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ── CTA buttons（纯 HTML button 以避免 Ant Design 覆盖） ── */
+.lp-btn-primary {
+  height: 52px;
+  padding: 0 40px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #1677ff 0%, #36cfc9 100%);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: 0 4px 24px rgba(22,119,255,0.42);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.lp-btn-primary:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 36px rgba(22,119,255,0.6);
+}
+.lp-btn-primary.lp-btn-lg {
+  height: 58px;
+  padding: 0 52px;
+  font-size: 18px;
+  border-radius: 14px;
+}
+.lp-btn-ghost {
+  height: 52px;
+  padding: 0 36px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #c7d2fe;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.13);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+}
+.lp-btn-ghost:hover {
+  background: rgba(255,255,255,0.13);
+  border-color: rgba(255,255,255,0.25);
+}
+
+/* ── Stats 卡片行 ── */
+.lp-stats {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  padding: 0 40px 80px;
+  flex-wrap: wrap;
+}
+.lp-stat-card {
+  text-align: center;
+  padding: 22px 44px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  backdrop-filter: blur(8px);
+  min-width: 140px;
+  transition: border-color 0.25s, transform 0.25s;
+}
+.lp-stat-card:hover {
+  border-color: rgba(255,255,255,0.16);
+  transform: translateY(-3px);
+}
+.lp-stat-value {
+  font-size: 30px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.lp-stat-label {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+/* ── Features ── */
+.lp-features {
+  position: relative;
+  z-index: 1;
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 40px 80px;
+}
+.lp-section-header {
+  text-align: center;
+  margin-bottom: 52px;
+}
+.lp-section-tag {
+  display: inline-block;
+  padding: 4px 14px;
+  background: rgba(79,142,247,0.12);
+  border: 1px solid rgba(79,142,247,0.3);
+  border-radius: 20px;
+  font-size: 12px;
+  color: #7ab7ff;
+  margin-bottom: 14px;
+  letter-spacing: 0.05em;
+}
+.lp-section-title {
+  font-size: clamp(26px, 3.5vw, 42px);
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 10px;
+}
+.lp-section-desc {
+  font-size: 15px;
+  color: #6b7280;
+}
+.lp-features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+.lp-feature-card {
+  padding: 28px 26px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 18px;
+  backdrop-filter: blur(8px);
+  cursor: default;
+  transition: transform 0.25s, box-shadow 0.25s, border-color 0.25s;
+  animation: lpFadeUp 0.5s ease both;
+}
+.lp-feature-card:hover {
+  transform: translateY(-5px);
+  border-color: var(--card-color, rgba(255,255,255,0.15));
+  box-shadow: 0 12px 40px var(--card-glow, rgba(0,0,0,0.3));
+}
+.lp-feature-icon {
+  width: 50px; height: 50px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin-bottom: 16px;
+}
+.lp-feature-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e8eaf0;
+  margin-bottom: 8px;
+}
+.lp-feature-desc {
+  font-size: 14px;
+  color: #6b7280;
+  line-height: 1.75;
+}
+
+/* ── Bottom CTA ── */
+.lp-cta {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 96px 40px;
+  background: linear-gradient(180deg, transparent 0%, rgba(22,119,255,0.07) 50%, transparent 100%);
+  border-top: 1px solid rgba(22,119,255,0.1);
+  border-bottom: 1px solid rgba(22,119,255,0.1);
+}
+.lp-cta-title {
+  font-size: clamp(28px, 3.5vw, 44px);
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 12px;
+}
+.lp-cta-sub {
+  font-size: 16px;
+  color: #9ca3af;
+  margin-bottom: 36px;
+}
+
+/* ── Footer ── */
+.lp-footer {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 22px 40px;
+  font-size: 13px;
+  color: #374151;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+/* ── 入场动画 ── */
+.lp-fade-in   { animation: lpFadeUp 0.8s ease both; }
+.lp-fade-in-1 { animation: lpFadeUp 0.8s ease 0.15s both; }
+.lp-fade-in-2 { animation: lpFadeUp 0.8s ease 0.3s both; }
+.lp-fade-in-3 { animation: lpFadeUp 0.8s ease 0.45s both; }
+
+@keyframes lpFadeUp {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 响应式 ── */
+@media (max-width: 768px) {
+  .lp-nav { padding: 0 20px; }
+  .lp-hero { padding: 120px 20px 56px; }
+  .lp-stats { padding: 0 20px 56px; gap: 12px; }
+  .lp-stat-card { padding: 16px 24px; min-width: 110px; }
+  .lp-features { padding: 0 20px 56px; }
+  .lp-features-grid { grid-template-columns: 1fr; }
+  .lp-cta { padding: 64px 20px; }
+  .lp-hero-sub br { display: none; }
+}

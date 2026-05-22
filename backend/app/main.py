@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import chat, health, path, profile, resources, tutor
+from app.api.routes import chat, health, path, profile, resources, tutor, auth, eval as eval_route
 from app.core.config import ROOT_DIR, get_settings
 from app.db.session import init_db
 
@@ -39,3 +39,5 @@ app.include_router(profile.router, prefix="/api")
 app.include_router(resources.router, prefix="/api")
 app.include_router(path.router, prefix="/api")
 app.include_router(tutor.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(eval_route.router, prefix="/api")

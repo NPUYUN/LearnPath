@@ -1,37 +1,29 @@
-# 在默认浏览器中打开学径（需已启动前后端）
+# LearnPath launcher: clean + start backend & frontend + open browser
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path -Parent
 
-Write-Host "打开本地入口页..."
-Start-Process (Join-Path $Root "entry.html")
+# -- Start services --------------------------------------------------------
+& "$Root\scripts\dev.ps1"
 
-Start-Sleep -Milliseconds 500
-
-$urls = @(
-    "http://localhost:3000/chat",
-    "http://localhost:3001/chat"
-)
-foreach ($u in $urls) {
-    try {
-        $r = Invoke-WebRequest -Uri "http://localhost:8000/api/health" -UseBasicParsing -TimeoutSec 2
-        if ($r.StatusCode -eq 200) {
-            Write-Host "后端已就绪: http://localhost:8000"
-            break
-        }
-    } catch {
-        Write-Host "提示: 后端未启动，请先运行 uvicorn 或 scripts\dev.ps1"
+# -- Wait for frontend (up to 30 s) ----------------------------------------
+Write-Host ""
+Write-Host "Waiting for frontend..."
+$frontUrl = $null
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 1
+    foreach ($port in @(3000, 3001)) {
+        try {
+            $r = Invoke-WebRequest -Uri "http://localhost:$port" -UseBasicParsing -TimeoutSec 1 -ErrorAction Stop
+            if ($r.StatusCode -eq 200) { $frontUrl = "http://localhost:$port/chat"; break }
+        } catch {}
     }
+    if ($frontUrl) { break }
 }
 
-# 尝试打开可用前端端口
-foreach ($u in $urls) {
-    try {
-        $r = Invoke-WebRequest -Uri ($u -replace "/chat","") -UseBasicParsing -TimeoutSec 2
-        if ($r.StatusCode -eq 200) {
-            Write-Host "打开前端: $u"
-            Start-Process $u
-            exit 0
-        }
-    } catch { }
+# -- Open browser ----------------------------------------------------------
+if ($frontUrl) {
+    Write-Host "Opening: $frontUrl"
+    Start-Process $frontUrl
+} else {
+    Write-Host "Frontend not ready, opening http://localhost:3000/chat"
+    Start-Process "http://localhost:3000/chat"
 }
-
-Write-Host "未检测到前端服务，请先在 frontend 目录执行 npm run dev"

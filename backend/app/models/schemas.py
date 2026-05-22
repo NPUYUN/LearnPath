@@ -88,4 +88,45 @@ class TutorRequest(BaseModel):
 class EvalSubmitRequest(BaseModel):
     user_id: str = "demo"
     quiz_id: str
-    answers: dict[str, Any]
+
+
+# ── Auth schemas ──────────────────────────────────────────────────────────────
+
+class SendOtpRequest(BaseModel):
+    email: str
+
+
+class VerifyOtpRequest(BaseModel):
+    email: str
+    code: str
+
+
+class AuthUser(BaseModel):
+    user_id: str
+    email: str
+    display_name: str
+
+
+# ── Eval stats schema ─────────────────────────────────────────────────────────
+
+class RadarData(BaseModel):
+    dimensions: list[str]
+    before: list[int]
+    after: list[int]
+
+
+class EvalEvent(BaseModel):
+    label: str
+    color: str
+    content: str
+    date: str
+
+
+class EvalStats(BaseModel):
+    total_resources: int
+    resources_by_type: dict[str, int]
+    profile_completeness: int
+    study_days: int
+    has_path: bool
+    radar: RadarData
+    recent_events: list[EvalEvent]

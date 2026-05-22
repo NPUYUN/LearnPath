@@ -125,3 +125,68 @@ export async function refreshPath(userId: string) {
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<LearningPath>;
 }
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+export type AuthUser = {
+  user_id: string;
+  email: string;
+  display_name: string;
+};
+
+/** 向邮箱发送验证码。Debug 模式下响应会附带 debug_code 字段。 */
+export async function sendOtp(email: string): Promise<{ sent: boolean; debug_code?: string }> {
+  const res = await fetch(`${API_BASE}/api/auth/send-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** 验证邮箱 + 验证码，返回用户信息（不存在则自动注册）。 */
+export async function verifyOtp(email: string, code: string): Promise<AuthUser> {
+  const res = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code }),
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "验证失败");
+    throw new Error(msg);
+  }
+  return res.json() as Promise<AuthUser>;
+}
+
+// ── Eval stats ────────────────────────────────────────────────────────────────
+
+export type RadarData = {
+  dimensions: string[];
+  before: number[];
+  after: number[];
+};
+
+export type EvalEvent = {
+  label: string;
+  color: string;
+  content: string;
+  date: string;
+};
+
+export type EvalStats = {
+  total_resources: number;
+  resources_by_type: Record<string, number>;
+  profile_completeness: number;
+  study_days: number;
+  has_path: boolean;
+  radar: RadarData;
+  recent_events: EvalEvent[];
+};
+
+export async function getEvalStats(userId: string): Promise<EvalStats> {
+  const res = await fetch(`${API_BASE}/api/eval/${userId}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<EvalStats>;
+}
+

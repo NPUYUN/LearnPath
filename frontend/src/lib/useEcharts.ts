@@ -11,8 +11,8 @@ function loadEcharts() {
 }
 
 // 供外部调用以提前预热（在不需要渲染的时机即可触发下载）
-export function preloadEcharts() {
-  void loadEcharts();
+export function preloadEcharts(): Promise<typeof import("echarts")> {
+  return loadEcharts();
 }
 
 /** 客户端安全初始化 ECharts，避免 SSR 与重复 dispose 问题 */
