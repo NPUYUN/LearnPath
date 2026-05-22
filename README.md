@@ -1,145 +1,331 @@
 # 学径（LearnPath）
 
-基于大模型的个性化资源生成与学习多智能体系统 —— 第十五届「中国软件杯」大赛 **A3** 参赛作品。
+基于 **LangGraph 多智能体**、**课程知识库 RAG** 与 **讯飞星火** 的个性化学习资源生成系统 —— 第十五届「中国软件杯」A3 赛题作品。
 
-> 赛题原文：[A组赛题页面](https://www.cnsoftbei.com/content-3-1286-1.html)（页面发布时间：2026-04-01 15:32:46）
+`Python` · `FastAPI` · `LangGraph` · `Next.js` · `Ant Design` · `Chroma`
 
-## 基本信息
+赛题全文见 [A3赛题内容.md](./A3赛题内容.md)，官方页面：[A组赛题](https://www.cnsoftbei.com/content-3-1286-1.html)
 
-| 项目 | 内容 |
+---
+
+## 快速入口（点击打开）
+
+> 需先启动后端与前端（见下方「快速开始」）。服务运行后点击下方链接即可。
+
+| 入口 | 说明 |
 |------|------|
-| 项目名称 | **学径（LearnPath）** — 寓意为每位学习者规划可演进的个性化学习路径 |
-| 赛题编号与名称 | A3：基于大模型的个性化资源生成与学习多智能体系统开发 |
-| 组别 | A组（本科、研究生、高职） |
-| 出题企业 | 科大讯飞股份有限公司 |
-| 答疑 QQ 群 | 1072584310 |
+| [**打开前端 · 智能对话**](http://localhost:3000/chat) | 默认端口 3000 |
+| [打开前端 · 备用 3001](http://localhost:3001/chat) | 3000 被占用时使用 |
+| [后端 API 文档](http://localhost:8000/docs) | Swagger |
+| [健康检查](http://localhost:8000/api/health) | 确认后端已启动 |
+
+**本地启动页（推荐）**：双击项目根目录下的 [`打开学径.bat`](./打开学径.bat)，或在资源管理器中打开 [`entry.html`](./entry.html)，在页面中点击按钮进入各模块。
+
+PowerShell 一键打开浏览器：`.\scripts\open.ps1`
 
 ---
 
-## 赛题简介
+## 核心能力
 
-在数字化与智能化深度融合的时代，高等教育的个性化变革成为核心发展方向，同时也面临传统教学模式适配性不足的挑战。不同学生在知识基础、学习能力、兴趣方向上的显著差异，使得标准化教学难以满足个性化学习需求，部分学生存在知识吸收效率低的问题。
+| 能力 | 说明 | 代码 / 页面 |
+|------|------|-------------|
+| 对话式学习画像 | 自然语言构建 6+ 维画像，随学随新 | `ProfileAgent` · `/profile` |
+| 多模态资源生成 | 讲解文档、思维导图、习题、拓展阅读、多模态说明、代码案例 | 六个 Resource Agent · `/resources` |
+| 学习路径规划 | 按画像与资源生成有序学习步骤 | `PathAgent` · `/path` |
+| 智能辅导 | 基于 RAG 的答疑（框架已接入） | `TutorAgent` · `/chat` |
+| 学习效果评估 | 评估报告与图表（前端为演示数据，待接 API） | `EvalAgent` · `/evaluation` |
+| 防幻觉与安全 | RAG 引用、敏感词过滤、一致性检查占位 | `backend/app/rag/` · `guardrails.py` |
 
-当前大模型技术迎来高速发展新阶段，以通用大模型、多模态生成大模型（如 SeeDance 等）、AI 辅助编程工具（如 Claude Code 等）为代表的技术体系，具备强大的自然语言理解、多模态内容生成、代码辅助开发及实时推理能力，为高等教育领域的创新升级带来全新契机。
-
-本赛题旨在借助大模型技术体系，融合前沿 AI 技术，突破传统教育的技术与模式局限，要求参赛团队构建高等教育个性化学习资源体系，开发智能学习智能体系统，切实满足学生的个性化、多模态学习需求。
-
----
-
-## 赛题业务场景
-
-在高等教育学习过程中，学生普遍面临学习资源繁杂无序、难以精准匹配自身需求且缺乏智能化、个性化学习指导的核心问题。不同专业、不同学历水平的学生在面对海量课程资料、学术文献、学习辅助工具时，难以快速筛选出契合自身学习进度和能力的资源；同时课堂集体讲授模式无法兼顾每位学生的学习节奏与特点，导致学生在知识掌握和能力提升上存在明显差距。
-
-传统学习模式及基础的智能辅助系统，因缺乏多模态生成、多智能体协同等前沿 AI 技术的支撑，难以满足现代高等教育对培养创新型、个性化人才的要求。
-
-基于此，本赛题要求参赛团队构建多智能体系统，为学生打造专属的个性化资源学习智能体，并借助多智能体协作实现智能化、精准化的学习引导。系统需依托各类高等教育资源，融合多模态生成、代码辅助开发等技术，以某一具体专业课程（如人工智能、计算机、电子信息相关等）为切入点，实现个性化资源的自动化生成与建设，根据学生个体情况提供定制化、多模态的学习内容，全方位辅助学生开展自主学习，真正实现“因材施教”的数字化落地。
+默认课程知识库：**机器学习导论**（`data/knowledge_base/ml_intro`）。无星火 API Key 时可使用 `LLM_MOCK=true` 本地演示。
 
 ---
 
-## 基本功能需求
+## 技术栈
 
-参赛团队需深入调研和研究新时代大学生的学习需求和痛点，融合前沿 AI 技术和工具，开发出能够高效生成个性化、多模态学习资源（如资源设计方案、PPT、题库、多模态视频/动画、实操案例、实践项目学习材料等）的智能体系统，实现提升学生学习效率、优化学习资源利用、增强学习效果的核心目标。该系统应包含以下核心功能：
-
-### 1. 对话式学习画像自主构建
-
-摒弃传统繁琐表单，支持通过自然语言对话（结合学生的专业、学习目标、学习历史等）自动抽取特征，构建包含不少于 6 个维度（如知识基础、认知风格、易错点偏好等）的动态学生画像，并支持画像的随学随新。
-
-### 2. 多智能体协同的资源生成
-
-系统须体现“多智能体”架构设计；通过与学生的智能交互，大模型结合 AI 前沿技术和工具，依据学生提供的专业、课程内容、知识短板、学习需求等信息，生成针对性的多模态学习资料，须由不同角色的智能体协作完成至少 5 种类型的个性化资源生成，例如：
-
-- 专业课程讲解文档  
-- 知识点思维导图  
-- 不同类型练习题目  
-- 拓展阅读材料  
-- 多模态教学视频/动画  
-- 代码类实操案例  
-
-为学生提供全方位学习参考。
-
-### 3. 个性化学习路径规划和资源推送
-
-依托多智能体协同工作机制，整合系统生成的个性化资源，结合大模型对学生专业、学习进度、知识掌握情况及学习偏好的深度分析，为学生规划科学、动态的个性化学习路径，明确学习步骤和顺序；同时基于画像实现学习资源的精准推送，涵盖文档、视频、题库、实操案例等多类型内容。
-
-### 4. 智能辅导（可选加分项）
-
-当学生在学习过程中遇到问题时，系统提供即时、多模态的答疑解惑服务，通过智能体的数据分析、大模型的知识支持，结合多模态生成技术，为学生提供详细的文字解答、图解说明、短视频讲解等多样化解答形式，实现针对性学习引导。
-
-### 5. 学习效果评估（可选加分项）
-
-通过实时跟踪学生的学习行为、练习测试情况、资源使用反馈等数据，依托大模型的数据分析能力实现对学生学习效果的多维度、精准评估；并根据评估结果及时动态调整学习资源推送策略和学习计划，实现学习方案的持续优化。
+| 层级 | 技术 |
+|------|------|
+| 后端 API | FastAPI、Uvicorn |
+| 多智能体 | LangGraph（Supervisor + 专项 Agent） |
+| 大模型 | 讯飞星火 HTTP（OpenAI 兼容），支持 Mock |
+| 检索 | ChromaDB + 课程 Markdown |
+| 持久化 | SQLite（`storage/learnpath.db`） |
+| 前端 | Next.js 14、Ant Design 5、ECharts、Zustand |
+| 文档 | 见 [docs/](./docs/) |
 
 ---
 
-## 非功能性需求
+## 快速开始
 
-1. 系统界面美观大方、简洁明了，交互逻辑清晰，符合现代 AI 产品交互规范（如流式输出、Markdown 渲染、多模态内容卡片化展示），无明显功能与界面错误，可结合 AI 技术实现交互体验的智能优化。  
-2. 若开发过程中使用开源项目、前沿 AI 工具/框架，需在提交文档的显著位置标注名称、来源及相关协议要求。  
-3. 系统需具备完善的“防幻觉”与内容安全过滤机制，确保生成的学术内容无事实性错误、无敏感违规信息。  
-4. 智能体核心功能的响应时间控制在合理范围内，保障学生的日常使用体验，多模态资源生成的响应效率需满足实际学习场景需求，如提供“生成进度追踪”或“流式呈现”机制，避免长时间白屏等待。
+### 环境要求
+
+- Python 3.11+（3.10 可运行）
+- Node.js 20+
+- 可选：讯飞星火 API Key（见 `.env`）
+
+### 1. 配置环境变量
+
+在项目根目录执行：
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+Copy-Item frontend\.env.local.example frontend\.env.local
+```
+
+```bash
+# Linux / macOS
+cp .env.example .env
+cp frontend/.env.local.example frontend/.env.local
+```
+
+编辑 `.env`：无密钥时保持 `LLM_MOCK=true`；接入星火时填写 `SPARK_API_KEY` 并设 `LLM_MOCK=false`。
+
+若前端运行在 **3001** 等非默认端口，请在 `.env` 中将 `CORS_ORIGINS` 设为 `http://localhost:3000,http://localhost:3001`。
+
+### 2. 启动后端
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1          # Windows
+# source .venv/bin/activate           # Linux / macOS
+pip install -r requirements.txt
+cd ..
+.\backend\.venv\Scripts\python scripts\ingest_kb.py   # Windows 使用 venv 内 Python
+# backend/.venv/bin/python scripts/ingest_kb.py       # Linux / macOS
+cd backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+```bash
+cd backend && python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt && cd ..
+./backend/.venv/bin/python scripts/ingest_kb.py
+cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+验证：
+
+- 健康检查：<http://localhost:8000/api/health>
+- Swagger：<http://localhost:8000/docs>
+
+### 3. 启动前端
+
+新开终端：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+浏览器访问 <http://localhost:3000>（若 3000 被占用，终端会提示实际端口，如 3001）。
+
+### 4. 一键启动并打开（Windows）
+
+已配置好后端 venv 时，可在项目根目录执行：
+
+```powershell
+.\scripts\dev.ps1    # 启动后端 + 前端（新窗口）
+.\scripts\open.ps1   # 打开 entry.html 与可用前端地址
+```
+
+或直接双击 **`打开学径.bat`** 打开本地入口页（需服务已启动）。
+
+Linux/macOS 可使用 `scripts/dev.sh`，浏览器访问 <http://localhost:3000/chat>。
+
+### 5. 建议体验流程
+
+1. 打开 `/chat`，发送「我是计算机专业，想学习机器学习导论，线性回归比较薄弱」
+2. 打开 `/profile` 查看画像雷达图
+3. 在 `/resources` 点击「生成新资源」
+4. 在 `/path` 点击「重新规划」生成学习路径
 
 ---
 
-## 实现条件
+## 环境变量（常用）
 
-本赛题对开发环境、编程语言、数据库、编辑器、硬件平台等均不做限制，参赛团队可结合前沿 AI 技术/工具，借助各类开源工具完成开发工作，需明确系统中“多智能体协同框架”，但须严格遵循开源协议及相关工具的使用要求，确保智能体程序可稳定、正常运行；智能体开发框架不做限制；开发过程中使用的其他 AI 辅助工具，需选用科大讯飞相关工具。
+| 变量 | 说明 | 默认 |
+|------|------|------|
+| `LLM_MOCK` | 无星火密钥时使用 Mock LLM | `true` |
+| `SPARK_API_KEY` | 讯飞星火 API Key | 空 |
+| `SPARK_BASE_URL` | OpenAI 兼容 Base URL | `https://spark-api-open.xf-yun.com/v1` |
+| `SPARK_MODEL` | 模型 ID | `generalv3.5` |
+| `DATABASE_URL` | SQLite 路径 | `./storage/learnpath.db` |
+| `CHROMA_PERSIST_DIR` | 向量库目录 | `./storage/chroma` |
+| `KNOWLEDGE_BASE_DIR` | 课程文档目录 | `./data/knowledge_base/ml_intro` |
+| `CORS_ORIGINS` | 允许的前端来源（逗号分隔） | `http://localhost:3000` |
+| `NEXT_PUBLIC_API_BASE` | 前端请求的后端地址（`frontend/.env.local`） | `http://localhost:8000` |
 
----
-
-## 测试数据或平台
-
-参赛团队需自行构造至少一门完整高校专业课程（如人工智能、计算机、电子信息相关等）的初始知识库/文档集作为系统输入。
-
----
-
-## 开发所需设备及设备指标需求说明
-
-无。
-
----
-
-## 文档及其他要求
-
-参赛团队提交的文档需参考软件系统的标准文档规范，包括但不限于系统开发说明书、测试说明书等，且须满足以下核心要求：
-
-1. **需求层面**：需深入了解和研究新时代大学生的学习需求，结合前沿 AI 技术的应用场景完成系统性的需求分析，明确技术与需求的结合点。  
-2. **技术开发层面**：详细阐述智能体的设计、开发、测试、部署全流程，包括用户界面设计、功能实现、系统集成及优化等方面的工作；重点说明前沿 AI 技术在系统中的融合应用思路、实现方法，同时指出系统开发过程中采纳的创新实践和用户体验提升策略。
-
-参赛团队须确保以上两个层面的内容在文档中条理清晰、逻辑连贯，并且有充分的数据与案例支撑，以便能够全面体现系统的深度与广度。此外，鼓励参赛团队通过图表、流程图、架构图等视觉工具增强文档的可读性和说服力。
+完整说明见 [docs/02-开发指南.md](./docs/02-开发指南.md)。
 
 ---
 
-## 各评分项及大致占比
+## 仓库结构
 
-| 评分项 | 占比 |
-|--------|------|
-| 创新价值与实用性 | 35% |
-| 功能实现及技术要求 | 45% |
-| 配套文档的丰富度 | 10% |
-| 演示视频、PPT 效果 | 10% |
+```
+A3/
+├── backend/
+│   └── app/
+│       ├── agents/          # LangGraph 编排与各 Agent 节点
+│       ├── api/             # REST / SSE 路由
+│       ├── core/            # 配置、LLM、guardrails
+│       ├── rag/             # 分块、入库、检索
+│       ├── services/        # 业务层调用 graph
+│       └── db/              # ORM 与仓储
+├── frontend/
+│   └── src/
+│       ├── app/             # 页面：chat | profile | path | resources | evaluation
+│       ├── components/      # AppShell、AntdProvider
+│       ├── lib/             # API 封装
+│       └── store/           # Zustand 全局状态
+├── data/knowledge_base/     # 课程原始 Markdown（需自行扩充）
+├── docs/                    # 需求、开发指南、开源协议等
+├── scripts/                 # ingest_kb.py、dev.ps1 / dev.sh
+├── storage/                 # 运行时 DB / Chroma / 生成物（gitignore）
+├── .env.example
+└── A3赛题内容.md
+```
+
+| 目录 | 职责 |
+|------|------|
+| `backend/app/agents` | 多智能体协同核心（赛题实现重点） |
+| `backend/app/rag` | 课程知识 grounding，支撑防幻觉 |
+| `frontend/src/app` | Ant Design 五页 UI，流式对话与图表 |
+| `data/knowledge_base` | 赛题要求的 ≥1 门完整课程文档输入 |
+| `docs` | 需求规格、开发说明书提纲、协议声明 |
+| `scripts` | 知识库入库与本地联调启动 |
+| `storage` | 本地运行产物，不提交 Git |
 
 ---
 
-## 初赛作品提交要求
+## 架构示意
 
-1. **演示 PPT**：须清晰展示智能体应用价值、前沿 AI 技术融合思路与实现方法、创新价值、核心功能等内容，逻辑清晰、重点突出。  
-2. **可完整运行的多智能体相关文件**：包含但不限于项目源码、数据集、模型部署配置文件等，文件整理规范，可在常规环境下正常运行。  
-3. **智能体演示视频**：时长控制在 7 分钟之内，须清晰展示系统的操作流程、核心功能、多模态资源生成效果及前沿 AI 技术的应用成果。  
-4. **智能体开发类型**：不限，包括但不限于 Web 应用、移动端开发、小程序端开发等。  
-5. **配套文档**：需满足上文“文档及其他要求”中的所有规范，文档格式统一、内容完整。  
-6. 如若使用 AI Coding 工具，给出相关说明。
+```mermaid
+flowchart LR
+  UI[Nextjs_AntDesign] --> API[FastAPI]
+  API --> Graph[LangGraph_Supervisor]
+  Graph --> Agents[Profile_Resource_Path_Agents]
+  Agents --> RAG[Chroma]
+  Agents --> LLM[Spark_or_Mock]
+```
 
----
-
-## 著作权与商业合作说明
-
-参赛团队作品中团队自主开发部分的软件作品著作权归参赛团队所有，其中具有市场应用及拓展的优秀作品，出题企业具有优先权，可以优先合作开发或者优先购买。另如基于该作品的任何合作升级开发、市场拓展等活动，以及在这一过程中所获得的任何商业费用，出题企业应与参赛团队协商解决。
+详细图源文件：[docs/diagrams/architecture.mmd](./docs/diagrams/architecture.mmd)
 
 ---
 
-## 大赛官方联系方式（官网页脚摘录）
+## 前端路由
 
-- 咨询时间：工作日 9 点–11 点、14 点–17 点  
-- 大赛邮箱：cnsoftbei@qq.com  
-- 邮编：100048  
-- 联系地址：北京市海淀区紫竹院路 66 号赛迪大厦 18 层  
+| 路径 | 功能 |
+|------|------|
+| `/` | 重定向至 `/chat` |
+| `/chat` | 智能对话，SSE 流式输出，快捷提问 |
+| `/profile` | 学习画像雷达图与六维卡片 |
+| `/resources` | 资源库列表、按类型筛选、Markdown 预览 |
+| `/path` | 学习路径总进度与分阶段展开 |
+| `/evaluation` | 学习评估仪表盘（当前为演示数据） |
+
+侧栏布局见 `frontend/src/components/AppShell.tsx`。
+
+---
+
+## 后端 API 速查
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/health` | 健康检查 |
+| POST | `/api/chat` | 对话（JSON 响应） |
+| POST | `/api/chat/stream` | 对话（SSE 流式） |
+| GET | `/api/profile/{user_id}` | 获取学习画像 |
+| POST | `/api/resources/generate` | 触发多类资源生成 |
+| GET | `/api/resources?user_id=` | 资源列表 |
+| GET | `/api/path/{user_id}` | 获取学习路径 |
+| POST | `/api/path/{user_id}/refresh` | 重新规划路径 |
+| POST | `/api/tutor/ask` | 辅导问答 |
+
+交互式文档：<http://localhost:8000/docs>（服务启动后访问）。
+
+---
+
+## 多智能体角色
+
+| Agent | 职责 |
+|-------|------|
+| Supervisor | 意图识别，路由至下游节点 |
+| ProfileAgent | 对话抽取/更新学习画像 |
+| DocAgent | 讲解文档 |
+| MindmapAgent | 思维导图（Mermaid） |
+| QuizAgent | 练习题 |
+| ReadingAgent | 拓展阅读 |
+| MediaAgent | 多模态讲解 / 分镜脚本 |
+| CodeAgent | 代码实操案例 |
+| PathAgent | 学习路径规划 |
+| TutorAgent | 智能辅导（加分项） |
+| EvalAgent | 学习效果评估（加分项） |
+
+---
+
+## 常见问题
+
+**没有星火 API Key 能运行吗？**  
+可以。`.env` 中保持 `LLM_MOCK=true`，对话与资源生成返回 Mock 结构化内容。
+
+**前端提示连接失败？**  
+确认后端已启动；检查 `frontend/.env.local` 中 `NEXT_PUBLIC_API_BASE=http://localhost:8000`；若前端端口为 3001，同步修改根目录 `.env` 的 `CORS_ORIGINS`。
+
+**知识库检索无结果？**  
+在项目根目录执行 `python scripts/ingest_kb.py`（建议使用 `backend/.venv` 内的 Python），并确认 `data/knowledge_base/ml_intro/chapters/` 下有 Markdown 章节。
+
+**访问 `/api/profile/demo` 返回 404？**  
+需先在 `/chat` 完成至少一轮对话以构建画像。
+
+**端口 3000 已被占用？**  
+Next.js 会自动改用 3001 等端口，以终端输出为准，并更新 `CORS_ORIGINS`。
+
+**前端报 `Cannot find module './vendor-chunks/@rc-component.js'`？**  
+多为 `.next` 缓存损坏。先关闭所有 `npm run dev` 窗口，再执行：
+
+```powershell
+Remove-Item -Recurse -Force frontend\.next
+cd frontend
+npm run build
+npm run dev
+```
+
+或运行 `.\scripts\clean-frontend.ps1`。
+
+---
+
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| [docs/01-需求规格说明书.md](./docs/01-需求规格说明书.md) | 功能/非功能需求与验收标准 |
+| [docs/02-开发指南.md](./docs/02-开发指南.md) | Agent 扩展、RAG 流程、API 细节 |
+| [docs/03-开源参考与协议.md](./docs/03-开源参考与协议.md) | 参考项目与依赖许可证 |
+| [docs/04-系统开发说明书-提纲.md](./docs/04-系统开发说明书-提纲.md) | 初赛配套文档骨架 |
+| [A3赛题内容.md](./A3赛题内容.md) | 赛题全文、评分占比、提交要求 |
+
+讯飞星火接入：[HTTP 接口文档](https://www.xfyun.cn/doc/spark/HTTP%E8%B0%83%E7%94%A8%E6%96%87%E6%A1%A3.html)
+
+---
+
+## 开发路线图
+
+| 阶段 | 状态 | 目标 |
+|------|------|------|
+| Sprint 0 | 已完成 | 框架、文档、样例知识库、Mock/SSE、Ant Design UI |
+| Sprint 1 | 待做 | 画像 JSON 解析强化、随学随新 |
+| Sprint 2 | 待做 | 资源生成质量、RAG、生成进度 UI |
+| Sprint 3 | 待做 | 路径算法与资源推送 |
+| Sprint 4 | 待做 | 辅导/评估 API、Reviewer 防幻觉 |
+| Sprint 5 | 待做 | 测试说明书、7 分钟演示视频、初赛材料 |
+
+---
+
+## 赛题与合规
+
+- 赛题编号：**A3** — 基于大模型的个性化资源生成与学习多智能体系统开发  
+- 出题企业：科大讯飞股份有限公司 · 答疑 QQ 群：1072584310  
+- 开源组件与讯飞服务使用须遵守 [docs/03-开源参考与协议.md](./docs/03-开源参考与协议.md)  
+- 参赛作品著作权归参赛团队所有；商业合作事宜见 [A3赛题内容.md](./A3赛题内容.md) 文末说明

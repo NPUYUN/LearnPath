@@ -1,0 +1,40 @@
+flowchart TB
+  subgraph frontend [Nextjs前端]
+    ChatUI[对话与画像]
+    ResourceHub[资源库]
+    PathView[学习路径]
+  end
+
+  subgraph api [FastAPI]
+    SSE[SSE流式]
+    REST[REST接口]
+  end
+
+  subgraph agents [LangGraph]
+    Supervisor[Supervisor]
+    ProfileAgent[ProfileAgent]
+    ResourceAgents[资源Agents]
+    PathAgent[PathAgent]
+  end
+
+  subgraph data [数据层]
+    KB[(Chroma)]
+    DB[(SQLite)]
+    Files[storage资源]
+  end
+
+  Spark[讯飞星火]
+
+  ChatUI --> SSE
+  ResourceHub --> REST
+  PathView --> REST
+  SSE --> Supervisor
+  REST --> Supervisor
+  Supervisor --> ProfileAgent
+  Supervisor --> ResourceAgents
+  Supervisor --> PathAgent
+  ProfileAgent --> Spark
+  ResourceAgents --> KB
+  ResourceAgents --> Spark
+  PathAgent --> DB
+  KB --> Files
