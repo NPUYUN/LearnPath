@@ -1,0 +1,46 @@
+version: '3.9'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - SPARK_APP_ID=${SPARK_APP_ID}
+      - SPARK_API_KEY=${SPARK_API_KEY}
+      - SPARK_API_SECRET=${SPARK_API_SECRET}
+      - SPARK_DOMAIN=${SPARK_DOMAIN:-4.0Ultra}
+      - DATABASE_URL=sqlite:///./data/learnpath.db
+      - CHROMA_PERSIST_DIR=/app/chroma_db
+    volumes:
+      - ./backend:/app
+      - backend_data:/app/data
+      - chroma_data:/app/chroma_db
+      - ./knowledge_base:/app/knowledge_base:ro
+    depends_on:
+      - chromadb
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+
+volumes:
+  backend_data:
+  chroma_data:

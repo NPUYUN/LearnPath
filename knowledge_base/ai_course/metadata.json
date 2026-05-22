@@ -1,0 +1,71 @@
+{
+  "course_name": "人工智能基础",
+  "course_code": "AI101",
+  "description": "面向计算机/电子信息专业大学生的人工智能基础课程，覆盖AI概述、机器学习、深度学习和NLP四大模块",
+  "total_chapters": 8,
+  "estimated_total_hours": 80,
+  "chapters": [
+    {
+      "chapter": 1,
+      "title": "人工智能概述",
+      "file": "chapters/01_intro_to_ai.md",
+      "difficulty": "beginner",
+      "keywords": ["人工智能", "机器学习", "深度学习"]
+    },
+    {
+      "chapter": 2,
+      "title": "机器学习基础",
+      "file": "chapters/02_machine_learning.md",
+      "difficulty": "beginner",
+      "keywords": ["监督学习", "梯度下降", "线性回归"]
+    },
+    {
+      "chapter": 3,
+      "title": "神经网络基础",
+      "file": "chapters/03_neural_networks.md",
+      "difficulty": "intermediate",
+      "keywords": ["感知机", "反向传播", "激活函数"],
+      "status": "TODO: 待开发者创建"
+    },
+    {
+      "chapter": 4,
+      "title": "卷积神经网络（CNN）",
+      "file": "chapters/04_cnn.md",
+      "difficulty": "intermediate",
+      "keywords": ["卷积", "池化", "图像分类"],
+      "status": "TODO: 待开发者创建"
+    },
+    {
+      "chapter": 5,
+      "title": "循环神经网络（RNN/LSTM）",
+      "file": "chapters/05_rnn_lstm.md",
+      "difficulty": "intermediate",
+      "keywords": ["时序数据", "LSTM", "文本处理"],
+      "status": "TODO: 待开发者创建"
+    },
+    {
+      "chapter": 6,
+      "title": "Transformer与注意力机制",
+      "file": "chapters/06_transformer.md",
+      "difficulty": "advanced",
+      "keywords": ["Attention", "自注意力", "BERT", "GPT"],
+      "status": "TODO: 待开发者创建"
+    },
+    {
+      "chapter": 7,
+      "title": "大语言模型（LLM）",
+      "file": "chapters/07_llm.md",
+      "difficulty": "advanced",
+      "keywords": ["预训练", "微调", "提示工程", "RAG"],
+      "status": "TODO: 待开发者创建"
+    },
+    {
+      "chapter": 8,
+      "title": "AI应用实战",
+      "file": "chapters/08_applications.md",
+      "difficulty": "advanced",
+      "keywords": ["项目实战", "模型部署", "工程化"],
+      "status": "TODO: 待开发者创建"
+    }
+  ]
+}

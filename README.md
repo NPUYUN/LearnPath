@@ -1,8 +1,200 @@
 # 学径（LearnPath）
 
-基于大模型的个性化资源生成与学习多智能体系统 —— 第十五届「中国软件杯」大赛 **A3** 参赛作品。
+> 基于大模型的个性化资源生成与学习多智能体系统  
+> 第十五届「中国软件杯」大赛 **A3** 参赛作品
 
-> 赛题原文：[A组赛题页面](https://www.cnsoftbei.com/content-3-1286-1.html)（页面发布时间：2026-04-01 15:32:46）
+[![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green)](https://fastapi.tiangolo.com)
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-orange)](https://github.com/langchain-ai/langgraph)
+[![React](https://img.shields.io/badge/React-18-blue)](https://react.dev)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+
+---
+
+## 🗂️ 项目结构与各模块职责
+
+```
+LearnPath/
+├── 📁 backend/                    # Python 后端（FastAPI + LangGraph）
+│   ├── main.py                   # 应用入口，注册路由
+│   ├── requirements.txt          # Python 依赖
+│   ├── 📁 agents/                # 🤖 多智能体系统核心
+│   │   ├── graph.py             # LangGraph 图编排（节点/路由/编译）
+│   │   ├── base_agent.py        # 智能体基类（LLM调用/RAG检索公共方法）
+│   │   ├── orchestrator.py      # 协调智能体：意图识别 + 任务分发
+│   │   ├── profile_agent.py     # 画像智能体：对话提取6+维度学生画像
+│   │   ├── curriculum_agent.py  # 路径智能体：生成个性化3阶段学习路径
+│   │   └── 📁 resource_agents/  # 资源生成智能体集合（5类）
+│   │       └── __init__.py      # DocumentAgent/MindMapAgent/QuizAgent/
+│   │                            #   VideoAgent/CodeAgent
+│   ├── 📁 api/                   # FastAPI 路由层
+│   │   ├── chat.py              # POST /api/chat/stream（SSE流式对话）
+│   │   ├── profile.py           # GET/PUT /api/profile（学生画像CRUD）
+│   │   ├── resources.py         # POST /api/resources/generate（资源生成）
+│   │   ├── learning_path.py     # POST /api/path/generate（路径规划）
+│   │   └── evaluation.py        # GET /api/evaluation（学习评估，加分项）
+│   ├── 📁 core/                  # 基础设施
+│   │   ├── config.py            # 全局配置（从.env读取讯飞API Key等）
+│   │   ├── llm.py               # 讯飞星火API客户端（WebSocket封装）
+│   │   └── rag.py               # RAG管道（ChromaDB检索 + 上下文注入）
+│   └── 📁 models/               # 数据模型
+│       └── state.py             # AgentState / StudentProfile 类型定义
+│
+├── 📁 frontend/                   # React + TypeScript 前端
+│   ├── src/
+│   │   ├── App.tsx              # 路由配置（5个页面）
+│   │   ├── main.tsx             # 应用入口
+│   │   ├── 📁 pages/            # 页面组件
+│   │   │   ├── ChatPage.tsx     # 主对话页（核心入口，SSE流式输出）
+│   │   │   ├── ProfilePage.tsx  # 学生画像页（雷达图展示6维度）
+│   │   │   ├── LearningPathPage.tsx # 学习路径页（时间线可视化）
+│   │   │   ├── ResourcesPage.tsx    # 资源库页（5类资源卡片）
+│   │   │   └── EvaluationPage.tsx   # 评估报告页（加分项）
+│   │   ├── 📁 store/            # Zustand 全局状态
+│   │   │   └── appStore.ts      # 画像/资源/路径全局状态管理
+│   │   └── 📁 components/       # 待实现的复用组件
+│   │       ├── Chat/            # TODO: 流式消息列表、资源卡片
+│   │       ├── Profile/         # TODO: 雷达图、维度卡片
+│   │       ├── LearningPath/    # TODO: 路径时间线、阶段卡片
+│   │       ├── Resources/       # TODO: 文档预览、思维导图渲染、代码高亮
+│   │       └── Evaluation/      # TODO: 评估报告、学习行为统计
+│   ├── package.json             # 前端依赖（React/AntD/ECharts/markmap）
+│   └── vite.config.ts           # Vite配置（开发代理/构建）
+│
+├── 📁 knowledge_base/             # 📚 知识库文档（RAG数据源）
+│   └── ai_course/
+│       ├── metadata.json        # 课程元信息（8章节目录）
+│       ├── chapters/            # 章节 Markdown 文档
+│       │   ├── 01_intro_to_ai.md      # ✅ 已完成
+│       │   ├── 02_machine_learning.md  # ✅ 已完成
+│       │   └── 03~08_*.md             # TODO: 待补充6章内容
+│       └── exercises/           # TODO: 各章节练习题 JSON
+│
+├── 📁 docs/                       # 📄 项目文档
+│   ├── requirements.md          # 需求规格说明书（功能/非功能/用例）
+│   └── development-guide.md     # 开发指南（环境搭建/架构/规范）
+│
+├── .env.example                  # 环境变量模板（填写后复制为 .env）
+├── docker-compose.yml            # Docker一键部署（backend+frontend+chromadb）
+└── README.md                     # 本文件
+```
+
+---
+
+## ⚡ 快速开始
+
+### 1. 配置环境变量
+
+```bash
+cp .env.example .env
+# 编辑 .env，填写讯飞星火 API Key（必填）
+```
+
+### 2. 启动后端
+
+```bash
+cd backend
+python -m venv venv && venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+### 3. 启动前端
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### 4. 或使用 Docker 一键启动
+
+```bash
+docker-compose up --build
+```
+
+访问 http://localhost:5173
+
+---
+
+## 🤖 多智能体架构
+
+```
+用户输入
+    │
+    ▼
+OrchestratorAgent（意图识别 → 路由）
+    ├── build_profile ──→ ProfileAgent（对话提取6维度画像）
+    ├── generate_resources ──→ DocumentAgent → MindMapAgent
+    │                          → QuizAgent → VideoAgent → CodeAgent
+    ├── plan_path ──→ CurriculumAgent（3阶段路径规划）
+    ├── tutor ──→ TutorAgent（RAG增强答疑，加分项）
+    └── evaluate ──→ EvaluatorAgent（多维度评估，加分项）
+```
+
+所有智能体通过 `AgentState` 共享状态，使用 **LangGraph** 编排，支持持久化多轮对话。
+
+---
+
+## 📋 开发任务清单
+
+以下是框架中标注了 `TODO` 的待实现模块，按优先级排序：
+
+### P0 — 必须实现（影响核心功能）
+
+| 模块 | 文件 | 任务描述 |
+|------|------|----------|
+| LLM客户端 | `backend/core/llm.py` | 完善讯飞Spark WebSocket鉴权和流式调用 |
+| 画像智能体 | `backend/agents/profile_agent.py` | 实现多轮对话提取+合并6维度画像 |
+| 资源智能体 | `backend/agents/resource_agents/__init__.py` | 5个Agent各自调用LLM生成对应资源 |
+| RAG管道 | `backend/core/rag.py` | 接入讯飞Embedding API完成文档向量化 |
+| 知识库文档 | `knowledge_base/ai_course/chapters/` | 补充03-08章节Markdown内容 |
+| 对话接口 | `backend/api/chat.py` | 接入LangGraph图，实现SSE流式推送 |
+| 聊天页面 | `frontend/src/pages/ChatPage.tsx` | 接入SSE接口，实现流式打字效果 |
+
+### P1 — 重要功能
+
+| 模块 | 文件 | 任务描述 |
+|------|------|----------|
+| 路径规划 | `backend/agents/curriculum_agent.py` | 实现LLM生成结构化学习路径JSON |
+| 画像展示 | `frontend/src/pages/ProfilePage.tsx` | ECharts雷达图 + 6维度卡片 |
+| 路径展示 | `frontend/src/pages/LearningPathPage.tsx` | Ant Design Steps时间线 |
+| 资源展示 | `frontend/src/pages/ResourcesPage.tsx` | 5类资源专属渲染组件 |
+| 应用导航 | `frontend/src/App.tsx` | 侧边栏导航 + 路由守卫 |
+
+### P2 — 加分项
+
+| 模块 | 文件 | 任务描述 |
+|------|------|----------|
+| 智能辅导 | `backend/agents/` (新建) | TutorAgent：RAG增强多模态答疑 |
+| 学习评估 | `backend/agents/` (新建) | EvaluatorAgent：行为追踪+评估报告 |
+| 评估页面 | `frontend/src/pages/EvaluationPage.tsx` | 评估报告可视化 |
+
+---
+
+## 🛠️ 技术栈
+
+| 层次 | 技术 |
+|------|------|
+| LLM | 讯飞星火 Spark 4.0 Ultra |
+| 多智能体框架 | LangGraph (MIT) |
+| 后端 | FastAPI + Python 3.10+ |
+| 向量数据库 | ChromaDB (Apache 2.0) |
+| 前端 | React 18 + TypeScript + Ant Design |
+| 状态管理 | Zustand |
+| 思维导图渲染 | markmap-lib (MIT) |
+| 图表 | ECharts + echarts-for-react |
+| 容器化 | Docker + Docker Compose |
+
+---
+
+## 📄 相关文档
+
+- [需求规格说明书](docs/requirements.md)
+- [开发指南](docs/development-guide.md)
+- [赛题原文](A3赛题内容.md)
+
+---
 
 ## 基本信息
 
