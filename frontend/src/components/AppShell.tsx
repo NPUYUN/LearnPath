@@ -1,305 +1,332 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  startTransition,
+} from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { getPath, getProfile, listResources } from "@/lib/api";
+import { getEvalStats, getPath, getProfile, listResources } from "@/lib/api";
+import { isNavRoute, NAV_ROUTES, type NavRoute } from "@/hooks/navRoutes";
+import { PAGE_MODULES } from "@/lib/pageModules";
+import { prewarmEchartsEngine, preloadEcharts } from "@/lib/useEcharts";
+import { registerClientNav } from "@/lib/clientNav";
 import { useAppStore } from "@/store/appStore";
-import { Layout, Menu, Avatar, Typography, Progress } from "antd";
 import type { MenuProps } from "antd";
+import type { ComponentType } from "react";
 import MessageOutlined from "@ant-design/icons/MessageOutlined";
 import UserOutlined from "@ant-design/icons/UserOutlined";
 import ApartmentOutlined from "@ant-design/icons/ApartmentOutlined";
 import BookOutlined from "@ant-design/icons/BookOutlined";
 import BarChartOutlined from "@ant-design/icons/BarChartOutlined";
-import BulbOutlined from "@ant-design/icons/BulbOutlined";
-import MenuFoldOutlined from "@ant-design/icons/MenuFoldOutlined";
-import MenuUnfoldOutlined from "@ant-design/icons/MenuUnfoldOutlined";
-import LogoutOutlined from "@ant-design/icons/LogoutOutlined";
+import IdcardOutlined from "@ant-design/icons/IdcardOutlined";
+import SettingOutlined from "@ant-design/icons/SettingOutlined";
 import dynamic from "next/dynamic";
+import AppSidebar from "@/components/AppSidebar";
+import AuthLightProvider from "@/components/AuthLightProvider";
+import AuthPageTheme from "@/components/AuthPageTheme";
+import InitLoadingScreen from "@/components/InitLoadingScreen";
+import PagePane from "@/components/PagePane";
+import ThemeProvider from "@/components/ThemeProvider";
 
-// ─── Keep-alive 页面组件（首次挂载后永不卸载，切换仅靠 CSS display）──────────
-const ChatContent       = dynamic(() => import("@/components/pages/ChatContent"),       { ssr: false });
-const ProfileContent    = dynamic(() => import("@/components/pages/ProfileContent"),    { ssr: false });
-const PathContent       = dynamic(() => import("@/components/pages/PathContent"),       { ssr: false });
-const ResourcesContent  = dynamic(() => import("@/components/pages/ResourcesContent"),  { ssr: false });
-const EvaluationContent = dynamic(() => import("@/components/pages/EvaluationContent"), { ssr: false });
-
-// ─── 登录页（仅在未登录时显示）──────────────────────────────────────────────────
-const LoginContent  = dynamic(() => import("@/components/LoginContent"),  { ssr: false });
+const LoginContent = dynamic(() => import("@/components/LoginContent"), { ssr: false });
 const LandingContent = dynamic(() => import("@/components/LandingContent"), { ssr: false });
 
-const { Sider, Content } = Layout;
-const { Text } = Typography;
-
-const NAV_ROUTES = ["/chat", "/profile", "/path", "/resources", "/evaluation"] as const;
-type NavRoute = (typeof NAV_ROUTES)[number];
-
-const NAV_ITEMS: { key: NavRoute; icon: React.ReactNode; label: string; Component: React.ComponentType }[] = [
-  { key: "/chat",       icon: <MessageOutlined />,   label: "智能对话", Component: ChatContent },
-  { key: "/profile",    icon: <UserOutlined />,       label: "学习画像", Component: ProfileContent },
-  { key: "/path",       icon: <ApartmentOutlined />,  label: "学习路径", Component: PathContent },
-  { key: "/resources",  icon: <BookOutlined />,       label: "资源库",   Component: ResourcesContent },
-  { key: "/evaluation", icon: <BarChartOutlined />,   label: "学习评估", Component: EvaluationContent },
+const NAV_ITEMS_PRIMARY: { key: NavRoute; icon: React.ReactNode; label: string }[] = [
+  { key: "/chat", icon: <MessageOutlined />, label: "智能对话" },
+  { key: "/profile", icon: <UserOutlined />, label: "学习画像" },
+  { key: "/path", icon: <ApartmentOutlined />, label: "学习路径" },
+  { key: "/resources", icon: <BookOutlined />, label: "资源库" },
+  { key: "/evaluation", icon: <BarChartOutlined />, label: "学习评估" },
 ];
 
+const NAV_ITEMS_SECONDARY: { key: NavRoute; icon: React.ReactNode; label: string }[] = [
+  { key: "/account", icon: <IdcardOutlined />, label: "个人主页" },
+  { key: "/settings", icon: <SettingOutlined />, label: "设置" },
+];
+
+const PREVIEW_MS = 180;
+
 export default function AppShell({ children: _children }: { children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const pathname = usePathname();
   const router = useRouter();
+  const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
 
-  // ── Auth state ────────────────────────────────────────────────────────────
-  const isLoggedIn  = useAppStore((s) => s.isLoggedIn);
+  const routeFromPath: NavRoute = isNavRoute(pathname) ? pathname : "/chat";
+  const [activeTab, setActiveTab] = useState<NavRoute>(routeFromPath);
+
+  const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const showLanding = useAppStore((s) => s.showLanding);
-  const userName   = useAppStore((s) => s.userName);
+  const userName = useAppStore((s) => s.userName);
   const courseName = useAppStore((s) => s.courseName);
-  const logout     = useAppStore((s) => s.logout);
+  const logout = useAppStore((s) => s.logout);
 
-  // ── 登录后初始化加载进度 ────────────────────────────────────────────────────
+  const [pageComponents, setPageComponents] = useState<Partial<Record<NavRoute, ComponentType>>>({});
+  const [dataReady, setDataReady] = useState(false);
+  const [warmedRoutes, setWarmedRoutes] = useState<Set<NavRoute>>(() => new Set());
+  const [previewRoute, setPreviewRoute] = useState<NavRoute | null>(null);
   const [initProgress, setInitProgress] = useState(0);
-  const [initDone,     setInitDone]     = useState(false);
-  const [initFading,   setInitFading]   = useState(false); // 触发淡出动画
-
-  // 规范化当前路由
-  const selected: NavRoute = (NAV_ROUTES.includes(pathname as NavRoute) ? pathname : "/chat") as NavRoute;
-
-  // ── Keep-alive：记录已经挂载过的页面，切换后不再卸载 ──────────────────────────
-  const mountedRef = useRef<Set<NavRoute>>(new Set([selected]));
-  const [mountedState, setMountedState] = useState<Set<NavRoute>>(() => new Set([selected]));
+  const [initDone, setInitDone] = useState(false);
+  const [initFading, setInitFading] = useState(false);
+  const finishCalled = useRef(false);
+  const cycleStarted = useRef(false);
 
   useEffect(() => {
-    if (!mountedRef.current.has(selected)) {
-      mountedRef.current.add(selected);
-      setMountedState(new Set(mountedRef.current));
-    }
-  }, [selected]);
+    if (isNavRoute(pathname)) setActiveTab(pathname);
+  }, [pathname]);
 
-  const menuItems: MenuProps["items"] = useMemo(
-    () => NAV_ITEMS.map(({ key, icon, label }) => ({ key, icon, label })),
-    []
+  const goTo = useCallback(
+    (key: NavRoute) => {
+      setActiveTab(key);
+      if (pathname !== key) {
+        startTransition(() => {
+          router.push(key);
+        });
+      }
+    },
+    [pathname, router]
   );
 
-  // ── 登录后预热 API 缓存 + 进度追踪 ────────────────────────────────────────
+  useEffect(() => {
+    registerClientNav(goTo);
+    return () => registerClientNav(() => {});
+  }, [goTo]);
+
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    NAV_ROUTES.forEach((r) => router.prefetch(r));
+  }, [isLoggedIn, router]);
+
+  useEffect(() => {
+    if (isLoggedIn && !isNavRoute(pathname)) {
+      router.replace("/chat");
+      setActiveTab("/chat");
+    }
+  }, [isLoggedIn, pathname, router]);
+
+  const finishInit = useCallback(() => {
+    if (finishCalled.current) return;
+    finishCalled.current = true;
+    setPreviewRoute(null);
+    setInitProgress(100);
+    setInitFading(true);
+    setTimeout(() => setInitDone(true), 380);
+  }, []);
+
   useEffect(() => {
     if (!isLoggedIn) {
-      // 退出登录时重置进度，下次登录重新播放
+      finishCalled.current = false;
+      cycleStarted.current = false;
+      setPageComponents({});
+      setWarmedRoutes(new Set());
+      setPreviewRoute(null);
+      setDataReady(false);
       setInitProgress(0);
       setInitDone(false);
       setInitFading(false);
+      setActiveTab("/chat");
       return;
     }
 
-    const { userId, profile, resources, learningPath, setProfile, setResources, setLearningPath, setResourceTitles } =
-      useAppStore.getState();
+    finishCalled.current = false;
+    cycleStarted.current = false;
+    setWarmedRoutes(new Set());
+    setPreviewRoute(null);
+    setDataReady(false);
+    setInitDone(false);
+    setInitFading(false);
+    setInitProgress(0);
 
-    // ── 任务列表：页面 chunk + ECharts + API（全部并行，已缓存的立即 resolve）──
-    const taskFns: Array<() => Promise<void>> = [
-      // 5 个页面 JS chunk（已在登录页预加载则从模块缓存秒返回）
-      () => import("@/components/pages/ChatContent").then(() => {}),
-      () => import("@/components/pages/ProfileContent").then(() => {}),
-      () => import("@/components/pages/PathContent").then(() => {}),
-      () => import("@/components/pages/ResourcesContent").then(() => {}),
-      () => import("@/components/pages/EvaluationContent").then(() => {}),
-      // ECharts（同上）
-      () => import("echarts").then(() => {}),
-    ];
+    const {
+      userId,
+      profile,
+      resources,
+      learningPath,
+      evalStats,
+      setProfile,
+      setResources,
+      setLearningPath,
+      setResourceTitles,
+      setEvalStats,
+    } = useAppStore.getState();
 
-    // 3 个 API（数据未缓存时才真正请求）
-    if (!profile) {
-      taskFns.push(() => getProfile(userId).then((p) => { if (p) setProfile(p); }));
-    }
-    if (!resources.length) {
-      taskFns.push(() =>
-        listResources(userId).then((list) => {
-          setResources(list);
-          const titles: Record<string, string> = {};
-          list.forEach((r) => { titles[r.id] = r.title; });
-          setResourceTitles(titles);
+    let cancelled = false;
+
+    void (async () => {
+      const entries = await Promise.all(
+        PAGE_MODULES.map(async (m) => {
+          const mod = await m.load();
+          return [m.route, mod.default] as const;
         })
       );
-    }
-    if (!learningPath) {
-      taskFns.push(() => getPath(userId).then((p) => { if (p) setLearningPath(p); }));
-    }
+      if (cancelled) return;
+      const map: Partial<Record<NavRoute, ComponentType>> = {};
+      entries.forEach(([route, Comp]) => {
+        map[route] = Comp;
+      });
+      setPageComponents(map);
+    })();
 
-    let done = 0;
-    const total = taskFns.length;
-    const tick = () => {
-      done += 1;
-      const pct = Math.round((done / total) * 100);
-      setInitProgress(pct);
-      if (done >= total) {
-        setInitFading(true);
-        setTimeout(() => setInitDone(true), 400);
+    void (async () => {
+      const tasks: Promise<void>[] = [];
+      if (!profile) {
+        tasks.push(
+          getProfile(userId)
+            .then((p) => {
+              if (p) setProfile(p);
+            })
+            .catch(() => {})
+        );
       }
+      if (!resources.length) {
+        tasks.push(
+          listResources(userId)
+            .then((list) => {
+              setResources(list);
+              const titles: Record<string, string> = {};
+              list.forEach((r) => {
+                titles[r.id] = r.title;
+              });
+              setResourceTitles(titles);
+            })
+            .catch(() => {})
+        );
+      }
+      if (!learningPath) {
+        tasks.push(
+          getPath(userId)
+            .then((p) => {
+              if (p) setLearningPath(p);
+            })
+            .catch(() => {})
+        );
+      }
+      if (!evalStats) {
+        tasks.push(
+          getEvalStats(userId)
+            .then((s) => setEvalStats(s))
+            .catch(() => {})
+        );
+      }
+      tasks.push(
+        import("@/components/MarkdownPreview").then(() => {}).catch(() => {}),
+        preloadEcharts().then(() => prewarmEchartsEngine()).catch(() => {})
+      );
+      await Promise.all(tasks);
+      if (!cancelled) setDataReady(true);
+    })();
+
+    const fallback = setTimeout(() => {
+      if (!cancelled) finishInit();
+    }, 20000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(fallback);
     };
+  }, [isLoggedIn, finishInit]);
 
-    taskFns.forEach((fn) => { void fn().finally(tick); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn]);
+  const allModulesLoaded = NAV_ROUTES.every((r) => pageComponents[r]);
 
-  const handleMenuClick = ({ key }: { key: string }) => {
-    router.push(key);
+  // 逐页短暂「点亮」预渲染（含 ECharts 首次绘制）
+  useEffect(() => {
+    if (!isLoggedIn || !allModulesLoaded || !dataReady || cycleStarted.current) return;
+    cycleStarted.current = true;
+
+    let cancelled = false;
+
+    void (async () => {
+      for (let i = 0; i < NAV_ROUTES.length; i++) {
+        if (cancelled) return;
+        const route = NAV_ROUTES[i];
+        setPreviewRoute(route);
+        window.dispatchEvent(new CustomEvent("learnpath-pane-show", { detail: route }));
+        await new Promise((r) => setTimeout(r, PREVIEW_MS));
+        setWarmedRoutes((prev) => {
+          const next = new Set(prev);
+          next.add(route);
+          return next;
+        });
+        setInitProgress(Math.min(95, 55 + Math.round(((i + 1) / NAV_ROUTES.length) * 40)));
+      }
+      if (!cancelled) finishInit();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, allModulesLoaded, dataReady, finishInit]);
+
+  useEffect(() => {
+    if (!isLoggedIn || initDone) return;
+    const modulePct = allModulesLoaded ? 35 : 0;
+    const dataPct = dataReady ? 20 : 0;
+    const warmPct = Math.round((warmedRoutes.size / NAV_ROUTES.length) * 40);
+    setInitProgress(Math.min(99, modulePct + dataPct + warmPct));
+  }, [isLoggedIn, initDone, allModulesLoaded, dataReady, warmedRoutes]);
+
+  const menuItems: MenuProps["items"] = useMemo(
+    () => [
+      ...NAV_ITEMS_PRIMARY.map(({ key, icon, label }) => ({ key, icon, label })),
+      { type: "divider" as const },
+      ...NAV_ITEMS_SECONDARY.map(({ key, icon, label }) => ({ key, icon, label })),
+    ],
+    []
+  );
+
+  const handleMenuClick: MenuProps["onClick"] = ({ key }) => {
+    if (!initDone) return;
+    if (typeof key === "string" && isNavRoute(key)) goTo(key);
   };
 
-  // ── 未登录时：先显示落地页，点击登录后显示登录表单 ─────────────────────────
   if (!isLoggedIn) {
-    return showLanding ? <LandingContent /> : <LoginContent />;
+    return (
+      <AuthLightProvider>
+        <AuthPageTheme />
+        {showLanding ? <LandingContent /> : <LoginContent />}
+      </AuthLightProvider>
+    );
   }
 
   return (
-    <>
-      {/* ── 登录后初始化加载遮罩 ────────────────────────────────────────── */}
-      {!initDone && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "#fff",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 28,
-            opacity: initFading ? 0 : 1,
-            transition: "opacity 0.38s ease",
-            pointerEvents: initFading ? "none" : "auto",
-          }}
-        >
-          {/* Logo */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <BulbOutlined style={{ fontSize: 36, color: "#1677ff" }} />
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 26, color: "#1677ff", lineHeight: 1.2 }}>学径</div>
-              <div style={{ fontSize: 12, color: "#8c8c8c" }}>LearnPath</div>
-            </div>
-          </div>
+    <ThemeProvider>
+      {!initDone && <InitLoadingScreen progress={initProgress} fading={initFading} />}
 
-          {/* 进度条 */}
-          <div style={{ width: 300 }}>
-            <Progress
-              percent={initProgress}
-              strokeColor={{ "0%": "#1677ff", "100%": "#36cfc9" }}
-              trailColor="#f0f0f0"
-              showInfo={false}
-              strokeWidth={6}
-              style={{ display: "block" }}
-            />
-            <div
-              style={{
-                textAlign: "center",
-                marginTop: 10,
-                color: "#8c8c8c",
-                fontSize: 13,
-              }}
-            >
-              {initProgress < 100 ? `正在加载学习数据… ${initProgress}%` : "加载完成，即将进入 ✓"}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <Layout style={{ height: "100vh", overflow: "hidden" }}>
-      <Sider
-        collapsed={collapsed}
-        trigger={null}
-        width={220}
-        style={{ background: "#fff", borderRight: "1px solid #f0f0f0", height: "100vh", overflow: "hidden" }}
+      <div
+        className={`learnpath-app${collapsed ? " learnpath-app--collapsed" : ""}${initDone ? "" : " learnpath-app--warming"}`}
       >
-        <Link
-          href="/chat"
-          style={{
-            height: 64,
-            display: "flex",
-            alignItems: "center",
-            padding: collapsed ? "0 24px" : "0 20px",
-            borderBottom: "1px solid #f0f0f0",
-            gap: 10,
-            overflow: "hidden",
-            whiteSpace: "nowrap",
-            textDecoration: "none",
+        <AppSidebar
+          collapsed={collapsed}
+          onCollapse={() => setCollapsed((c) => !c)}
+          selected={activeTab}
+          onNavigate={goTo}
+          menuItems={menuItems}
+          onMenuClick={handleMenuClick}
+          userName={userName}
+          courseName={courseName}
+          onLogout={() => {
+            logout();
+            router.replace("/");
           }}
-        >
-          <BulbOutlined style={{ fontSize: 22, color: "#1677ff", flexShrink: 0 }} />
-          {!collapsed && (
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "#1677ff", lineHeight: 1.2 }}>学径</div>
-              <div style={{ fontSize: 11, color: "#8c8c8c" }}>LearnPath</div>
-            </div>
-          )}
-        </Link>
-
-        <Menu
-          mode="inline"
-          selectedKeys={[selected]}
-          items={menuItems}
-          onClick={handleMenuClick}
-          style={{ flex: 1, border: "none", marginTop: 8 }}
         />
 
-        <div style={{ borderTop: "1px solid #f0f0f0", padding: "12px 16px" }}>
-          {!collapsed && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <Avatar size={32} style={{ background: "#1677ff", flexShrink: 0 }}>
-                {userName.charAt(0)}
-              </Avatar>
-              <div style={{ overflow: "hidden", flex: 1 }}>
-                <Text strong style={{ fontSize: 13, display: "block" }}>{userName}</Text>
-                <Text type="secondary" style={{ fontSize: 11 }}>{courseName}</Text>
-              </div>
-              <LogoutOutlined
-                title="退出登录"
-                onClick={logout}
-                style={{ color: "#bfbfbf", cursor: "pointer", fontSize: 14, flexShrink: 0 }}
-              />
-            </div>
-          )}
-          <div
-            onClick={() => setCollapsed(!collapsed)}
-            style={{ cursor: "pointer", color: "#8c8c8c", display: "flex", justifyContent: collapsed ? "center" : "flex-end" }}
-          >
-            {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-          </div>
-        </div>
-      </Sider>
-
-      {/*
-        Keep-alive 内容区：
-        - 每个页面首次访问后永远保持挂载（mountedState 控制条件渲染）
-        - 当前页面 display:flex，其余 display:none
-        - 切换仅修改 CSS，无任何 React unmount/mount 开销，速度即时
-      */}
-      <Content
-        style={{
-          position: "relative",
-          flex: 1,
-          height: "100vh",
-          overflow: "hidden",
-          background: "#f5f7fa",
-        }}
-      >
-        {NAV_ITEMS.map(({ key, Component }) => {
-          if (!mountedState.has(key)) return null;
-          const isActive = selected === key;
-          return (
-            <div
-              key={key}
-              style={{
-                position: "absolute",
-                inset: 0,
-                overflowY: "auto",
-                overflowX: "hidden",
-                display: isActive ? "block" : "none",
-                background: "#f5f7fa",
-              }}
-            >
-              <Component />
-            </div>
-          );
-        })}
-      </Content>
-    </Layout>
-    </>
+        <main className="learnpath-main learnpath-panel learnpath-keepalive">
+          {allModulesLoaded &&
+            NAV_ROUTES.map((route) => {
+              const Comp = pageComponents[route]!;
+              const isActive = initDone && activeTab === route;
+              const isPreview = !initDone && previewRoute === route;
+              return (
+                <PagePane key={route} active={isActive} preview={isPreview}>
+                  <Comp />
+                </PagePane>
+              );
+            })}
+        </main>
+      </div>
+    </ThemeProvider>
   );
 }

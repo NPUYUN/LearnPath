@@ -125,7 +125,8 @@ npm run dev
 ### 4. 一键启动（Windows）
 
 ```powershell
-.\scripts\dev.ps1    # 同时启动后端 + 前端（新窗口）
+.\scripts\start.ps1   # 一键启动（等待后端就绪后打开浏览器）
+.\scripts\dev.ps1     # 同上，但不自动打开浏览器
 .\scripts\open.ps1   # 打开 entry.html 入口页
 ```
 
@@ -202,8 +203,10 @@ A3/
 | `/resources` | 资源库列表、按类型筛选、Markdown 预览 |
 | `/path` | 学习路径总进度与分阶段展开 |
 | `/evaluation` | 学习评估仪表盘 |
+| `/account` | 个人主页（账号资料编辑） |
+| `/settings` | 设置（主题、语音偏好等） |
 
-未登录时所有路由均展示登录页（由 `AppShell` 统一拦截）。
+未登录时展示落地页/登录页（由 `AppShell` 统一拦截）。界面测试详见 [docs/05-界面功能与测试手册.md](./docs/05-界面功能与测试手册.md)。
 
 ---
 
@@ -258,7 +261,7 @@ flowchart LR
 可以。`.env` 中保持 `LLM_MOCK=true`，对话与资源生成返回 Mock 结构化内容，前端完整可用。
 
 **前端提示无法连接后端？**  
-确认后端已启动；检查 `frontend/.env.local` 中 `NEXT_PUBLIC_API_BASE=http://localhost:8000`；若前端运行在非 3000 端口，将该端口加入 `.env` 的 `CORS_ORIGINS`。
+确认后端已启动（运行 `.\scripts\start.ps1` 或双击 `打开学径.bat`）。本地开发时 `frontend/.env.local` 中 **`NEXT_PUBLIC_API_BASE` 应留空**，由 Next 将 `/api` 代理到 `http://127.0.0.1:8000`；若必须直连后端，再填写完整地址并同步 `.env` 的 `CORS_ORIGINS`。
 
 **知识库检索无结果？**  
 执行 `.\backend\.venv\Scripts\python scripts\ingest_kb.py`（使用 venv 内的 Python），确认 `data/knowledge_base/ml_intro/chapters/` 下存在 Markdown 章节文件。
@@ -284,6 +287,7 @@ cd frontend && npm run dev
 | [docs/02-开发指南.md](./docs/02-开发指南.md) | Agent 扩展、RAG 流程、API 细节 |
 | [docs/03-开源参考与协议.md](./docs/03-开源参考与协议.md) | 参考项目与依赖许可证 |
 | [docs/04-系统开发说明书-提纲.md](./docs/04-系统开发说明书-提纲.md) | 初赛配套文档骨架 |
+| [docs/05-界面功能与测试手册.md](./docs/05-界面功能与测试手册.md) | **各界面功能、测试步骤、页面关联与 E2E 场景** |
 | [A3赛题内容.md](./A3赛题内容.md) | 赛题全文、评分占比、提交要求 |
 
 讯飞星火接入：[HTTP 接口文档](https://www.xfyun.cn/doc/spark/HTTP%E8%B0%83%E7%94%A8%E6%96%87%E6%A1%A3.html)

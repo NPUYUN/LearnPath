@@ -1,13 +1,4 @@
-"use client";
-
-import dynamic from "next/dynamic";
-import PageSkeleton from "@/components/PageSkeleton";
-
-const ProfileContent = dynamic(
-  () => import("@/components/pages/ProfileContent"),
-  { loading: () => <PageSkeleton /> }
-);
-
+/** 由 AppShell Keep-alive 渲染 */
 export default function ProfilePage() {
-  return <ProfileContent />;
+  return null;
 }

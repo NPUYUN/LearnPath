@@ -21,7 +21,28 @@ engine = get_engine()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def _migrate_users_columns() -> None:
+    """为已有 SQLite 库补充 users 表新列（无 Alembic 时的轻量迁移）。"""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "users" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("users")}
+    alters = [
+        ("course_name", "VARCHAR(256) DEFAULT ''"),
+        ("major", "VARCHAR(128) DEFAULT ''"),
+        ("bio", "TEXT DEFAULT ''"),
+        ("phone", "VARCHAR(32) DEFAULT ''"),
+    ]
+    with engine.begin() as conn:
+        for col, ddl in alters:
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {ddl}"))
+
+
 def init_db() -> None:
     from app.db import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _migrate_users_columns()

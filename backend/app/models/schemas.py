@@ -107,6 +107,25 @@ class AuthUser(BaseModel):
     display_name: str
 
 
+class UserAccount(BaseModel):
+    user_id: str
+    display_name: str = ""
+    email: str = ""
+    course_name: str = "机器学习导论"
+    major: str = ""
+    bio: str = ""
+    phone: str = ""
+    created_at: datetime | None = None
+
+
+class UserAccountUpdate(BaseModel):
+    display_name: str | None = None
+    course_name: str | None = None
+    major: str | None = None
+    bio: str | None = None
+    phone: str | None = None
+
+
 # ── Eval stats schema ─────────────────────────────────────────────────────────
 
 class RadarData(BaseModel):

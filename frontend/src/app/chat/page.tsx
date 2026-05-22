@@ -1,13 +1,4 @@
-"use client";
-
-import dynamic from "next/dynamic";
-import PageSkeleton from "@/components/PageSkeleton";
-
-const ChatContent = dynamic(
-  () => import("@/components/pages/ChatContent"),
-  { loading: () => <PageSkeleton /> }
-);
-
+/** 由 AppShell Keep-alive 渲染 */
 export default function ChatPage() {
-  return <ChatContent />;
+  return null;
 }

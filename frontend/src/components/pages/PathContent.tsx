@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { clientNavigate } from "@/lib/clientNav";
 import {
   Card,
   Tag,
@@ -22,8 +22,10 @@ import PlayCircleOutlined from "@ant-design/icons/PlayCircleOutlined";
 import LockOutlined from "@ant-design/icons/LockOutlined";
 import FireOutlined from "@ant-design/icons/FireOutlined";
 import TrophyOutlined from "@ant-design/icons/TrophyOutlined";
+import PageHeader from "@/components/PageHeader";
 import { getPath, refreshPath, listResources, type LearningPath, type PathStep } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
+import ApartmentOutlined from "@ant-design/icons/ApartmentOutlined";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -55,7 +57,6 @@ function mapStatus(s: string): keyof typeof STATUS_CONFIG {
 }
 
 export default function PathContent() {
-  const router = useRouter();
   const userId = useAppStore((s) => s.userId);
   const cachedPath = useAppStore((s) => s.learningPath);
   const cachedTitles = useAppStore((s) => s.resourceTitles);
@@ -102,14 +103,14 @@ export default function PathContent() {
   useEffect(() => {
     if (cachedPath) {
       setPath(cachedPath);
-      setExpanded(`step-${cachedPath.steps[0]?.order ?? 1}`);
+      setExpanded(`step-${cachedPath.steps?.[0]?.order ?? 1}`);
       if (Object.keys(cachedTitles).length) setResourceTitlesLocal(cachedTitles);
-      void load(true);
-    } else {
-      void load(false);
+      setLoading(false);
+      return;
     }
+    void load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, cachedPath]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -161,7 +162,7 @@ export default function PathContent() {
           <Button type="primary" loading={refreshing} onClick={handleRefresh}>
             生成学习路径
           </Button>
-          <Button style={{ marginLeft: 8 }} onClick={() => router.push("/chat")}>
+          <Button style={{ marginLeft: 8 }} onClick={() => clientNavigate("/chat")}>
             去对话
           </Button>
         </Empty>
@@ -170,33 +171,18 @@ export default function PathContent() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            我的学习路径
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            {steps.length} 个阶段 · 机器学习导论
-          </Text>
-        </div>
-        <Button
-          icon={<FireOutlined />}
-          type="primary"
-          loading={refreshing}
-          onClick={handleRefresh}
-        >
-          重新规划
-        </Button>
-      </div>
-
+    <div>
+      <PageHeader
+        title="我的学习路径"
+        subtitle={`${steps.length} 个阶段 · 机器学习导论`}
+        icon={<ApartmentOutlined />}
+        extra={
+          <Button icon={<FireOutlined />} type="primary" loading={refreshing} onClick={handleRefresh}>
+            重新规划
+          </Button>
+        }
+      />
+      <div className="lp-page-body" style={{ maxWidth: 900 }}>
       <Card
         style={{
           marginBottom: 20,
@@ -349,7 +335,7 @@ export default function PathContent() {
                         size="small"
                         onClick={(e) => {
                           e.stopPropagation();
-                          router.push("/resources");
+                          clientNavigate("/resources");
                         }}
                       >
                         查看本阶段资源
@@ -361,6 +347,7 @@ export default function PathContent() {
             </Card>
           );
         })}
+      </div>
       </div>
     </div>
   );

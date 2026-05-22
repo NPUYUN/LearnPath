@@ -28,8 +28,10 @@ import {
   listResources,
   type LearningResource,
 } from "@/lib/api";
+import PageHeader from "@/components/PageHeader";
 import { RESOURCE_CONFIG, mapApiType, type UiResourceType } from "@/lib/resourceConfig";
 import { useAppStore } from "@/store/appStore";
+import BookOutlined from "@ant-design/icons/BookOutlined";
 
 const MarkdownPreview = dynamic(() => import("@/components/MarkdownPreview"), {
   loading: () => <Spin />,
@@ -78,12 +80,11 @@ export default function ResourcesContent() {
     if (cachedResources.length > 0) {
       setItems(cachedResources);
       setLoading(false);
-      void load(true);
-    } else {
-      void load(false);
+      return;
     }
+    void load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, cachedResources.length]);
 
   const filtered = items.filter((r) => {
     const ui = mapApiType(r.type);
@@ -109,25 +110,12 @@ export default function ResourcesContent() {
   };
 
   return (
-    <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 16,
-          flexWrap: "wrap",
-          gap: 12,
-        }}
-      >
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            学习资源库
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            {items.length} 个资源 · 多智能体协同生成
-          </Text>
-        </div>
+    <div>
+      <PageHeader
+        title="学习资源库"
+        subtitle={`${items.length} 个资源 · 多智能体协同生成`}
+        icon={<BookOutlined />}
+        extra={
         <Space wrap>
           <Input
             prefix={<SearchOutlined style={{ color: "#bfbfbf" }} />}
@@ -152,8 +140,9 @@ export default function ResourcesContent() {
             生成新资源
           </Button>
         </Space>
-      </div>
-
+        }
+      />
+      <div className="lp-page-body" style={{ maxWidth: 1100 }}>
       <Tabs activeKey={activeType} onChange={setActiveType} items={TABS} style={{ marginBottom: 16 }} />
 
       {loading && items.length === 0 ? (
@@ -286,6 +275,7 @@ export default function ResourcesContent() {
           </div>
         )}
       </Modal>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { clientNavigate } from "@/lib/clientNav";
 import {
   Button,
   Card,
@@ -11,6 +11,7 @@ import {
   Progress,
   Row,
   Skeleton,
+  Space,
   Tag,
   Timeline,
   Typography,
@@ -25,8 +26,10 @@ import {
 } from "@ant-design/icons";
 import type { EChartsOption } from "echarts";
 import { useEcharts } from "@/lib/useEcharts";
+import PageHeader from "@/components/PageHeader";
 import { getEvalStats, type EvalStats } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
+import BarChartOutlined from "@ant-design/icons/BarChartOutlined";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -40,10 +43,11 @@ const RESOURCE_TYPE_LABELS: Record<string, string> = {
 };
 
 export default function EvaluationContent() {
-  const router = useRouter();
   const userId = useAppStore((s) => s.userId);
-  const [stats, setStats] = useState<EvalStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const storeStats = useAppStore((s) => s.evalStats);
+  const setEvalStats = useAppStore((s) => s.setEvalStats);
+  const [stats, setStats] = useState<EvalStats | null>(storeStats);
+  const [loading, setLoading] = useState(!storeStats);
   const [error, setError] = useState<string | null>(null);
 
   const fetchStats = useCallback(async () => {
@@ -52,16 +56,22 @@ export default function EvaluationContent() {
     try {
       const data = await getEvalStats(userId);
       setStats(data);
+      setEvalStats(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, setEvalStats]);
 
   useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+    if (storeStats) {
+      setStats(storeStats);
+      setLoading(false);
+      return;
+    }
+    void fetchStats();
+  }, [storeStats, fetchStats]);
 
   const radarOption: EChartsOption = stats
     ? {
@@ -132,21 +142,24 @@ export default function EvaluationContent() {
   const hasData = stats && (stats.total_resources > 0 || stats.profile_completeness > 0);
 
   return (
-    <div style={{ padding: 24, maxWidth: 1060, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>学习效果评估</Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>数据实时来自你的学习记录</Text>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Button icon={<ReloadOutlined />} onClick={fetchStats}>刷新</Button>
-          <Button icon={<RiseOutlined />} type="primary" onClick={() => router.push("/chat")}>更新评估</Button>
-        </div>
-      </div>
-
+    <div>
+      <PageHeader
+        title="学习效果评估"
+        subtitle="数据实时来自你的学习记录"
+        icon={<BarChartOutlined />}
+        extra={
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={fetchStats}>刷新</Button>
+            <Button icon={<RiseOutlined />} type="primary" onClick={() => clientNavigate("/chat")}>
+              更新评估
+            </Button>
+          </Space>
+        }
+      />
+      <div className="lp-page-body">
       {!hasData ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无学习数据，前往「AI 助手」对话开始学习" style={{ padding: "60px 0" }}>
-          <Button type="primary" onClick={() => router.push("/chat")}>前往 AI 助手</Button>
+          <Button type="primary" onClick={() => clientNavigate("/chat")}>前往 AI 助手</Button>
         </Empty>
       ) : (
         <>
@@ -179,13 +192,13 @@ export default function EvaluationContent() {
             </Col>
             <Col xs={24} lg={14}>
               <Card title="AI 学习建议" extra={<Tag color="blue">自动生成</Tag>}>
-                <Paragraph style={{ color: "#444", lineHeight: 1.9 }}>{suggestion}</Paragraph>
+                <Paragraph className="lp-prose">{suggestion}</Paragraph>
                 {stats && stats.total_resources > 0 && (
                   <>
-                    <Paragraph style={{ color: "#444", lineHeight: 1.9 }}>
+                    <Paragraph className="lp-prose">
                       <Text strong>优势：</Text>{stats.profile_completeness >= 60 ? "学习画像较完整，资源推荐精准度高。" : "已开始学习，具备初步数据基础。"}
                     </Paragraph>
-                    <Paragraph style={{ color: "#444", lineHeight: 1.9 }}>
+                    <Paragraph className="lp-prose">
                       <Text strong>待提升：</Text>{stats.has_path ? "继续按路径推进，完成更多资源学习。" : "尚未生成学习路径，建议与 AI 助手对话自动规划。"}
                     </Paragraph>
                     <Divider style={{ margin: "12px 0" }} />
@@ -209,7 +222,7 @@ export default function EvaluationContent() {
                     children: (
                       <div>
                         <Tag color={e.color} style={{ fontSize: 11 }}>{e.label}</Tag>
-                        <div style={{ fontSize: 13, color: "#444", marginTop: 4 }}>{e.content}</div>
+                        <div className="lp-prose" style={{ fontSize: 13, marginTop: 4 }}>{e.content}</div>
                         <div style={{ fontSize: 11, color: "#bfbfbf", marginTop: 2 }}>{e.date}</div>
                       </div>
                     ),
@@ -222,6 +235,7 @@ export default function EvaluationContent() {
           </Row>
         </>
       )}
+      </div>
     </div>
   );
 }

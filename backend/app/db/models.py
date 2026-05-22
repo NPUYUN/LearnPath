@@ -44,6 +44,10 @@ class UserRecord(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False, index=True)
     display_name: Mapped[str] = mapped_column(String(256), default="")
+    course_name: Mapped[str] = mapped_column(String(256), default="")
+    major: Mapped[str] = mapped_column(String(128), default="")
+    bio: Mapped[str] = mapped_column(Text, default="")
+    phone: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

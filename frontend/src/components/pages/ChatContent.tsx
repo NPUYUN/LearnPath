@@ -7,7 +7,8 @@ import UserOutlined from "@ant-design/icons/UserOutlined";
 import RobotOutlined from "@ant-design/icons/RobotOutlined";
 import ReloadOutlined from "@ant-design/icons/ReloadOutlined";
 import dynamic from "next/dynamic";
-import { chat, getProfile, streamChat } from "@/lib/api";
+import PageHeader from "@/components/PageHeader";
+import { chat, checkHealth, getProfile, streamChat } from "@/lib/api";
 import { RESOURCE_CONFIG, mapApiType } from "@/lib/resourceConfig";
 import { useAppStore } from "@/store/appStore";
 
@@ -42,83 +43,46 @@ const MessageItem = memo(function MessageItem({
   onSend?: (text: string) => void;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
-        marginBottom: 20,
-        gap: 10,
-        alignItems: "flex-start",
-      }}
-    >
+    <div className={`lp-chat-row lp-chat-row--${msg.role}`}>
       {msg.role === "assistant" && (
-        <Avatar
-          size={36}
-          style={{ background: "#1677ff", flexShrink: 0, marginTop: 2 }}
-          icon={<RobotOutlined />}
-        />
+        <Avatar size={36} className="lp-chat-avatar lp-chat-avatar--ai" icon={<RobotOutlined />} />
       )}
 
-      <div style={{ maxWidth: "72%" }}>
+      <div className="lp-chat-body">
         {msg.isTyping ? (
-          <div
-            style={{
-              background: "#fff",
-              borderRadius: "12px 12px 12px 2px",
-              padding: "14px 18px",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-            }}
-          >
+          <div className="lp-chat-bubble lp-chat-bubble--assistant lp-chat-bubble--typing">
             <span className="typing-dot" />
             <span className="typing-dot" />
             <span className="typing-dot" />
           </div>
         ) : (
           <>
-            <div
-              style={{
-                background: msg.role === "user" ? "#1677ff" : "#fff",
-                color: msg.role === "user" ? "#fff" : "#1a1a1a",
-                borderRadius:
-                  msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
-                padding: "12px 16px",
-                boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-                lineHeight: 1.7,
-              }}
-            >
+            <div className={`lp-chat-bubble lp-chat-bubble--${msg.role}`}>
               <div className={`md-content ${msg.role === "user" ? "md-user" : ""}`}>
                 <MarkdownPreview content={msg.content || "　"} />
               </div>
             </div>
 
             {msg.resources && msg.resources.length > 0 && (
-              <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <div className="lp-chat-resources">
                 {msg.resources.map((r, i) => {
                   const uiType = mapApiType(r.type);
                   const cfg = RESOURCE_CONFIG[uiType];
                   return (
                     <div
                       key={i}
-                      className="resource-card"
+                      className="resource-card lp-chat-resource-card"
                       style={{
-                        background: "#fff",
-                        border: `1px solid ${cfg.color}22`,
-                        borderLeft: `3px solid ${cfg.color}`,
-                        borderRadius: 8,
-                        padding: "8px 14px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        cursor: "pointer",
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                        borderColor: `${cfg.color}33`,
+                        borderLeftColor: cfg.color,
                       }}
                     >
                       <span style={{ color: cfg.color, fontSize: 16 }}>{cfg.icon}</span>
                       <div>
-                        <div style={{ fontSize: 11, color: cfg.color, fontWeight: 600 }}>
+                        <div className="lp-chat-resource-type" style={{ color: cfg.color }}>
                           {cfg.label}
                         </div>
-                        <div style={{ fontSize: 12, color: "#595959" }}>{r.title}</div>
+                        <div className="lp-chat-resource-title">{r.title}</div>
                       </div>
                     </div>
                   );
@@ -126,15 +90,7 @@ const MessageItem = memo(function MessageItem({
               </div>
             )}
 
-            <div
-              style={{
-                fontSize: 11,
-                color: "#bfbfbf",
-                marginTop: 4,
-                textAlign: msg.role === "user" ? "right" : "left",
-                paddingLeft: 4,
-              }}
-            >
+            <div className={`lp-chat-time lp-chat-time--${msg.role}`}>
               {msg.timestamp.toLocaleTimeString("zh-CN", {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -145,11 +101,7 @@ const MessageItem = memo(function MessageItem({
       </div>
 
       {msg.role === "user" && (
-        <Avatar
-          size={36}
-          style={{ background: "#f0f0f0", color: "#595959", flexShrink: 0, marginTop: 2 }}
-          icon={<UserOutlined />}
-        />
+        <Avatar size={36} className="lp-chat-avatar lp-chat-avatar--user" icon={<UserOutlined />} />
       )}
     </div>
   );
@@ -168,7 +120,18 @@ export default function ChatContent() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const probeBackend = useCallback(async () => {
+    setBackendOk(await checkHealth());
+  }, []);
+
+  useEffect(() => {
+    void probeBackend();
+    const timer = setInterval(() => void probeBackend(), 15000);
+    return () => clearInterval(timer);
+  }, [probeBackend]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -248,7 +211,7 @@ export default function ChatContent() {
             .concat({
               id: Date.now().toString(),
               role: "assistant",
-              content: `⚠️ 连接失败：${msg}\n\n请确保后端已启动（http://localhost:8000）`,
+              content: `⚠️ 连接失败：${msg}\n\n请双击项目根目录 **打开学径.bat** 重新启动（会等待后端就绪后再打开页面）。\n若已启动，请查看标题为「LearnPath Backend」的命令行窗口是否有报错。`,
               timestamp: new Date(),
             })
         );
@@ -259,25 +222,29 @@ export default function ChatContent() {
     [input, loading, userId, setProfile]
   );
 
+  const statusClass =
+    backendOk === false
+      ? "lp-status-dot--err"
+      : backendOk
+        ? "lp-status-dot--ok"
+        : "lp-status-dot--idle";
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: "100vh" }}>
-      <div
-        style={{
-          padding: "14px 24px",
-          background: "#fff",
-          borderBottom: "1px solid #f0f0f0",
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          flexShrink: 0,
-        }}
-      >
-        <RobotOutlined style={{ fontSize: 20, color: "#1677ff" }} />
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>智能学习助手</div>
-          <div style={{ fontSize: 12, color: "#52c41a" }}>● 在线 · 讯飞星火 / Mock</div>
-        </div>
-        <div style={{ marginLeft: "auto" }}>
+    <div className="lp-chat-page">
+      <PageHeader
+        title="智能学习助手"
+        subtitle="多智能体协同 · RAG 知识增强"
+        icon={<RobotOutlined />}
+        status={
+          <span className={`lp-status-dot ${statusClass}`}>
+            {backendOk === false
+              ? "后端未连接 · 请运行 打开学径.bat"
+              : backendOk
+                ? "在线 · 讯飞星火 / Mock"
+                : "检测连接中…"}
+          </span>
+        }
+        extra={
           <Tooltip title="清空对话">
             <Button
               icon={<ReloadOutlined />}
@@ -294,10 +261,10 @@ export default function ChatContent() {
               }
             />
           </Tooltip>
-        </div>
-      </div>
+        }
+      />
 
-      <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+      <div className="lp-chat-messages">
         {messages.map((msg) => (
           <MessageItem key={msg.id} msg={msg} onSend={send} />
         ))}
@@ -305,12 +272,12 @@ export default function ChatContent() {
       </div>
 
       {messages.length <= 1 && (
-        <div style={{ padding: "0 24px 12px", display: "flex", flexWrap: "wrap", gap: 8 }}>
+        <div className="lp-chat-quick-actions">
           {QUICK_ACTIONS.map((a) => (
             <Tag
               key={a}
               color="blue"
-              style={{ cursor: "pointer", padding: "4px 12px", borderRadius: 20, fontSize: 13 }}
+              className="lp-quick-tag"
               onClick={() => send(a)}
             >
               {a}
@@ -319,16 +286,7 @@ export default function ChatContent() {
         </div>
       )}
 
-      <div
-        style={{
-          padding: "12px 24px 16px",
-          background: "#fff",
-          borderTop: "1px solid #f0f0f0",
-          display: "flex",
-          gap: 10,
-          alignItems: "flex-end",
-        }}
-      >
+      <div className="lp-chat-composer">
         <Input.TextArea
           value={input}
           onChange={(e) => setInput(e.target.value)}

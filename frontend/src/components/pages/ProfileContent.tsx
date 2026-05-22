@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { clientNavigate } from "@/lib/clientNav";
 import {
   Card,
   Row,
@@ -26,6 +26,7 @@ import {
   InfoCircleOutlined,
 } from "@ant-design/icons";
 import type { EChartsOption } from "echarts";
+import PageHeader from "@/components/PageHeader";
 import { getProfile, type StudentProfile } from "@/lib/api";
 import { useEcharts } from "@/lib/useEcharts";
 import { useAppStore } from "@/store/appStore";
@@ -98,7 +99,6 @@ function buildDimensions(p: StudentProfile) {
 }
 
 export default function ProfileContent() {
-  const router = useRouter();
   const userId = useAppStore((s) => s.userId);
   const storeProfile = useAppStore((s) => s.profile);
   const setProfile = useAppStore((s) => s.setProfile);
@@ -106,21 +106,24 @@ export default function ProfileContent() {
   const [loading, setLoading] = useState(!storeProfile);
 
   useEffect(() => {
-    if (storeProfile) setLocal(storeProfile);
+    if (storeProfile) {
+      setLocal(storeProfile);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     getProfile(userId)
       .then((p) => {
         if (p) {
           setLocal(p);
           setProfile(p);
-        } else if (!storeProfile) {
+        } else {
           setLocal(null);
         }
       })
-      .catch(() => {
-        if (!storeProfile) setLocal(null);
-      })
+      .catch(() => setLocal(null))
       .finally(() => setLoading(false));
-  }, [userId, setProfile]);
+  }, [userId, setProfile, storeProfile]);
 
   const dimensions = useMemo(
     () => (profile ? buildDimensions(profile) : []),
@@ -170,7 +173,7 @@ export default function ProfileContent() {
     return (
       <div style={{ padding: 48, maxWidth: 560, margin: "0 auto" }}>
         <Empty description="尚未建立学习画像">
-          <Button type="primary" onClick={() => router.push("/chat")}>
+          <Button type="primary" onClick={() => clientNavigate("/chat")}>
             去对话构建画像
           </Button>
         </Empty>
@@ -181,28 +184,18 @@ export default function ProfileContent() {
   const summary = `当前基础「${profile.knowledge_level}」，目标为「${profile.learning_goal}」。偏好 ${profile.preferred_modality}，${profile.pace_and_time}。${profile.error_prone_topics?.length ? `建议重点巩固：${profile.error_prone_topics.join("、")}。` : ""}`;
 
   return (
-    <div style={{ padding: 24, maxWidth: 1060, margin: "0 auto" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            我的学习画像
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            对话自动抽取 · 6 个维度
-          </Text>
-        </div>
-        <Button icon={<EditOutlined />} onClick={() => router.push("/chat")}>
-          更新画像
-        </Button>
-      </div>
-
+    <div>
+      <PageHeader
+        title="我的学习画像"
+        subtitle="对话自动抽取 · 6 个维度"
+        icon={<UserOutlined />}
+        extra={
+          <Button type="primary" icon={<EditOutlined />} onClick={() => clientNavigate("/chat")}>
+            更新画像
+          </Button>
+        }
+      />
+      <div className="lp-page-body">
       <Row gutter={[20, 20]}>
         <Col xs={24} lg={10}>
           <Card title="综合能力雷达图" style={{ height: 380 }}>
@@ -212,7 +205,7 @@ export default function ProfileContent() {
 
         <Col xs={24} lg={14}>
           <Card title="画像综合评价" style={{ height: 380 }}>
-            <Paragraph style={{ color: "#444", lineHeight: 1.8, fontSize: 14 }}>
+            <Paragraph className="lp-prose" style={{ fontSize: 14 }}>
               {summary}
             </Paragraph>
             <Divider style={{ margin: "12px 0" }} />
@@ -224,10 +217,10 @@ export default function ProfileContent() {
               ))}
             </div>
             <div style={{ marginTop: 16 }}>
-              <Button type="primary" onClick={() => router.push("/path")} style={{ marginRight: 10 }}>
+              <Button type="primary" onClick={() => clientNavigate("/path")} style={{ marginRight: 10 }}>
                 查看学习路径
               </Button>
-              <Button onClick={() => router.push("/chat")}>继续对话优化</Button>
+              <Button onClick={() => clientNavigate("/chat")}>继续对话优化</Button>
             </div>
           </Card>
         </Col>
@@ -270,6 +263,7 @@ export default function ProfileContent() {
           </Col>
         ))}
       </Row>
+      </div>
     </div>
   );
 }

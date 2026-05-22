@@ -107,6 +107,64 @@ def verify_otp_code(email: str, code: str) -> bool:
         return True
 
 
+def _demo_account() -> dict:
+    return {
+        "user_id": "demo",
+        "display_name": "演示学生",
+        "email": "demo@learnpath.local",
+        "course_name": "机器学习导论",
+        "major": "计算机科学",
+        "bio": "学径演示账号，用于体验多智能体个性化学习。",
+        "phone": "",
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+
+async def get_user_account(user_id: str) -> dict | None:
+    if user_id == "demo":
+        return _demo_account()
+    with SessionLocal() as db:
+        row = db.get(UserRecord, user_id)
+        if not row:
+            return None
+        return {
+            "user_id": row.id,
+            "display_name": row.display_name or "",
+            "email": row.email,
+            "course_name": getattr(row, "course_name", None) or "",
+            "major": getattr(row, "major", None) or "",
+            "bio": getattr(row, "bio", None) or "",
+            "phone": getattr(row, "phone", None) or "",
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+
+
+async def update_user_account(user_id: str, patch: dict) -> dict | None:
+    if user_id == "demo":
+        base = _demo_account()
+        base.update({k: v for k, v in patch.items() if v is not None})
+        return base
+    with SessionLocal() as db:
+        row = db.get(UserRecord, user_id)
+        if not row:
+            return None
+        for key in ("display_name", "course_name", "major", "bio", "phone"):
+            if key in patch and patch[key] is not None:
+                setattr(row, key, patch[key])
+        db.commit()
+        db.refresh(row)
+        return {
+            "user_id": row.id,
+            "display_name": row.display_name or "",
+            "email": row.email,
+            "course_name": getattr(row, "course_name", None) or "",
+            "major": getattr(row, "major", None) or "",
+            "bio": getattr(row, "bio", None) or "",
+            "phone": getattr(row, "phone", None) or "",
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+
+
 def get_or_create_user(email: str) -> dict:
     """根据邮箱获取或创建用户，返回用户信息字典。"""
     with SessionLocal() as db:

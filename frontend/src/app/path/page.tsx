@@ -1,13 +1,4 @@
-"use client";
-
-import dynamic from "next/dynamic";
-import PageSkeleton from "@/components/PageSkeleton";
-
-const PathContent = dynamic(
-  () => import("@/components/pages/PathContent"),
-  { loading: () => <PageSkeleton /> }
-);
-
+/** 由 AppShell Keep-alive 渲染 */
 export default function PathPage() {
-  return <PathContent />;
+  return null;
 }

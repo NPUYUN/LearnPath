@@ -1,4 +1,9 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+import { getApiBase } from "./apiBase";
+
+function apiUrl(path: string): string {
+  const base = getApiBase();
+  return base ? `${base}${path}` : path;
+}
 
 export type StudentProfile = {
   user_id: string;
@@ -35,8 +40,17 @@ export type LearningPath = {
   version: number;
 };
 
+export async function checkHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(apiUrl("/api/health"), { cache: "no-store" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function chat(userId: string, message: string) {
-  const res = await fetch(`${API_BASE}/api/chat`, {
+  const res = await fetch(apiUrl("/api/chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, message, stream: false }),
@@ -51,7 +65,7 @@ export async function streamChat(
   onToken: (t: string) => void,
   onDone: (reply: string) => void
 ) {
-  const res = await fetch(`${API_BASE}/api/chat/stream`, {
+  const res = await fetch(apiUrl("/api/chat/stream"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, message, stream: true }),
@@ -85,14 +99,14 @@ export async function streamChat(
 }
 
 export async function getProfile(userId: string) {
-  const res = await fetch(`${API_BASE}/api/profile/${userId}`);
+  const res = await fetch(apiUrl(`/api/profile/${userId}`));
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<StudentProfile>;
 }
 
 export async function generateResources(userId: string, topic: string) {
-  const res = await fetch(`${API_BASE}/api/resources/generate`, {
+  const res = await fetch(apiUrl("/api/resources/generate"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -106,20 +120,20 @@ export async function generateResources(userId: string, topic: string) {
 }
 
 export async function listResources(userId: string) {
-  const res = await fetch(`${API_BASE}/api/resources?user_id=${userId}`);
+  const res = await fetch(apiUrl(`/api/resources?user_id=${userId}`));
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<LearningResource[]>;
 }
 
 export async function getPath(userId: string) {
-  const res = await fetch(`${API_BASE}/api/path/${userId}`);
+  const res = await fetch(apiUrl(`/api/path/${userId}`));
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<LearningPath>;
 }
 
 export async function refreshPath(userId: string) {
-  const res = await fetch(`${API_BASE}/api/path/${userId}/refresh`, {
+  const res = await fetch(apiUrl(`/api/path/${userId}/refresh`), {
     method: "POST",
   });
   if (!res.ok) throw new Error(await res.text());
@@ -136,7 +150,7 @@ export type AuthUser = {
 
 /** 向邮箱发送验证码。Debug 模式下响应会附带 debug_code 字段。 */
 export async function sendOtp(email: string): Promise<{ sent: boolean; debug_code?: string }> {
-  const res = await fetch(`${API_BASE}/api/auth/send-otp`, {
+  const res = await fetch(apiUrl("/api/auth/send-otp"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
@@ -147,7 +161,7 @@ export async function sendOtp(email: string): Promise<{ sent: boolean; debug_cod
 
 /** 验证邮箱 + 验证码，返回用户信息（不存在则自动注册）。 */
 export async function verifyOtp(email: string, code: string): Promise<AuthUser> {
-  const res = await fetch(`${API_BASE}/api/auth/verify-otp`, {
+  const res = await fetch(apiUrl("/api/auth/verify-otp"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, code }),
@@ -185,8 +199,44 @@ export type EvalStats = {
 };
 
 export async function getEvalStats(userId: string): Promise<EvalStats> {
-  const res = await fetch(`${API_BASE}/api/eval/${userId}`);
+  const res = await fetch(apiUrl(`/api/eval/${userId}`));
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<EvalStats>;
+}
+
+// ── User account (个人主页，非学习画像) ───────────────────────────────────────
+
+export type UserAccount = {
+  user_id: string;
+  display_name: string;
+  email: string;
+  course_name: string;
+  major: string;
+  bio: string;
+  phone: string;
+  created_at?: string | null;
+};
+
+export type UserAccountUpdate = Partial<
+  Pick<UserAccount, "display_name" | "course_name" | "major" | "bio" | "phone">
+>;
+
+export async function getAccount(userId: string): Promise<UserAccount> {
+  const res = await fetch(apiUrl(`/api/account/${userId}`));
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<UserAccount>;
+}
+
+export async function updateAccount(
+  userId: string,
+  body: UserAccountUpdate
+): Promise<UserAccount> {
+  const res = await fetch(apiUrl(`/api/account/${userId}`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<UserAccount>;
 }
 
