@@ -1,42 +1,50 @@
-# 学径（LearnPath）
+# 学径 · LearnPath
 
-基于 **LangGraph 多智能体**、**课程知识库 RAG** 与 **讯飞星火** 的个性化学习资源生成系统 —— 第十五届「中国软件杯」A3 赛题作品。
+> 基于 **LangGraph 多智能体 + 课程知识库 RAG + 讯飞星火** 的个性化学习资源生成系统
+>
+> 第十五届「中国软件杯」**A3 赛题**参赛作品
 
-`Python` · `FastAPI` · `LangGraph` · `Next.js` · `Ant Design` · `Chroma`
+![Python](https://img.shields.io/badge/Python-3.11-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688) ![Next.js](https://img.shields.io/badge/Next.js-14-black) ![LangGraph](https://img.shields.io/badge/LangGraph-multiagent-orange) ![License](https://img.shields.io/badge/license-MIT-green)
 
-赛题全文见 [A3赛题内容.md](./A3赛题内容.md)，官方页面：[A组赛题](https://www.cnsoftbei.com/content-3-1286-1.html)
+赛题全文：[A3赛题内容.md](./A3赛题内容.md) · 官方页面：[cnsoftbei.com](https://www.cnsoftbei.com/content-3-1286-1.html)
 
 ---
 
-## 快速入口（点击打开）
+## 目录
 
-> 需先启动后端与前端（见下方「快速开始」）。服务运行后点击下方链接即可。
+- [功能概览](#功能概览)
+- [技术栈](#技术栈)
+- [快速开始](#快速开始)
+- [体验流程](#体验流程)
+- [仓库结构](#仓库结构)
+- [环境变量](#环境变量)
+- [前端路由](#前端路由)
+- [后端 API](#后端-api)
+- [多智能体角色](#多智能体角色)
+- [常见问题](#常见问题)
+- [文档索引](#文档索引)
+- [赛题与合规](#赛题与合规)
 
-| 入口 | 说明 |
+---
+
+## 功能概览
+
+| 模块 | 说明 |
 |------|------|
-| [**打开前端 · 智能对话**](http://localhost:3000/chat) | 默认端口 3000 |
-| [打开前端 · 备用 3001](http://localhost:3001/chat) | 3000 被占用时使用 |
-| [后端 API 文档](http://localhost:8000/docs) | Swagger |
-| [健康检查](http://localhost:8000/api/health) | 确认后端已启动 |
+| **对话式学习画像** | 自然语言一轮对话提取 6+ 维学情，随学随更新 |
+| **多模态资源生成** | 讲解文档、思维导图（Mermaid）、习题、拓展阅读、多模态脚本、代码案例 |
+| **学习路径规划** | 依据画像与资源库生成有序学习步骤 |
+| **智能辅导** | 基于 RAG 的知识库问答（TutorAgent） |
+| **学习效果评估** | 评估报告与可视化图表（EvalAgent） |
+| **防幻觉与安全** | RAG 来源引用、敏感词过滤、一致性检查 |
 
-**本地启动页（推荐）**：双击项目根目录下的 [`打开学径.bat`](./打开学径.bat)，或在资源管理器中打开 [`entry.html`](./entry.html)，在页面中点击按钮进入各模块。
+**前端亮点**
 
-PowerShell 一键打开浏览器：`.\scripts\open.ps1`
+- 登录页静默预加载所有页面 JS chunk + ECharts，进度条实时反馈
+- 登录后初始化进度条跟踪 API 请求（profile / resources / path），全部就绪后才进入主界面
+- Keep-alive 路由：页面首次挂载后永不卸载，切换仅修改 CSS `display`，响应即时
 
----
-
-## 核心能力
-
-| 能力 | 说明 | 代码 / 页面 |
-|------|------|-------------|
-| 对话式学习画像 | 自然语言构建 6+ 维画像，随学随新 | `ProfileAgent` · `/profile` |
-| 多模态资源生成 | 讲解文档、思维导图、习题、拓展阅读、多模态说明、代码案例 | 六个 Resource Agent · `/resources` |
-| 学习路径规划 | 按画像与资源生成有序学习步骤 | `PathAgent` · `/path` |
-| 智能辅导 | 基于 RAG 的答疑（框架已接入） | `TutorAgent` · `/chat` |
-| 学习效果评估 | 评估报告与图表（前端为演示数据，待接 API） | `EvalAgent` · `/evaluation` |
-| 防幻觉与安全 | RAG 引用、敏感词过滤、一致性检查占位 | `backend/app/rag/` · `guardrails.py` |
-
-默认课程知识库：**机器学习导论**（`data/knowledge_base/ml_intro`）。无星火 API Key 时可使用 `LLM_MOCK=true` 本地演示。
+默认课程知识库：**机器学习导论**（`data/knowledge_base/ml_intro`）。无星火 API Key 时保持 `LLM_MOCK=true` 即可本地演示。
 
 ---
 
@@ -44,13 +52,15 @@ PowerShell 一键打开浏览器：`.\scripts\open.ps1`
 
 | 层级 | 技术 |
 |------|------|
-| 后端 API | FastAPI、Uvicorn |
-| 多智能体 | LangGraph（Supervisor + 专项 Agent） |
+| 后端 API | FastAPI + Uvicorn |
+| 多智能体编排 | LangGraph（Supervisor + 专项 Agent） |
 | 大模型 | 讯飞星火 HTTP（OpenAI 兼容），支持 Mock |
-| 检索 | ChromaDB + 课程 Markdown |
+| 知识检索 | ChromaDB + 课程 Markdown 分块入库 |
 | 持久化 | SQLite（`storage/learnpath.db`） |
-| 前端 | Next.js 14、Ant Design 5、ECharts、Zustand |
-| 文档 | 见 [docs/](./docs/) |
+| 前端框架 | Next.js 14 App Router |
+| UI 组件 | Ant Design 5 |
+| 图表 | ECharts（懒加载 + 模块缓存） |
+| 状态管理 | Zustand |
 
 ---
 
@@ -60,14 +70,12 @@ PowerShell 一键打开浏览器：`.\scripts\open.ps1`
 
 - Python 3.11+（3.10 可运行）
 - Node.js 20+
-- 可选：讯飞星火 API Key（见 `.env`）
+- 可选：讯飞星火 API Key
 
 ### 1. 配置环境变量
 
-在项目根目录执行：
-
 ```powershell
-# Windows PowerShell
+# Windows
 Copy-Item .env.example .env
 Copy-Item frontend\.env.local.example frontend\.env.local
 ```
@@ -80,38 +88,31 @@ cp frontend/.env.local.example frontend/.env.local
 
 编辑 `.env`：无密钥时保持 `LLM_MOCK=true`；接入星火时填写 `SPARK_API_KEY` 并设 `LLM_MOCK=false`。
 
-若前端运行在 **3001** 等非默认端口，请在 `.env` 中将 `CORS_ORIGINS` 设为 `http://localhost:3000,http://localhost:3001`。
-
 ### 2. 启动后端
 
 ```powershell
+# Windows
 cd backend
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1          # Windows
-# source .venv/bin/activate           # Linux / macOS
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 cd ..
-.\backend\.venv\Scripts\python scripts\ingest_kb.py   # Windows 使用 venv 内 Python
-# backend/.venv/bin/python scripts/ingest_kb.py       # Linux / macOS
+.\backend\.venv\Scripts\python scripts\ingest_kb.py   # 知识库入库
 cd backend
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ```bash
+# Linux / macOS
 cd backend && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt && cd ..
 ./backend/.venv/bin/python scripts/ingest_kb.py
 cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-验证：
-
-- 健康检查：<http://localhost:8000/api/health>
-- Swagger：<http://localhost:8000/docs>
+验证：<http://localhost:8000/api/health>（健康检查）· <http://localhost:8000/docs>（Swagger）
 
 ### 3. 启动前端
-
-新开终端：
 
 ```bash
 cd frontend
@@ -119,45 +120,28 @@ npm install
 npm run dev
 ```
 
-浏览器访问 <http://localhost:3000>（若 3000 被占用，终端会提示实际端口，如 3001）。
+浏览器访问 <http://localhost:3000>，进入登录页后点击「**开始学习**」即可（默认填写了演示用户名与课程）。
 
-### 4. 一键启动并打开（Windows）
-
-已配置好后端 venv 时，可在项目根目录执行：
+### 4. 一键启动（Windows）
 
 ```powershell
-.\scripts\dev.ps1    # 启动后端 + 前端（新窗口）
-.\scripts\open.ps1   # 打开 entry.html 与可用前端地址
+.\scripts\dev.ps1    # 同时启动后端 + 前端（新窗口）
+.\scripts\open.ps1   # 打开 entry.html 入口页
 ```
 
-或直接双击 **`打开学径.bat`** 打开本地入口页（需服务已启动）。
-
-Linux/macOS 可使用 `scripts/dev.sh`，浏览器访问 <http://localhost:3000/chat>。
-
-### 5. 建议体验流程
-
-1. 打开 `/chat`，发送「我是计算机专业，想学习机器学习导论，线性回归比较薄弱」
-2. 打开 `/profile` 查看画像雷达图
-3. 在 `/resources` 点击「生成新资源」
-4. 在 `/path` 点击「重新规划」生成学习路径
+或双击根目录 **`打开学径.bat`** 打开本地入口导航页。Linux/macOS 使用 `scripts/dev.sh`。
 
 ---
 
-## 环境变量（常用）
+## 体验流程
 
-| 变量 | 说明 | 默认 |
-|------|------|------|
-| `LLM_MOCK` | 无星火密钥时使用 Mock LLM | `true` |
-| `SPARK_API_KEY` | 讯飞星火 API Key | 空 |
-| `SPARK_BASE_URL` | OpenAI 兼容 Base URL | `https://spark-api-open.xf-yun.com/v1` |
-| `SPARK_MODEL` | 模型 ID | `generalv3.5` |
-| `DATABASE_URL` | SQLite 路径 | `./storage/learnpath.db` |
-| `CHROMA_PERSIST_DIR` | 向量库目录 | `./storage/chroma` |
-| `KNOWLEDGE_BASE_DIR` | 课程文档目录 | `./data/knowledge_base/ml_intro` |
-| `CORS_ORIGINS` | 允许的前端来源（逗号分隔） | `http://localhost:3000` |
-| `NEXT_PUBLIC_API_BASE` | 前端请求的后端地址（`frontend/.env.local`） | `http://localhost:8000` |
-
-完整说明见 [docs/02-开发指南.md](./docs/02-开发指南.md)。
+1. 打开 <http://localhost:3000>，登录页加载完毕后点击「**开始学习**」
+2. 进入主界面，等待初始化进度条（约 2–5 秒，视网络状态）
+3. 在 **智能对话（/chat）** 发送：
+   > 「我是计算机专业，想学习机器学习导论，线性回归比较薄弱」
+4. 切换至 **学习画像（/profile）** 查看雷达图与六维卡片
+5. 在 **资源库（/resources）** 点击「生成新资源」
+6. 在 **学习路径（/path）** 点击「重新规划」生成学习步骤
 
 ---
 
@@ -167,50 +151,44 @@ Linux/macOS 可使用 `scripts/dev.sh`，浏览器访问 <http://localhost:3000/
 A3/
 ├── backend/
 │   └── app/
-│       ├── agents/          # LangGraph 编排与各 Agent 节点
-│       ├── api/             # REST / SSE 路由
-│       ├── core/            # 配置、LLM、guardrails
-│       ├── rag/             # 分块、入库、检索
-│       ├── services/        # 业务层调用 graph
-│       └── db/              # ORM 与仓储
+│       ├── agents/          # LangGraph 编排（graph.py、supervisor.py）与各 Agent 节点
+│       ├── api/             # REST / SSE 路由（chat、profile、path、resources、tutor）
+│       ├── core/            # 配置、LLM 客户端、guardrails
+│       ├── rag/             # 分块入库（ingest.py）与检索（retriever.py）
+│       ├── services/        # 业务层：调用 graph，处理流式/非流式响应
+│       └── db/              # SQLAlchemy 模型与仓储
 ├── frontend/
 │   └── src/
-│       ├── app/             # 页面：chat | profile | path | resources | evaluation
-│       ├── components/      # AppShell、AntdProvider
-│       ├── lib/             # API 封装
-│       └── store/           # Zustand 全局状态
-├── data/knowledge_base/     # 课程原始 Markdown（需自行扩充）
-├── docs/                    # 需求、开发指南、开源协议等
-├── scripts/                 # ingest_kb.py、dev.ps1 / dev.sh
-├── storage/                 # 运行时 DB / Chroma / 生成物（gitignore）
+│       ├── app/             # Next.js 页面（chat | profile | path | resources | evaluation）
+│       ├── components/
+│       │   ├── AppShell.tsx      # 侧边栏 + Keep-alive 内容区 + 初始化进度遮罩
+│       │   ├── LoginContent.tsx  # 全屏登录页（含 chunk 预加载进度条）
+│       │   └── pages/            # 各页面内容组件（code-split）
+│       ├── lib/             # API 封装、ECharts hook、resourceConfig
+│       └── store/           # Zustand 全局状态（auth + 业务数据）
+├── data/knowledge_base/     # 课程原始 Markdown（可自行扩充）
+├── docs/                    # 需求规格、开发指南、开源协议等
+├── scripts/                 # 知识库入库（ingest_kb.py）、本地联调启动脚本
+├── storage/                 # 运行时 DB / Chroma（gitignore）
 ├── .env.example
 └── A3赛题内容.md
 ```
 
-| 目录 | 职责 |
-|------|------|
-| `backend/app/agents` | 多智能体协同核心（赛题实现重点） |
-| `backend/app/rag` | 课程知识 grounding，支撑防幻觉 |
-| `frontend/src/app` | Ant Design 五页 UI，流式对话与图表 |
-| `data/knowledge_base` | 赛题要求的 ≥1 门完整课程文档输入 |
-| `docs` | 需求规格、开发说明书提纲、协议声明 |
-| `scripts` | 知识库入库与本地联调启动 |
-| `storage` | 本地运行产物，不提交 Git |
-
 ---
 
-## 架构示意
+## 环境变量
 
-```mermaid
-flowchart LR
-  UI[Nextjs_AntDesign] --> API[FastAPI]
-  API --> Graph[LangGraph_Supervisor]
-  Graph --> Agents[Profile_Resource_Path_Agents]
-  Agents --> RAG[Chroma]
-  Agents --> LLM[Spark_or_Mock]
-```
-
-详细图源文件：[docs/diagrams/architecture.mmd](./docs/diagrams/architecture.mmd)
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `LLM_MOCK` | 无星火密钥时使用 Mock LLM | `true` |
+| `SPARK_API_KEY` | 讯飞星火 API Key | 空 |
+| `SPARK_BASE_URL` | OpenAI 兼容 Base URL | `https://spark-api-open.xf-yun.com/v1` |
+| `SPARK_MODEL` | 模型 ID | `generalv3.5` |
+| `DATABASE_URL` | SQLite 路径 | `./storage/learnpath.db` |
+| `CHROMA_PERSIST_DIR` | 向量库目录 | `./storage/chroma` |
+| `KNOWLEDGE_BASE_DIR` | 课程文档目录 | `./data/knowledge_base/ml_intro` |
+| `CORS_ORIGINS` | 允许的前端来源（逗号分隔） | `http://localhost:3000` |
+| `NEXT_PUBLIC_API_BASE` | 前端请求的后端地址（`frontend/.env.local`） | `http://localhost:8000` |
 
 ---
 
@@ -223,13 +201,13 @@ flowchart LR
 | `/profile` | 学习画像雷达图与六维卡片 |
 | `/resources` | 资源库列表、按类型筛选、Markdown 预览 |
 | `/path` | 学习路径总进度与分阶段展开 |
-| `/evaluation` | 学习评估仪表盘（当前为演示数据） |
+| `/evaluation` | 学习评估仪表盘 |
 
-侧栏布局见 `frontend/src/components/AppShell.tsx`。
+未登录时所有路由均展示登录页（由 `AppShell` 统一拦截）。
 
 ---
 
-## 后端 API 速查
+## 后端 API
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -238,12 +216,12 @@ flowchart LR
 | POST | `/api/chat/stream` | 对话（SSE 流式） |
 | GET | `/api/profile/{user_id}` | 获取学习画像 |
 | POST | `/api/resources/generate` | 触发多类资源生成 |
-| GET | `/api/resources?user_id=` | 资源列表 |
+| GET | `/api/resources` | 资源列表（`?user_id=`） |
 | GET | `/api/path/{user_id}` | 获取学习路径 |
 | POST | `/api/path/{user_id}/refresh` | 重新规划路径 |
 | POST | `/api/tutor/ask` | 辅导问答 |
 
-交互式文档：<http://localhost:8000/docs>（服务启动后访问）。
+完整交互式文档：<http://localhost:8000/docs>
 
 ---
 
@@ -251,48 +229,50 @@ flowchart LR
 
 | Agent | 职责 |
 |-------|------|
-| Supervisor | 意图识别，路由至下游节点 |
-| ProfileAgent | 对话抽取/更新学习画像 |
-| DocAgent | 讲解文档 |
-| MindmapAgent | 思维导图（Mermaid） |
-| QuizAgent | 练习题 |
-| ReadingAgent | 拓展阅读 |
-| MediaAgent | 多模态讲解 / 分镜脚本 |
-| CodeAgent | 代码实操案例 |
-| PathAgent | 学习路径规划 |
-| TutorAgent | 智能辅导（加分项） |
-| EvalAgent | 学习效果评估（加分项） |
+| **Supervisor** | 意图识别，路由至下游节点 |
+| **ProfileAgent** | 对话抽取 / 更新学习画像 |
+| **DocAgent** | 讲解文档生成 |
+| **MindmapAgent** | 思维导图（Mermaid） |
+| **QuizAgent** | 练习题 |
+| **ReadingAgent** | 拓展阅读 |
+| **MediaAgent** | 多模态讲解 / 分镜脚本 |
+| **CodeAgent** | 代码实操案例 |
+| **PathAgent** | 学习路径规划 |
+| **TutorAgent** | 智能辅导（加分项） |
+| **EvalAgent** | 学习效果评估（加分项） |
+
+```mermaid
+flowchart LR
+  UI[Next.js] --> API[FastAPI]
+  API --> Graph[LangGraph Supervisor]
+  Graph --> Agents[Profile / Resource / Path Agents]
+  Agents --> RAG[ChromaDB]
+  Agents --> LLM[Spark / Mock]
+```
 
 ---
 
 ## 常见问题
 
 **没有星火 API Key 能运行吗？**  
-可以。`.env` 中保持 `LLM_MOCK=true`，对话与资源生成返回 Mock 结构化内容。
+可以。`.env` 中保持 `LLM_MOCK=true`，对话与资源生成返回 Mock 结构化内容，前端完整可用。
 
-**前端提示连接失败？**  
-确认后端已启动；检查 `frontend/.env.local` 中 `NEXT_PUBLIC_API_BASE=http://localhost:8000`；若前端端口为 3001，同步修改根目录 `.env` 的 `CORS_ORIGINS`。
+**前端提示无法连接后端？**  
+确认后端已启动；检查 `frontend/.env.local` 中 `NEXT_PUBLIC_API_BASE=http://localhost:8000`；若前端运行在非 3000 端口，将该端口加入 `.env` 的 `CORS_ORIGINS`。
 
 **知识库检索无结果？**  
-在项目根目录执行 `python scripts/ingest_kb.py`（建议使用 `backend/.venv` 内的 Python），并确认 `data/knowledge_base/ml_intro/chapters/` 下有 Markdown 章节。
+执行 `.\backend\.venv\Scripts\python scripts\ingest_kb.py`（使用 venv 内的 Python），确认 `data/knowledge_base/ml_intro/chapters/` 下存在 Markdown 章节文件。
 
-**访问 `/api/profile/demo` 返回 404？**  
-需先在 `/chat` 完成至少一轮对话以构建画像。
+**访问画像 / 资源返回空数据？**  
+需先在 `/chat` 完成至少一轮对话以构建画像，资源生成依赖画像数据。
 
-**端口 3000 已被占用？**  
-Next.js 会自动改用 3001 等端口，以终端输出为准，并更新 `CORS_ORIGINS`。
-
-**前端报 `Cannot find module './vendor-chunks/@rc-component.js'`？**  
-多为 `.next` 缓存损坏。先关闭所有 `npm run dev` 窗口，再执行：
+**前端报 `Cannot find module './vendor-chunks/...'`？**  
+`.next` 缓存损坏，执行：
 
 ```powershell
-Remove-Item -Recurse -Force frontend\.next
-cd frontend
-npm run build
-npm run dev
+.\scripts\clean-frontend.ps1  # 或手动：Remove-Item -Recurse -Force frontend\.next
+cd frontend && npm run dev
 ```
-
-或运行 `.\scripts\clean-frontend.ps1`。
 
 ---
 
@@ -300,7 +280,7 @@ npm run dev
 
 | 文档 | 内容 |
 |------|------|
-| [docs/01-需求规格说明书.md](./docs/01-需求规格说明书.md) | 功能/非功能需求与验收标准 |
+| [docs/01-需求规格说明书.md](./docs/01-需求规格说明书.md) | 功能 / 非功能需求与验收标准 |
 | [docs/02-开发指南.md](./docs/02-开发指南.md) | Agent 扩展、RAG 流程、API 细节 |
 | [docs/03-开源参考与协议.md](./docs/03-开源参考与协议.md) | 参考项目与依赖许可证 |
 | [docs/04-系统开发说明书-提纲.md](./docs/04-系统开发说明书-提纲.md) | 初赛配套文档骨架 |
@@ -310,22 +290,10 @@ npm run dev
 
 ---
 
-## 开发路线图
-
-| 阶段 | 状态 | 目标 |
-|------|------|------|
-| Sprint 0 | 已完成 | 框架、文档、样例知识库、Mock/SSE、Ant Design UI |
-| Sprint 1 | 待做 | 画像 JSON 解析强化、随学随新 |
-| Sprint 2 | 待做 | 资源生成质量、RAG、生成进度 UI |
-| Sprint 3 | 待做 | 路径算法与资源推送 |
-| Sprint 4 | 待做 | 辅导/评估 API、Reviewer 防幻觉 |
-| Sprint 5 | 待做 | 测试说明书、7 分钟演示视频、初赛材料 |
-
----
-
 ## 赛题与合规
 
-- 赛题编号：**A3** — 基于大模型的个性化资源生成与学习多智能体系统开发  
-- 出题企业：科大讯飞股份有限公司 · 答疑 QQ 群：1072584310  
-- 开源组件与讯飞服务使用须遵守 [docs/03-开源参考与协议.md](./docs/03-开源参考与协议.md)  
-- 参赛作品著作权归参赛团队所有；商业合作事宜见 [A3赛题内容.md](./A3赛题内容.md) 文末说明
+- 赛题编号：**A3** — 基于大模型的个性化资源生成与学习多智能体系统开发
+- 出题企业：科大讯飞股份有限公司 · 答疑 QQ 群：1072584310
+- 开源组件与讯飞服务使用须遵守 [docs/03-开源参考与协议.md](./docs/03-开源参考与协议.md)
+- 参赛作品著作权归参赛团队所有
+
