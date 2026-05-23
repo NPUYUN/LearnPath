@@ -3,7 +3,19 @@ import random
 import string
 import uuid
 
-from app.db.models import PathRecord, ProfileRecord, ResourceRecord, UserRecord, OtpRecord, dumps, loads
+from app.db.models import (
+    ChatMessageRecord,
+    LearningEventRecord,
+    OtpRecord,
+    PathRecord,
+    ProfileRecord,
+    QuizAttemptRecord,
+    ResourceRecord,
+    UserPreferencesRecord,
+    UserRecord,
+    dumps,
+    loads,
+)
 from app.db.session import SessionLocal
 
 
@@ -74,6 +86,67 @@ async def list_resources(user_id: str) -> list[dict]:
         return [loads(r.data_json) for r in rows]
 
 
+async def get_resource(user_id: str, resource_id: str) -> dict | None:
+    with SessionLocal() as db:
+        row = db.get(ResourceRecord, resource_id)
+        if not row or row.user_id != user_id:
+            return None
+        data = loads(row.data_json)
+        data.setdefault("id", row.id)
+        data.setdefault("type", row.type)
+        data.setdefault("title", row.title)
+        data.setdefault("content", row.content)
+        return data
+
+
+async def save_quiz_attempt(
+    user_id: str,
+    quiz_resource_id: str,
+    answers: list[int],
+    score: int,
+    total: int,
+) -> dict:
+    with SessionLocal() as db:
+        row = QuizAttemptRecord(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            quiz_resource_id=quiz_resource_id,
+            answers_json=dumps({"answers": answers}),
+            score=score,
+            total=total,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return {
+            "id": row.id,
+            "user_id": row.user_id,
+            "quiz_resource_id": row.quiz_resource_id,
+            "score": row.score,
+            "total": row.total,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
+
+
+async def get_last_quiz_attempt(user_id: str) -> dict | None:
+    with SessionLocal() as db:
+        row = (
+            db.query(QuizAttemptRecord)
+            .filter(QuizAttemptRecord.user_id == user_id)
+            .order_by(QuizAttemptRecord.created_at.desc())
+            .first()
+        )
+        if not row:
+            return None
+        return {
+            "id": row.id,
+            "quiz_resource_id": row.quiz_resource_id,
+            "score": row.score,
+            "total": row.total,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
+
+
 # ── Auth helpers ──────────────────────────────────────────────────────────────
 
 def create_otp(email: str) -> str:
@@ -122,7 +195,10 @@ def _demo_account() -> dict:
 
 async def get_user_account(user_id: str) -> dict | None:
     if user_id == "demo":
-        return _demo_account()
+        base = _demo_account()
+        prefs = await get_preferences("demo")
+        base.update({k: v for k, v in (prefs.get("account_patch") or {}).items() if v is not None})
+        return base
     with SessionLocal() as db:
         row = db.get(UserRecord, user_id)
         if not row:
@@ -142,7 +218,13 @@ async def get_user_account(user_id: str) -> dict | None:
 async def update_user_account(user_id: str, patch: dict) -> dict | None:
     if user_id == "demo":
         base = _demo_account()
+        prefs = await get_preferences("demo")
+        prefs_patch = prefs.get("account_patch") or {}
+        base.update({k: v for k, v in prefs_patch.items() if v is not None})
         base.update({k: v for k, v in patch.items() if v is not None})
+        await set_preferences("demo", {"account_patch": {k: base[k] for k in (
+            "display_name", "course_name", "major", "bio", "phone", "email"
+        ) if k in base}})
         return base
     with SessionLocal() as db:
         row = db.get(UserRecord, user_id)
@@ -179,6 +261,135 @@ def get_or_create_user(email: str) -> dict:
             db.commit()
             db.refresh(row)
         return {"id": row.id, "email": row.email, "display_name": row.display_name}
+
+
+async def record_event(
+    user_id: str,
+    event_type: str,
+    *,
+    resource_id: str = "",
+    meta: dict | None = None,
+) -> dict:
+    with SessionLocal() as db:
+        row = LearningEventRecord(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            event_type=event_type,
+            resource_id=resource_id or "",
+            meta_json=dumps(meta or {}),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return {
+            "id": row.id,
+            "user_id": row.user_id,
+            "event_type": row.event_type,
+            "resource_id": row.resource_id,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
+
+
+def list_events(user_id: str, limit: int = 50) -> list[dict]:
+    with SessionLocal() as db:
+        rows = (
+            db.query(LearningEventRecord)
+            .filter(LearningEventRecord.user_id == user_id)
+            .order_by(LearningEventRecord.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "event_type": r.event_type,
+                "resource_id": r.resource_id,
+                "meta": loads(r.meta_json),
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+            }
+            for r in rows
+        ]
+
+
+def _default_preferences(user_id: str) -> dict:
+    return {"user_id": user_id, "starred_resource_ids": [], "account_patch": {}}
+
+
+async def get_preferences(user_id: str) -> dict:
+    with SessionLocal() as db:
+        row = db.get(UserPreferencesRecord, user_id)
+        if not row:
+            return _default_preferences(user_id)
+        data = loads(row.data_json)
+        data.setdefault("user_id", user_id)
+        data.setdefault("starred_resource_ids", [])
+        data.setdefault("account_patch", {})
+        return data
+
+
+async def set_preferences(user_id: str, patch: dict) -> dict:
+    current = await get_preferences(user_id)
+    if "starred_resource_ids" in patch and patch["starred_resource_ids"] is not None:
+        current["starred_resource_ids"] = list(patch["starred_resource_ids"])
+    if "account_patch" in patch and patch["account_patch"] is not None:
+        current["account_patch"] = {**current.get("account_patch", {}), **patch["account_patch"]}
+    with SessionLocal() as db:
+        row = db.get(UserPreferencesRecord, user_id)
+        if row is None:
+            row = UserPreferencesRecord(user_id=user_id, data_json=dumps(current))
+            db.add(row)
+        else:
+            row.data_json = dumps(current)
+            row.updated_at = datetime.utcnow()
+        db.commit()
+    return current
+
+
+async def append_chat_message(
+    user_id: str,
+    role: str,
+    content: str,
+    resources: list[dict] | None = None,
+) -> dict:
+    with SessionLocal() as db:
+        row = ChatMessageRecord(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            role=role,
+            content=content,
+            resources_json=dumps(resources or []),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return {
+            "id": row.id,
+            "role": row.role,
+            "content": row.content,
+            "resources": loads(row.resources_json),
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
+
+
+def list_chat_messages(user_id: str, limit: int = 100) -> list[dict]:
+    with SessionLocal() as db:
+        rows = (
+            db.query(ChatMessageRecord)
+            .filter(ChatMessageRecord.user_id == user_id)
+            .order_by(ChatMessageRecord.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "role": r.role,
+                "content": r.content,
+                "resources": loads(r.resources_json),
+                "created_at": r.created_at.isoformat() if r.created_at else "",
+            }
+            for r in rows
+        ]
 
 
 def list_resources_with_meta(user_id: str) -> list[dict]:

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { EvalStats, LearningPath, LearningResource, StudentProfile } from "@/lib/api";
+import { clearAccessToken } from "@/store/authStore";
 
 export const DEMO_USER_ID = "demo";
 
@@ -23,6 +24,8 @@ interface AppState {
   learningPath: LearningPath | null;
   resourceTitles: Record<string, string>;
   evalStats: EvalStats | null;
+  pendingResourcePreviewId: string | null;
+  setPendingResourcePreviewId: (id: string | null) => void;
   setProfile: (p: StudentProfile | null) => void;
   setEvalStats: (s: EvalStats | null) => void;
   setResources: (r: LearningResource[]) => void;
@@ -53,7 +56,8 @@ export const useAppStore = create<AppState>((set) => ({
       courseName: meta.courseName ?? s.courseName,
       userEmail: meta.userEmail ?? s.userEmail,
     })),
-  logout: () =>
+  logout: () => {
+    clearAccessToken();
     set({
       isLoggedIn: false,
       showLanding: true,
@@ -63,7 +67,9 @@ export const useAppStore = create<AppState>((set) => ({
       learningPath: null,
       resourceTitles: {},
       evalStats: null,
-    }),
+      pendingResourcePreviewId: null,
+    });
+  },
   setShowLanding: (v) => set({ showLanding: v }),
   // ── Core data defaults ────────────────────────────────────────────────────
   profile: null,
@@ -71,6 +77,8 @@ export const useAppStore = create<AppState>((set) => ({
   learningPath: null,
   resourceTitles: {},
   evalStats: null,
+  pendingResourcePreviewId: null,
+  setPendingResourcePreviewId: (pendingResourcePreviewId) => set({ pendingResourcePreviewId }),
   setProfile: (profile) => set({ profile }),
   setEvalStats: (evalStats) => set({ evalStats }),
   setResources: (resources) => set({ resources }),

@@ -8,7 +8,8 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.config import get_settings
 from app.db.repository import create_otp, get_or_create_user, verify_otp_code
-from app.models.schemas import AuthUser, SendOtpRequest, VerifyOtpRequest
+from app.core.security import create_access_token
+from app.models.schemas import AuthUser, DemoTokenRequest, SendOtpRequest, VerifyOtpRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -43,10 +44,24 @@ async def verify_otp(req: VerifyOtpRequest) -> AuthUser:
         raise HTTPException(400, "验证码无效或已过期，请重新获取")
 
     user = get_or_create_user(email)
+    token = create_access_token(user["id"])
     return AuthUser(
         user_id=user["id"],
         email=user["email"],
         display_name=user["display_name"],
+        access_token=token,
+    )
+
+
+@router.post("/demo-token", response_model=AuthUser)
+async def demo_token(req: DemoTokenRequest) -> AuthUser:
+    """快速体验：为 demo 用户签发 JWT。"""
+    token = create_access_token("demo", extra={"demo": True})
+    return AuthUser(
+        user_id="demo",
+        email="demo@learnpath.local",
+        display_name=req.display_name.strip() or "演示学生",
+        access_token=token,
     )
 
 

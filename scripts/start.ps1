@@ -163,7 +163,18 @@ try {
 
     Write-Host "[3/5] backend http://127.0.0.1:8000 ..."
     $py = $paths.Python
-    $backendArgs = '/k title LearnPath Backend & "' + $py + '" -m uvicorn app.main:app --host 127.0.0.1 --port 8000'
+    $reloadFlag = ""
+    try {
+        $envPath = Join-Path $Root ".env"
+        if (Test-Path $envPath) {
+            $envText = Get-Content $envPath -Raw -Encoding UTF8
+            if ($envText -match '(?m)^\s*DEV_RELOAD\s*=\s*true\s*$') {
+                $reloadFlag = " --reload"
+                Write-Step "DEV_RELOAD=true, uvicorn hot reload enabled"
+            }
+        }
+    } catch {}
+    $backendArgs = '/k title LearnPath Backend & "' + $py + '" -m uvicorn app.main:app --host 127.0.0.1 --port 8000' + $reloadFlag
     Start-Process -FilePath "cmd.exe" -ArgumentList $backendArgs -WorkingDirectory $paths.BackendDir -WindowStyle Normal
 
     $backendOk = Wait-HttpOk -Url "http://127.0.0.1:8000/api/health" -TimeoutSec 90 -Label "backend"

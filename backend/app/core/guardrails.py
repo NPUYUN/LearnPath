@@ -8,6 +8,10 @@ SENSITIVE_PATTERNS = [
     for p in [
         r"违禁",
         r"暴力教程",
+        r"爆炸物制作",
+        r"赌博平台",
+        r"色情",
+        r"政治敏感",
     ]
 ]
 

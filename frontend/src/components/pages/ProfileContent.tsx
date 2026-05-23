@@ -29,6 +29,7 @@ import type { EChartsOption } from "echarts";
 import PageHeader from "@/components/PageHeader";
 import { getProfile, type StudentProfile } from "@/lib/api";
 import { useEcharts } from "@/lib/useEcharts";
+import { getChartPalette, isDarkTheme } from "@/lib/chartTheme";
 import { useAppStore } from "@/store/appStore";
 
 const { Title, Paragraph, Text } = Typography;
@@ -132,14 +133,15 @@ export default function ProfileContent() {
 
   const chartOption: EChartsOption | null = useMemo(() => {
     if (!dimensions.length) return null;
+    const palette = getChartPalette(isDarkTheme());
     return {
       radar: {
         indicator: dimensions.map((d) => ({ name: d.label, max: 100 })),
         radius: "68%",
-        axisName: { color: "#444", fontSize: 13, fontWeight: 500 },
-        splitArea: { areaStyle: { color: ["#fafafa", "#f0f7ff"] } },
-        axisLine: { lineStyle: { color: "#e0e0e0" } },
-        splitLine: { lineStyle: { color: "#e0e0e0" } },
+        axisName: { color: palette.text, fontSize: 13, fontWeight: 500 },
+        splitArea: { areaStyle: { color: palette.splitArea } },
+        axisLine: { lineStyle: { color: palette.axisLine } },
+        splitLine: { lineStyle: { color: palette.axisLine } },
       },
       series: [
         {
@@ -148,9 +150,9 @@ export default function ProfileContent() {
             {
               value: dimensions.map((d) => d.score),
               name: "学习画像",
-              areaStyle: { color: "rgba(22,119,255,0.15)" },
-              lineStyle: { color: "#1677ff", width: 2 },
-              itemStyle: { color: "#1677ff" },
+              areaStyle: { color: palette.primary === "#4096ff" ? "rgba(64,150,255,0.2)" : "rgba(22,119,255,0.15)" },
+              lineStyle: { color: palette.primary, width: 2 },
+              itemStyle: { color: palette.primary },
             },
           ],
         },
@@ -236,7 +238,7 @@ export default function ProfileContent() {
               }
               extra={
                 <Tooltip title={d.detail}>
-                  <InfoCircleOutlined style={{ color: "#bfbfbf" }} />
+                  <InfoCircleOutlined className="lp-muted-text" />
                 </Tooltip>
               }
             >
@@ -249,7 +251,7 @@ export default function ProfileContent() {
                 )}
                 style={{ marginBottom: 10 }}
               />
-              <Paragraph style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+              <Paragraph className="lp-muted-text" style={{ fontSize: 12, marginBottom: 8 }}>
                 {d.detail}
               </Paragraph>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>

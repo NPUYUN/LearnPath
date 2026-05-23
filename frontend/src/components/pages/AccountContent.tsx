@@ -22,8 +22,12 @@ import SaveOutlined from "@ant-design/icons/SaveOutlined";
 import MailOutlined from "@ant-design/icons/MailOutlined";
 import ReadOutlined from "@ant-design/icons/ReadOutlined";
 import LinkOutlined from "@ant-design/icons/LinkOutlined";
+import TrophyOutlined from "@ant-design/icons/TrophyOutlined";
+import RightOutlined from "@ant-design/icons/RightOutlined";
 import PageHeader from "@/components/PageHeader";
 import { clientNavigate } from "@/lib/clientNav";
+import { computeInsights } from "@/lib/insightsCompute";
+import { pathProgress } from "@/lib/navMeta";
 import { getAccount, updateAccount, type UserAccount } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
 
@@ -104,6 +108,18 @@ export default function AccountContent() {
     }
   };
 
+  const evalStats = useAppStore((s) => s.evalStats);
+  const learningPath = useAppStore((s) => s.learningPath);
+  const profile = useAppStore((s) => s.profile);
+
+  const insightPreview = computeInsights({
+    stats: evalStats,
+    learningPath,
+    profile,
+    chatCount: 0,
+    userMsgCount: 0,
+  });
+
   const initial = account?.display_name?.charAt(0) || userName?.charAt(0) || "学";
 
   return (
@@ -129,6 +145,36 @@ export default function AccountContent() {
       />
       <div className="lp-page-body">
         <Row gutter={[20, 20]}>
+          <Col span={24}>
+            <button
+              type="button"
+              className="lp-account-insights-entry"
+              onClick={() => clientNavigate("/insights")}
+            >
+              <div className="lp-account-insights-entry-glow" aria-hidden />
+              <div className="lp-account-insights-entry-main">
+                <span className="lp-account-insights-entry-icon">
+                  <TrophyOutlined />
+                </span>
+                <div className="lp-account-insights-entry-text">
+                  <Title level={5} style={{ margin: 0, color: "inherit" }}>
+                    学习成就馆
+                  </Title>
+                  <Text style={{ color: "rgba(255,255,255,0.82)", fontSize: 13 }}>
+                    查看学力等级、成就徽章与可视化成长数据
+                  </Text>
+                </div>
+              </div>
+              <div className="lp-account-insights-entry-stats">
+                <span>
+                  Lv.{insightPreview.level} · {insightPreview.xp} XP
+                </span>
+                <span>路径 {pathProgress(learningPath?.steps)}%</span>
+                <span>{insightPreview.unlockedCount} 项成就</span>
+              </div>
+              <RightOutlined className="lp-account-insights-entry-arrow" />
+            </button>
+          </Col>
           <Col xs={24} lg={8}>
             <Card loading={loading}>
               <div className="lp-account-hero">

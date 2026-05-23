@@ -3,19 +3,17 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   startTransition,
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { getEvalStats, getPath, getProfile, listResources } from "@/lib/api";
-import { isNavRoute, NAV_ROUTES, type NavRoute } from "@/hooks/navRoutes";
+import { isNavRoute, isStandaloneRoute, NAV_ROUTES, type AppRoute, type NavRoute } from "@/hooks/navRoutes";
 import { PAGE_MODULES } from "@/lib/pageModules";
 import { prewarmEchartsEngine, preloadEcharts } from "@/lib/useEcharts";
 import { registerClientNav } from "@/lib/clientNav";
 import { useAppStore } from "@/store/appStore";
-import type { MenuProps } from "antd";
 import type { ComponentType } from "react";
 import MessageOutlined from "@ant-design/icons/MessageOutlined";
 import UserOutlined from "@ant-design/icons/UserOutlined";
@@ -26,11 +24,14 @@ import IdcardOutlined from "@ant-design/icons/IdcardOutlined";
 import SettingOutlined from "@ant-design/icons/SettingOutlined";
 import dynamic from "next/dynamic";
 import AppSidebar from "@/components/AppSidebar";
+import AppCanvas from "@/components/AppCanvas";
 import AuthLightProvider from "@/components/AuthLightProvider";
 import AuthPageTheme from "@/components/AuthPageTheme";
 import InitLoadingScreen from "@/components/InitLoadingScreen";
+import RouteLoadingScreen from "@/components/RouteLoadingScreen";
 import PagePane from "@/components/PagePane";
 import ThemeProvider from "@/components/ThemeProvider";
+import { preloadStandaloneRoute } from "@/lib/routePreload";
 
 const LoginContent = dynamic(() => import("@/components/LoginContent"), { ssr: false });
 const LandingContent = dynamic(() => import("@/components/LandingContent"), { ssr: false });
@@ -50,7 +51,7 @@ const NAV_ITEMS_SECONDARY: { key: NavRoute; icon: React.ReactNode; label: string
 
 const PREVIEW_MS = 180;
 
-export default function AppShell({ children: _children }: { children: React.ReactNode }) {
+export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -74,12 +75,20 @@ export default function AppShell({ children: _children }: { children: React.Reac
   const finishCalled = useRef(false);
   const cycleStarted = useRef(false);
 
+  const [standaloneProgress, setStandaloneProgress] = useState(0);
+  const [standaloneFading, setStandaloneFading] = useState(false);
+  const [standaloneReady, setStandaloneReady] = useState(false);
+
   useEffect(() => {
     if (isNavRoute(pathname)) setActiveTab(pathname);
   }, [pathname]);
 
   const goTo = useCallback(
-    (key: NavRoute) => {
+    (key: AppRoute) => {
+      if (isStandaloneRoute(key)) {
+        router.push(key);
+        return;
+      }
       setActiveTab(key);
       if (pathname !== key) {
         startTransition(() => {
@@ -98,10 +107,11 @@ export default function AppShell({ children: _children }: { children: React.Reac
   useEffect(() => {
     if (!isLoggedIn) return;
     NAV_ROUTES.forEach((r) => router.prefetch(r));
+    router.prefetch("/insights");
   }, [isLoggedIn, router]);
 
   useEffect(() => {
-    if (isLoggedIn && !isNavRoute(pathname)) {
+    if (isLoggedIn && !isNavRoute(pathname) && !isStandaloneRoute(pathname)) {
       router.replace("/chat");
       setActiveTab("/chat");
     }
@@ -268,19 +278,44 @@ export default function AppShell({ children: _children }: { children: React.Reac
     setInitProgress(Math.min(99, modulePct + dataPct + warmPct));
   }, [isLoggedIn, initDone, allModulesLoaded, dataReady, warmedRoutes]);
 
-  const menuItems: MenuProps["items"] = useMemo(
-    () => [
-      ...NAV_ITEMS_PRIMARY.map(({ key, icon, label }) => ({ key, icon, label })),
-      { type: "divider" as const },
-      ...NAV_ITEMS_SECONDARY.map(({ key, icon, label }) => ({ key, icon, label })),
-    ],
-    []
-  );
+  // 独立页（如成就馆）切换时预加载 + 进度条
+  useEffect(() => {
+    if (!isLoggedIn || !isStandaloneRoute(pathname)) {
+      setStandaloneReady(true);
+      setStandaloneProgress(0);
+      setStandaloneFading(false);
+      return;
+    }
 
-  const handleMenuClick: MenuProps["onClick"] = ({ key }) => {
-    if (!initDone) return;
-    if (typeof key === "string" && isNavRoute(key)) goTo(key);
-  };
+    let cancelled = false;
+    setStandaloneReady(false);
+    setStandaloneProgress(0);
+    setStandaloneFading(false);
+
+    const tick = setInterval(() => {
+      setStandaloneProgress((p) => Math.min(p + 5, 90));
+    }, 45);
+
+    void (async () => {
+      try {
+        await preloadStandaloneRoute(pathname);
+      } catch {
+        /* 预加载失败仍允许进入，由页面内重试 */
+      }
+      if (cancelled) return;
+      clearInterval(tick);
+      setStandaloneProgress(100);
+      setStandaloneFading(true);
+      window.setTimeout(() => {
+        if (!cancelled) setStandaloneReady(true);
+      }, 380);
+    })();
+
+    return () => {
+      cancelled = true;
+      clearInterval(tick);
+    };
+  }, [pathname, isLoggedIn]);
 
   if (!isLoggedIn) {
     return (
@@ -288,6 +323,26 @@ export default function AppShell({ children: _children }: { children: React.Reac
         <AuthPageTheme />
         {showLanding ? <LandingContent /> : <LoginContent />}
       </AuthLightProvider>
+    );
+  }
+
+  if (isStandaloneRoute(pathname)) {
+    const loaderVariant = pathname === "/insights" ? "insights" : "default";
+    return (
+      <ThemeProvider>
+        {!standaloneReady && (
+          <RouteLoadingScreen
+            variant={loaderVariant}
+            progress={standaloneProgress}
+            fading={standaloneFading}
+          />
+        )}
+        <div
+          className={`lp-standalone-mount${standaloneReady ? " lp-standalone-mount--ready" : ""}`}
+        >
+          {children}
+        </div>
+      </ThemeProvider>
     );
   }
 
@@ -303,10 +358,11 @@ export default function AppShell({ children: _children }: { children: React.Reac
           onCollapse={() => setCollapsed((c) => !c)}
           selected={activeTab}
           onNavigate={goTo}
-          menuItems={menuItems}
-          onMenuClick={handleMenuClick}
+          primaryItems={NAV_ITEMS_PRIMARY}
+          secondaryItems={NAV_ITEMS_SECONDARY}
           userName={userName}
           courseName={courseName}
+          initDone={initDone}
           onLogout={() => {
             logout();
             router.replace("/");
@@ -314,6 +370,7 @@ export default function AppShell({ children: _children }: { children: React.Reac
         />
 
         <main className="learnpath-main learnpath-panel learnpath-keepalive">
+          <AppCanvas activeRoute={activeTab} />
           {allModulesLoaded &&
             NAV_ROUTES.map((route) => {
               const Comp = pageComponents[route]!;

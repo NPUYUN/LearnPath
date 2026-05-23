@@ -14,10 +14,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    llm_mock: bool = True
+    llm_mock: bool = False
     spark_api_key: str = ""
     spark_base_url: str = "https://spark-api-open.xf-yun.com/v1"
     spark_model: str = "generalv3.5"
+
+    # 辅助云端 LLM（OpenAI 兼容：硅基流动 / DeepSeek / Groq / OpenRouter 等，无需本地权重）
+    aux_llm_api_key: str = ""
+    aux_llm_base_url: str = "https://api.siliconflow.cn/v1"
+    aux_llm_model: str = "Qwen/Qwen2.5-7B-Instruct"
 
     database_url: str = f"sqlite:///{(ROOT_DIR / 'storage' / 'learnpath.db').as_posix()}"
     chroma_persist_dir: str = str(ROOT_DIR / "storage" / "chroma")
@@ -36,9 +41,25 @@ class Settings(BaseSettings):
     # 当 smtp_host 未配置时，将验证码打印到日志并在响应中返回（仅用于演示）
     otp_debug: bool = True
 
+    # ── JWT ─────────────────────────────────────────────────────────────────
+    jwt_secret: str = "learnpath-dev-secret-change-in-production"
+    jwt_expire_hours: int = 72
+    auto_path_after_generate: bool = True
+    dev_reload: bool = True
+
+    spark_tts_url: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def has_spark(self) -> bool:
+        return bool(self.spark_api_key.strip())
+
+    @property
+    def has_aux(self) -> bool:
+        return bool(self.aux_llm_api_key.strip())
 
 
 @lru_cache

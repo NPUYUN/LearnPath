@@ -1,16 +1,36 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Input, Button, Avatar, Tag, Tooltip } from "antd";
+import { Input, Button, Avatar, Tag, Tooltip, Switch } from "antd";
 import SendOutlined from "@ant-design/icons/SendOutlined";
+import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import UserOutlined from "@ant-design/icons/UserOutlined";
 import RobotOutlined from "@ant-design/icons/RobotOutlined";
 import ReloadOutlined from "@ant-design/icons/ReloadOutlined";
 import dynamic from "next/dynamic";
 import PageHeader from "@/components/PageHeader";
-import { chat, checkHealth, getProfile, streamChat } from "@/lib/api";
+import {
+  appendChatHistory,
+  chat,
+  checkHealth,
+  formatLlmRouting,
+  getHealth,
+  getChatHistory,
+  getEvalStats,
+  getPath,
+  getProfile,
+  getRecommendations,
+  listResources,
+  streamChat,
+  streamTutor,
+  type ResourceRecommendation,
+  type ResourceSummary,
+} from "@/lib/api";
+import { clientNavigate } from "@/lib/clientNav";
 import { RESOURCE_CONFIG, mapApiType } from "@/lib/resourceConfig";
+import { playAssistantSpeech } from "@/lib/tts";
 import { useAppStore } from "@/store/appStore";
+import { useSettingsStore } from "@/store/settingsStore";
 
 // 懒加载重型 Markdown 渲染器，避免阻塞首屏
 const MarkdownPreview = dynamic(() => import("@/components/MarkdownPreview"), {
@@ -22,7 +42,7 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  resources?: { type: string; title: string }[];
+  resources?: ResourceSummary[];
   timestamp: Date;
   isTyping?: boolean;
 }
@@ -37,10 +57,10 @@ const QUICK_ACTIONS = [
 // 单条消息 —— 用 memo 确保流式更新时仅重绘当前气泡
 const MessageItem = memo(function MessageItem({
   msg,
-  onSend,
+  onResourceClick,
 }: {
   msg: Message;
-  onSend?: (text: string) => void;
+  onResourceClick?: (id: string) => void;
 }) {
   return (
     <div className={`lp-chat-row lp-chat-row--${msg.role}`}>
@@ -70,11 +90,21 @@ const MessageItem = memo(function MessageItem({
                   const cfg = RESOURCE_CONFIG[uiType];
                   return (
                     <div
-                      key={i}
+                      key={r.id || i}
+                      role={r.id ? "button" : undefined}
+                      tabIndex={r.id ? 0 : undefined}
                       className="resource-card lp-chat-resource-card"
                       style={{
                         borderColor: `${cfg.color}33`,
                         borderLeftColor: cfg.color,
+                        cursor: r.id ? "pointer" : undefined,
+                      }}
+                      onClick={() => r.id && onResourceClick?.(r.id)}
+                      onKeyDown={(e) => {
+                        if (r.id && (e.key === "Enter" || e.key === " ")) {
+                          e.preventDefault();
+                          onResourceClick?.(r.id);
+                        }
                       }}
                     >
                       <span style={{ color: cfg.color, fontSize: 16 }}>{cfg.icon}</span>
@@ -107,24 +137,89 @@ const MessageItem = memo(function MessageItem({
   );
 });
 
+const TUTOR_HINT = /解释|为什么|怎么|如何|不懂|疑问|辅导/;
+
+const STAGE_LABELS: Record<string, string> = {
+  deep_thinking: "深度思考中",
+  profile: "更新画像",
+  generate: "生成资源",
+  path: "规划路径",
+  eval: "学习评估",
+  tutor: "智能辅导",
+  running: "处理中",
+};
+
+const WELCOME_MSG: Message = {
+  id: "0",
+  role: "assistant",
+  content: `你好！我是 **学径 LearnPath 学习助手** 🎓\n\n我可以帮你：\n- 📊 **构建个人学习画像** — 通过对话了解你的学习情况\n- 📚 **生成个性化学习资源** — 文档、思维导图、题库、多模态说明、代码案例\n- 🗺️ **规划学习路径** — 科学分阶段的个性化学习计划\n- 🤔 **解答学习疑问** — 随时提问，RAG 知识库支撑\n\n请告诉我你想学习什么，或点击下方快捷操作开始 👇`,
+  timestamp: new Date(),
+};
+
 export default function ChatContent() {
   const userId = useAppStore((s) => s.userId);
   const setProfile = useAppStore((s) => s.setProfile);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "0",
-      role: "assistant",
-      content: `你好！我是 **学径 LearnPath 学习助手** 🎓\n\n我可以帮你：\n- 📊 **构建个人学习画像** — 通过对话了解你的学习情况\n- 📚 **生成个性化学习资源** — 文档、思维导图、题库、多模态说明、代码案例\n- 🗺️ **规划学习路径** — 科学分阶段的个性化学习计划\n- 🤔 **解答学习疑问** — 随时提问，RAG 知识库支撑\n\n请告诉我你想学习什么，或点击下方快捷操作开始 👇`,
-      timestamp: new Date(),
-    },
-  ]);
+  const setResources = useAppStore((s) => s.setResources);
+  const setResourceTitles = useAppStore((s) => s.setResourceTitles);
+  const setLearningPath = useAppStore((s) => s.setLearningPath);
+  const setEvalStats = useAppStore((s) => s.setEvalStats);
+  const addResources = useAppStore((s) => s.addResources);
+  const setPendingResourcePreviewId = useAppStore((s) => s.setPendingResourcePreviewId);
+  const streamSpeed = useSettingsStore((s) => s.streamSpeed);
+  const deepThinking = useSettingsStore((s) => s.deepThinking);
+  const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
+  const voice = useSettingsStore((s) => s.voice);
+  const setSettings = useSettingsStore((s) => s.setSettings);
+  const chunkSize = streamSpeed === "fast" ? 2 : 8;
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MSG]);
+  const [recommendations, setRecommendations] = useState<ResourceRecommendation[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
+  const [llmRouting, setLlmRouting] = useState("");
+  const [stageLabel, setStageLabel] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  const historyLoaded = useRef(false);
+
+  const handleResourceClick = useCallback(
+    (id: string) => {
+      setPendingResourcePreviewId(id);
+      clientNavigate("/resources");
+    },
+    [setPendingResourcePreviewId]
+  );
+
+  const syncAfterChat = useCallback(async () => {
+    try {
+      const [list, p, evalS, pathData] = await Promise.all([
+        listResources(userId),
+        getProfile(userId),
+        getEvalStats(userId),
+        getPath(userId),
+      ]);
+      setResources(list);
+      const titles: Record<string, string> = {};
+      list.forEach((r) => {
+        titles[r.id] = r.title;
+      });
+      setResourceTitles(titles);
+      if (p) setProfile(p);
+      setEvalStats(evalS);
+      if (pathData) setLearningPath(pathData);
+    } catch {
+      /* 部分接口可能尚未就绪 */
+    }
+  }, [userId, setResources, setResourceTitles, setProfile, setEvalStats, setLearningPath]);
 
   const probeBackend = useCallback(async () => {
+    const data = await getHealth();
+    if (data) {
+      setBackendOk(data.status === "ok");
+      setLlmRouting(formatLlmRouting(data.llm?.routing));
+      return;
+    }
     setBackendOk(await checkHealth());
+    setLlmRouting("");
   }, []);
 
   useEffect(() => {
@@ -132,6 +227,32 @@ export default function ChatContent() {
     const timer = setInterval(() => void probeBackend(), 15000);
     return () => clearInterval(timer);
   }, [probeBackend]);
+
+  useEffect(() => {
+    if (historyLoaded.current) return;
+    historyLoaded.current = true;
+    void getChatHistory(userId)
+      .then((rows) => {
+        if (!rows.length) return;
+        setMessages([
+          WELCOME_MSG,
+          ...rows.map((r) => ({
+            id: r.id,
+            role: r.role,
+            content: r.content,
+            resources: r.resources?.length ? r.resources : undefined,
+            timestamp: new Date(r.created_at),
+          })),
+        ]);
+      })
+      .catch(() => {});
+  }, [userId]);
+
+  useEffect(() => {
+    void getRecommendations(userId, 3)
+      .then(setRecommendations)
+      .catch(() => setRecommendations([]));
+  }, [userId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -150,6 +271,7 @@ export default function ChatContent() {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, userMsg]);
+      void appendChatHistory(userId, "user", content).catch(() => {});
       setLoading(true);
 
       const typingId = "typing";
@@ -168,41 +290,93 @@ export default function ChatContent() {
 
         let acc = "";
         let finalReply = "";
-        await streamChat(
-          userId,
-          content,
-          (token) => {
+        let msgResources: ResourceSummary[] | undefined;
+        const useTutor = TUTOR_HINT.test(content);
+
+        const formatStage = (stage: string) => STAGE_LABELS[stage] || stage;
+
+        const callbacks = {
+          onToken: (token: string) => {
             acc += token;
             setMessages((prev) =>
               prev.map((m) => (m.id === replyId ? { ...m, content: acc } : m))
             );
           },
-          (reply) => {
+          onProgress: (stage: string) => setStageLabel(formatStage(stage)),
+          onDone: (reply: string) => {
             finalReply = reply;
-          }
-        );
+          },
+          onError: (err: string) => {
+            throw new Error(err);
+          },
+        };
+
+        if (useTutor) {
+          await streamTutor(userId, content, "机器学习导论", callbacks, chunkSize, deepThinking);
+        } else {
+          await streamChat(
+            userId,
+            content,
+            {
+              ...callbacks,
+              onIntent: (intent: string) => setStageLabel(formatStage(intent)),
+              onProfile: (p) => setProfile(p),
+              onResources: (items) => {
+                msgResources = items;
+                addResources(
+                  items.map((it) => ({
+                    id: it.id,
+                    type: it.type,
+                    title: it.title,
+                    content: "",
+                    sources: [],
+                    topic: "",
+                  }))
+                );
+              },
+              onPath: () => setStageLabel(formatStage("path")),
+            },
+            chunkSize,
+            deepThinking
+          );
+        }
 
         const display = finalReply || acc;
-        if (display) {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === replyId ? { ...m, content: display } : m))
-          );
-        } else {
-          const res = await chat(userId, content);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === replyId
+              ? {
+                  ...m,
+                  content: display || "处理完成",
+                  resources: msgResources,
+                }
+              : m
+          )
+        );
+
+        let assistantText = display || "处理完成";
+        if (!display && !acc) {
+          const res = await chat(userId, content, deepThinking);
+          assistantText = res.reply || "处理完成";
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === replyId ? { ...m, content: res.reply || "处理完成" } : m
+              m.id === replyId ? { ...m, content: assistantText } : m
             )
           );
           if (res.profile) setProfile(res.profile);
         }
-
-        try {
-          const p = await getProfile(userId);
-          if (p) setProfile(p);
-        } catch {
-          /* 画像尚未生成时忽略 */
+        void appendChatHistory(userId, "assistant", assistantText, msgResources || []).catch(
+          () => {}
+        );
+        if (ttsEnabled) {
+          void playAssistantSpeech(assistantText, voice);
         }
+
+        setStageLabel("");
+        await syncAfterChat();
+        void getRecommendations(userId, 3)
+          .then(setRecommendations)
+          .catch(() => {});
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "未知错误";
         setMessages((prev) =>
@@ -219,7 +393,18 @@ export default function ChatContent() {
         setLoading(false);
       }
     },
-    [input, loading, userId, setProfile]
+    [
+      input,
+      loading,
+      userId,
+      setProfile,
+      chunkSize,
+      deepThinking,
+      addResources,
+      syncAfterChat,
+      ttsEnabled,
+      voice,
+    ]
   );
 
   const statusClass =
@@ -234,14 +419,17 @@ export default function ChatContent() {
       <PageHeader
         title="智能学习助手"
         subtitle="多智能体协同 · RAG 知识增强"
+        variant="immersive"
         icon={<RobotOutlined />}
         status={
           <span className={`lp-status-dot ${statusClass}`}>
-            {backendOk === false
-              ? "后端未连接 · 请运行 打开学径.bat"
-              : backendOk
-                ? "在线 · 讯飞星火 / Mock"
-                : "检测连接中…"}
+            {stageLabel
+              ? `处理中 · ${stageLabel}`
+              : backendOk === false
+                ? "后端未连接 · 请运行 打开学径.bat"
+                : backendOk
+                  ? `在线 · ${llmRouting || "LLM"}${deepThinking ? " · 深度思考" : ""}`
+                  : "检测连接中…"}
           </span>
         }
         extra={
@@ -249,24 +437,36 @@ export default function ChatContent() {
             <Button
               icon={<ReloadOutlined />}
               size="small"
-              onClick={() =>
-                setMessages([
-                  {
-                    id: "0",
-                    role: "assistant",
-                    content: "对话已清空，请重新开始 👋",
-                    timestamp: new Date(),
-                  },
-                ])
-              }
+              onClick={() => {
+                historyLoaded.current = true;
+                setMessages([{ ...WELCOME_MSG, content: "对话已清空，请重新开始 👋" }]);
+              }}
             />
           </Tooltip>
         }
       />
 
+      {recommendations.length > 0 && (
+        <div className="lp-chat-recommendations">
+          <span className="lp-muted-text" style={{ fontSize: 12, marginRight: 8 }}>
+            今日推荐
+          </span>
+          {recommendations.map((rec) => (
+            <Tag
+              key={rec.id}
+              className="lp-quick-tag"
+              color="processing"
+              onClick={() => handleResourceClick(rec.id)}
+            >
+              {rec.title}
+            </Tag>
+          ))}
+        </div>
+      )}
+
       <div className="lp-chat-messages">
         {messages.map((msg) => (
-          <MessageItem key={msg.id} msg={msg} onSend={send} />
+          <MessageItem key={msg.id} msg={msg} onResourceClick={handleResourceClick} />
         ))}
         <div ref={bottomRef} />
       </div>
@@ -286,7 +486,22 @@ export default function ChatContent() {
         </div>
       )}
 
-      <div className="lp-chat-composer">
+      <div className="lp-chat-composer-wrap">
+        <div className="lp-chat-composer-toolbar">
+          <Tooltip title="开启后推理更完整，响应略慢">
+            <Switch
+              size="small"
+              checked={deepThinking}
+              onChange={(v) => setSettings({ deepThinking: v })}
+              checkedChildren={<BulbOutlined />}
+              unCheckedChildren={<BulbOutlined />}
+            />
+          </Tooltip>
+          <span className="lp-muted-text" style={{ fontSize: 12 }}>
+            深度思考
+          </span>
+        </div>
+        <div className="lp-chat-composer">
         <Input.TextArea
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -298,7 +513,7 @@ export default function ChatContent() {
           }}
           placeholder="输入消息，按 Enter 发送（Shift+Enter 换行）"
           autoSize={{ minRows: 1, maxRows: 5 }}
-          style={{ borderRadius: 10, fontSize: 14, resize: "none" }}
+          style={{ borderRadius: 10, fontSize: 14, resize: "none", flex: 1 }}
           disabled={loading}
         />
         <Button
@@ -317,6 +532,7 @@ export default function ChatContent() {
         >
           发送
         </Button>
+        </div>
       </div>
     </div>
   );

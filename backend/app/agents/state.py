@@ -7,8 +7,10 @@ class AgentState(TypedDict, total=False):
     intent: str
     profile: dict[str, Any]
     resources: list[dict[str, Any]]
+    new_resources: list[dict[str, Any]]
     path: dict[str, Any]
     rag_context: str
     topic: str
     resource_types: list[str]
     reply: str
+    deep_thinking: bool

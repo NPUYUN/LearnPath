@@ -20,7 +20,7 @@ import SafetyOutlined from "@ant-design/icons/SafetyOutlined";
 import QqOutlined from "@ant-design/icons/QqOutlined";
 import WechatOutlined from "@ant-design/icons/WechatOutlined";
 import ThunderboltOutlined from "@ant-design/icons/ThunderboltOutlined";
-import { sendOtp, verifyOtp } from "@/lib/api";
+import { fetchDemoToken, sendOtp, verifyOtp } from "@/lib/api";
 import { preloadEcharts } from "@/lib/useEcharts";
 import { useAppStore } from "@/store/appStore";
 
@@ -33,6 +33,7 @@ const PAGE_CHUNKS = [
   () => import("@/components/pages/ResourcesContent"),
   () => import("@/components/pages/EvaluationContent"),
   () => import("@/components/pages/AccountContent"),
+  () => import("@/components/pages/DataInsightsContent"),
   () => import("@/components/pages/SettingsContent"),
 ];
 
@@ -68,10 +69,21 @@ export default function LoginContent() {
 
   useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current); }, []);
 
-  const handleDemoLogin = () => {
+  const handleDemoLogin = async () => {
     const values = demoForm.getFieldsValue() as { name: string; course: string };
     setSubmitting(true);
-    login(values.name || "演示学生", values.course || "机器学习导论");
+    try {
+      const user = await fetchDemoToken(values.name || "演示学生");
+      login(
+        values.name || user.display_name || "演示学生",
+        values.course || "机器学习导论",
+        user.user_id,
+        user.email
+      );
+    } catch (err: unknown) {
+      message.error(err instanceof Error ? err.message : "登录失败");
+      setSubmitting(false);
+    }
   };
 
   const handleSendOtp = async () => {

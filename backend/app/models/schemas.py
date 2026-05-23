@@ -10,6 +10,21 @@ ResourceType = Literal[
     "reading",
     "media",
     "code",
+    "ppt",
+    "design",
+    "project",
+]
+
+EXTENDED_RESOURCE_TYPES: list[ResourceType] = [
+    "doc",
+    "mindmap",
+    "quiz",
+    "reading",
+    "media",
+    "code",
+    "ppt",
+    "design",
+    "project",
 ]
 
 IntentType = Literal[
@@ -63,19 +78,23 @@ class ChatRequest(BaseModel):
     user_id: str = "demo"
     message: str
     stream: bool = True
+    chunk_size: int = 8
+    deep_thinking: bool = False
 
 
 class ChatResponse(BaseModel):
     reply: str
     profile: StudentProfile | None = None
     intent: IntentType = "chat"
+    resources: list[dict] = Field(default_factory=list)
+    path: dict | None = None
 
 
 class GenerateResourcesRequest(BaseModel):
     user_id: str = "demo"
     topic: str = "机器学习导论"
     resource_types: list[ResourceType] = Field(
-        default_factory=lambda: ["doc", "mindmap", "quiz", "reading", "code"]
+        default_factory=lambda: ["doc", "mindmap", "quiz", "reading", "media", "code"]
     )
 
 
@@ -83,11 +102,20 @@ class TutorRequest(BaseModel):
     user_id: str = "demo"
     question: str
     topic: str = ""
+    deep_thinking: bool = False
 
 
 class EvalSubmitRequest(BaseModel):
     user_id: str = "demo"
     quiz_id: str
+    answers: list[int] = Field(default_factory=list)
+
+
+class EvalSubmitResponse(BaseModel):
+    score: int
+    total: int
+    feedback: str
+    weak_topics: list[str] = Field(default_factory=list)
 
 
 # ── Auth schemas ──────────────────────────────────────────────────────────────
@@ -105,6 +133,11 @@ class AuthUser(BaseModel):
     user_id: str
     email: str
     display_name: str
+    access_token: str = ""
+
+
+class DemoTokenRequest(BaseModel):
+    display_name: str = "演示学生"
 
 
 class UserAccount(BaseModel):
@@ -149,3 +182,53 @@ class EvalStats(BaseModel):
     has_path: bool
     radar: RadarData
     recent_events: list[EvalEvent]
+
+
+class PathStepStatusUpdate(BaseModel):
+    status: Literal["pending", "in_progress", "done"]
+
+
+class ResourceRecommendation(BaseModel):
+    id: str
+    type: str
+    title: str
+    topic: str = ""
+    score: float = 0.0
+    reason: str = ""
+
+
+class UserPreferences(BaseModel):
+    user_id: str
+    starred_resource_ids: list[str] = Field(default_factory=list)
+    account_patch: dict = Field(default_factory=dict)
+
+
+class UserPreferencesUpdate(BaseModel):
+    starred_resource_ids: list[str] | None = None
+    account_patch: dict | None = None
+
+
+class ChatMessageItem(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    content: str
+    resources: list[dict] = Field(default_factory=list)
+    created_at: str = ""
+
+
+class ChatHistoryAppend(BaseModel):
+    user_id: str = "demo"
+    role: Literal["user", "assistant"]
+    content: str
+    resources: list[dict] = Field(default_factory=list)
+
+
+class TtsSpeakRequest(BaseModel):
+    text: str
+    voice: Literal["female", "male", "off"] = "female"
+
+
+class TtsSpeakResponse(BaseModel):
+    audio_base64: str = ""
+    format: str = "mp3"
+    provider: Literal["spark", "mock"] = "mock"

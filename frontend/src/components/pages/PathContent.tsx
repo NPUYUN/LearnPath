@@ -23,7 +23,14 @@ import LockOutlined from "@ant-design/icons/LockOutlined";
 import FireOutlined from "@ant-design/icons/FireOutlined";
 import TrophyOutlined from "@ant-design/icons/TrophyOutlined";
 import PageHeader from "@/components/PageHeader";
-import { getPath, refreshPath, listResources, type LearningPath, type PathStep } from "@/lib/api";
+import {
+  getPath,
+  refreshPath,
+  listResources,
+  updatePathStep,
+  type LearningPath,
+  type PathStep,
+} from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
 import ApartmentOutlined from "@ant-design/icons/ApartmentOutlined";
 
@@ -67,6 +74,7 @@ export default function PathContent() {
   const [resourceTitles, setResourceTitlesLocal] = useState<Record<string, string>>(cachedTitles);
   const [loading, setLoading] = useState(!cachedPath);
   const [refreshing, setRefreshing] = useState(false);
+  const [markingOrder, setMarkingOrder] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<string>("");
 
   const applyResourcesTitles = (resources: { id: string; title: string }[]) => {
@@ -112,11 +120,27 @@ export default function PathContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, cachedPath]);
 
+  const handleMarkDone = async (order: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMarkingOrder(order);
+    try {
+      const p = await updatePathStep(userId, order, "done");
+      setPath(p);
+      setLearningPath(p);
+      message.success(`步骤 ${order} 已标记完成`);
+    } catch (err: unknown) {
+      message.error(err instanceof Error ? err.message : "更新失败");
+    } finally {
+      setMarkingOrder(null);
+    }
+  };
+
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       const p = await refreshPath(userId);
       setPath(p);
+      setLearningPath(p);
       if (p.steps[0]) setExpanded(`step-${p.steps[0].order}`);
       message.success("学习路径已更新");
     } catch (e: unknown) {
@@ -183,12 +207,7 @@ export default function PathContent() {
         }
       />
       <div className="lp-page-body" style={{ maxWidth: 900 }}>
-      <Card
-        style={{
-          marginBottom: 20,
-          background: "linear-gradient(135deg, #e6f4ff 0%, #fff 100%)",
-        }}
-      >
+      <Card className="lp-path-progress-card" style={{ marginBottom: 20 }}>
         <Row align="middle" gutter={20}>
           <Col flex="auto">
             <Text strong style={{ fontSize: 15 }}>
@@ -199,14 +218,14 @@ export default function PathContent() {
               strokeColor={{ "0%": "#1677ff", "100%": "#52c41a" }}
               style={{ marginTop: 8 }}
               format={(p) => (
-                <span style={{ fontWeight: 700, color: "#1677ff" }}>{p}%</span>
+                <span style={{ fontWeight: 700, color: "var(--lp-primary)" }}>{p}%</span>
               )}
             />
           </Col>
           <Col>
             <div style={{ textAlign: "center" }}>
               <TrophyOutlined style={{ fontSize: 32, color: "#faad14" }} />
-              <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+              <div className="lp-muted-text" style={{ fontSize: 12, marginTop: 4 }}>
                 个性化路径
               </div>
             </div>
@@ -223,7 +242,10 @@ export default function PathContent() {
                     <span
                       style={{
                         fontSize: 12,
-                        color: mapStatus(s.status) === "in_progress" ? "#1677ff" : "#888",
+                        color:
+                          mapStatus(s.status) === "in_progress"
+                            ? "var(--lp-primary)"
+                            : "var(--lp-text-muted)",
                       }}
                     >
                       步骤{s.order}
@@ -319,7 +341,7 @@ export default function PathContent() {
               {isOpen && (
                 <>
                   <Divider style={{ margin: "12px 0" }} />
-                  <Paragraph style={{ color: "#555", marginBottom: 12 }}>
+                  <Paragraph className="lp-prose" style={{ marginBottom: 12 }}>
                     {step.objective}
                   </Paragraph>
                   <Text strong style={{ fontSize: 13 }}>
@@ -328,10 +350,19 @@ export default function PathContent() {
                   <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {renderStepResources(step)}
                   </div>
-                  {mapStatus(step.status) === "in_progress" && (
-                    <div style={{ marginTop: 14 }}>
+                  <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {mapStatus(step.status) !== "done" && (
                       <Button
                         type="primary"
+                        size="small"
+                        loading={markingOrder === step.order}
+                        onClick={(e) => handleMarkDone(step.order, e)}
+                      >
+                        标记完成
+                      </Button>
+                    )}
+                    {mapStatus(step.status) === "in_progress" && (
+                      <Button
                         size="small"
                         onClick={(e) => {
                           e.stopPropagation();
@@ -340,8 +371,8 @@ export default function PathContent() {
                       >
                         查看本阶段资源
                       </Button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </>
               )}
             </Card>

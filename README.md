@@ -32,7 +32,9 @@
 | 模块 | 说明 |
 |------|------|
 | **对话式学习画像** | 自然语言一轮对话提取 6+ 维学情，随学随更新 |
-| **多模态资源生成** | 讲解文档、思维导图（Mermaid）、习题、拓展阅读、多模态脚本、代码案例 |
+| **多模态资源生成** | 讲解文档、思维导图、习题、拓展阅读、多模态脚本、代码案例；可选「完整套件」含课件提纲/设计方案/实践项目 |
+| **个性化推送** | 基于学习事件与画像的今日推荐（侧栏/对话） |
+| **学习行为闭环** | 浏览/完成埋点、路径步骤 PATCH、对话历史持久化 |
 | **学习路径规划** | 依据画像与资源库生成有序学习步骤 |
 | **智能辅导** | 基于 RAG 的知识库问答（TutorAgent） |
 | **学习效果评估** | 评估报告与可视化图表（EvalAgent） |
@@ -44,7 +46,9 @@
 - 登录后初始化进度条跟踪 API 请求（profile / resources / path），全部就绪后才进入主界面
 - Keep-alive 路由：页面首次挂载后永不卸载，切换仅修改 CSS `display`，响应即时
 
-默认课程知识库：**机器学习导论**（`data/knowledge_base/ml_intro`）。无星火 API Key 时保持 `LLM_MOCK=true` 即可本地演示。
+默认课程知识库：**机器学习导论**（`data/knowledge_base/ml_intro`）。
+
+**LLM 路由**：配置 `SPARK_API_KEY` 时，画像/辅导等主任务走星火；推荐润色、质检等走辅助云端模型（`AUX_LLM_*`，如硅基流动/DeepSeek）。无星火 Key 时主任务默认走辅助模型。无任何 Key 时可设 `LLM_MOCK=true` 纯本地 Mock。
 
 ---
 
@@ -86,7 +90,7 @@ cp .env.example .env
 cp frontend/.env.local.example frontend/.env.local
 ```
 
-编辑 `.env`：无密钥时保持 `LLM_MOCK=true`；接入星火时填写 `SPARK_API_KEY` 并设 `LLM_MOCK=false`。
+编辑 `.env`：至少配置 `AUX_LLM_API_KEY`（硅基流动/DeepSeek 等）或 `SPARK_API_KEY`；无任何 Key 时设 `LLM_MOCK=true`。
 
 ### 2. 启动后端
 
@@ -181,15 +185,23 @@ A3/
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `LLM_MOCK` | 无星火密钥时使用 Mock LLM | `true` |
-| `SPARK_API_KEY` | 讯飞星火 API Key | 空 |
-| `SPARK_BASE_URL` | OpenAI 兼容 Base URL | `https://spark-api-open.xf-yun.com/v1` |
-| `SPARK_MODEL` | 模型 ID | `generalv3.5` |
+| `LLM_MOCK` | 强制 Mock（无任何 Key 时演示） | `false` |
+| `SPARK_API_KEY` | 讯飞星火 API Key（主任务） | 空 |
+| `SPARK_BASE_URL` | 星火 OpenAI 兼容 Base URL | `https://spark-api-open.xf-yun.com/v1` |
+| `SPARK_MODEL` | 星火模型 ID | `generalv3.5` |
+| `AUX_LLM_API_KEY` | 辅助云端 LLM Key（次要任务 / 无星火时的主任务） | 空 |
+| `AUX_LLM_BASE_URL` | 辅助 LLM Base URL | `https://api.siliconflow.cn/v1` |
+| `AUX_LLM_MODEL` | 辅助模型 ID | `Qwen/Qwen2.5-7B-Instruct` |
 | `DATABASE_URL` | SQLite 路径 | `./storage/learnpath.db` |
 | `CHROMA_PERSIST_DIR` | 向量库目录 | `./storage/chroma` |
 | `KNOWLEDGE_BASE_DIR` | 课程文档目录 | `./data/knowledge_base/ml_intro` |
 | `CORS_ORIGINS` | 允许的前端来源（逗号分隔） | `http://localhost:3000` |
 | `NEXT_PUBLIC_API_BASE` | 前端请求的后端地址（`frontend/.env.local`） | `http://localhost:8000` |
+| `JWT_SECRET` | JWT 签名密钥（生产务必修改） | 见 `.env.example` |
+| `JWT_EXPIRE_HOURS` | 令牌有效期（小时） | `72` |
+| `AUTO_PATH_AFTER_GENERATE` | 资源生成后自动规划路径 | `true` |
+| `DEV_RELOAD` | `start.ps1` 是否为 uvicorn 启用 `--reload` | `true` |
+| `SPARK_TTS_URL` | 讯飞 TTS 合成地址（可选） | 空 |
 
 ---
 
@@ -218,11 +230,23 @@ A3/
 | POST | `/api/chat` | 对话（JSON 响应） |
 | POST | `/api/chat/stream` | 对话（SSE 流式） |
 | GET | `/api/profile/{user_id}` | 获取学习画像 |
-| POST | `/api/resources/generate` | 触发多类资源生成 |
+| POST | `/api/resources/generate` | 触发多类资源生成（默认 6 类） |
+| POST | `/api/resources/generate/stream` | 资源生成 SSE 进度流 |
 | GET | `/api/resources` | 资源列表（`?user_id=`） |
+| GET | `/api/resources/recommendations` | 画像推送 Top N（`?user_id=&limit=`） |
+| POST | `/api/resources/{id}/view` | 记录资源浏览事件 |
+| POST | `/api/resources/{id}/complete` | 标记资源完成 |
 | GET | `/api/path/{user_id}` | 获取学习路径 |
+| PATCH | `/api/path/{user_id}/steps/{order}` | 更新步骤状态（`done` 等） |
 | POST | `/api/path/{user_id}/refresh` | 重新规划路径 |
+| GET | `/api/chat/history/{user_id}` | 对话历史 |
+| POST | `/api/chat/history` | 追加对话消息 |
+| GET/PATCH | `/api/preferences/{user_id}` | 收藏与 demo 资料 |
+| POST | `/api/tts/speak` | TTS 合成（无 Key 时 mock） |
+| POST | `/api/auth/demo-token` | 演示账号 JWT |
 | POST | `/api/tutor/ask` | 辅导问答 |
+| POST | `/api/tutor/stream` | 辅导 SSE 流式 |
+| POST | `/api/eval/submit` | 提交测验评估 |
 
 完整交互式文档：<http://localhost:8000/docs>
 
@@ -288,6 +312,7 @@ cd frontend && npm run dev
 | [docs/03-开源参考与协议.md](./docs/03-开源参考与协议.md) | 参考项目与依赖许可证 |
 | [docs/04-系统开发说明书-提纲.md](./docs/04-系统开发说明书-提纲.md) | 初赛配套文档骨架 |
 | [docs/05-界面功能与测试手册.md](./docs/05-界面功能与测试手册.md) | **各界面功能、测试步骤、页面关联与 E2E 场景** |
+| [docs/06-LLM双通道路由.md](./docs/06-LLM双通道路由.md) | 星火 / 辅助云端模型路由与 `.env` 配置 |
 | [A3赛题内容.md](./A3赛题内容.md) | 赛题全文、评分占比、提交要求 |
 
 讯飞星火接入：[HTTP 接口文档](https://www.xfyun.cn/doc/spark/HTTP%E8%B0%83%E7%94%A8%E6%96%87%E6%A1%A3.html)

@@ -14,6 +14,7 @@ export type AppSettings = {
   fontSize: FontSizePreset;
   streamSpeed: StreamSpeed;
   reduceMotion: boolean;
+  deepThinking: boolean;
 };
 
 const DEFAULTS: AppSettings = {
@@ -23,6 +24,7 @@ const DEFAULTS: AppSettings = {
   fontSize: "normal",
   streamSpeed: "normal",
   reduceMotion: false,
+  deepThinking: false,
 };
 
 type SettingsState = AppSettings & {
@@ -58,6 +60,7 @@ export const useSettingsStore = create<SettingsState>()(
         fontSize: s.fontSize,
         streamSpeed: s.streamSpeed,
         reduceMotion: s.reduceMotion,
+        deepThinking: s.deepThinking,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {

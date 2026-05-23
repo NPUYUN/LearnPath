@@ -1,14 +1,14 @@
-import type { NavRoute } from "@/hooks/navRoutes";
-import { isNavRoute } from "@/hooks/navRoutes";
+import type { AppRoute } from "@/hooks/navRoutes";
+import { isNavRoute, isStandaloneRoute } from "@/hooks/navRoutes";
 
-let pushRoute: ((path: NavRoute) => void) | null = null;
+let pushRoute: ((path: AppRoute) => void) | null = null;
 
-export function registerClientNav(fn: (path: NavRoute) => void) {
+export function registerClientNav(fn: (path: AppRoute) => void) {
   pushRoute = fn;
 }
 
-export function clientNavigate(path: NavRoute) {
-  if (!isNavRoute(path)) return;
+export function clientNavigate(path: AppRoute) {
+  if (!isNavRoute(path) && !isStandaloneRoute(path)) return;
   if (pushRoute) {
     pushRoute(path);
     return;

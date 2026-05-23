@@ -5,6 +5,7 @@ import SettingOutlined from "@ant-design/icons/SettingOutlined";
 import SoundOutlined from "@ant-design/icons/SoundOutlined";
 import BgColorsOutlined from "@ant-design/icons/BgColorsOutlined";
 import ThunderboltOutlined from "@ant-design/icons/ThunderboltOutlined";
+import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import PageHeader from "@/components/PageHeader";
 import {
   useSettingsStore,
@@ -23,6 +24,7 @@ export default function SettingsContent() {
   const fontSize = useSettingsStore((s) => s.fontSize);
   const streamSpeed = useSettingsStore((s) => s.streamSpeed);
   const reduceMotion = useSettingsStore((s) => s.reduceMotion);
+  const deepThinking = useSettingsStore((s) => s.deepThinking);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const resetSettings = useSettingsStore((s) => s.resetSettings);
 
@@ -144,6 +146,19 @@ export default function SettingsContent() {
                   ]}
                 />
               </div>
+              <div className="lp-settings-row">
+                <span>
+                  <BulbOutlined style={{ marginRight: 6, color: "#faad14" }} />
+                  深度思考
+                </span>
+                <Switch
+                  checked={deepThinking}
+                  onChange={(v) => setSettings({ deepThinking: v })}
+                />
+              </div>
+              <Paragraph type="secondary" style={{ margin: "0 0 8px", fontSize: 13 }}>
+                开启后回复更慢、推理更完整（先分析要点再结论）；与对话页开关同步。
+              </Paragraph>
               <Divider style={{ margin: "16px 0" }} />
               <Text type="secondary">
                 赛题核心能力（对话画像、资源生成、学习路径、评估）在侧栏主菜单中；本页为产品体验增强，非赛题硬性要求。
