@@ -62,3 +62,16 @@ export const EXTENDED_RESOURCE_TYPES = [
   "design",
   "project",
 ] as const;
+
+/** 生成弹窗可选资源类型（API 类型 + UI 配置键） */
+export const GENERATABLE_RESOURCE_TYPES = [
+  { api: "doc", ui: "document" as UiResourceType },
+  { api: "mindmap", ui: "mindmap" as UiResourceType },
+  { api: "quiz", ui: "quiz" as UiResourceType },
+  { api: "reading", ui: "reading" as UiResourceType },
+  { api: "media", ui: "video" as UiResourceType },
+  { api: "code", ui: "code" as UiResourceType },
+  { api: "ppt", ui: "ppt" as UiResourceType },
+  { api: "design", ui: "design" as UiResourceType },
+  { api: "project", ui: "project" as UiResourceType },
+] as const;

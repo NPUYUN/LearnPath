@@ -15,6 +15,17 @@ def mock_chat_response(
     system_msg = next((m["content"] for m in messages if m.get("role") == "system"), "")
     snippet = user_msg[:80] + ("…" if len(user_msg) > 80 else "")
 
+    if "资源生成 Agent" in system_msg or "资源生成" in system_msg:
+        return (
+            f"# {snippet}\n\n"
+            "## 学习目标\n"
+            "掌握主题核心概念（Mock 模式示例输出）。\n\n"
+            "## 正文\n"
+            "基于资料库/全网摘要生成的占位内容。配置星火 API 后将输出完整 LLM 生成结果。\n\n"
+            "## 小结\n"
+            "请完成配套练习巩固理解。"
+        )
+
     if quick:
         return f"[辅助模型 Mock] {snippet[:60]} — 已记录推荐上下文。"
 
@@ -79,6 +90,6 @@ class MockLLMClient:
         content = await self.chat(
             messages, temperature=temperature, deep_thinking=deep_thinking
         )
-        step = 12 if self.quick else 8
+        step = 2 if self.quick else 1
         for i in range(0, len(content), step):
             yield content[i : i + step]

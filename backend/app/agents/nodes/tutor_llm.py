@@ -1,58 +1,66 @@
-"""辅导节点与流式接口共用的 LLM 消息构建与回复后处理。"""
+"""辅导 LLM：与 /api/tutor 及流式接口共用，走智能对话管线。"""
 
-from app.core.guardrails import attach_sources, filter_sensitive
-from app.core.prompts import tutor_system, tutor_temperature
-from app.rag.retriever import retrieve
+from app.services.chat_intelligence_service import (
+    build_intelligent_chat_messages,
+    postprocess_multimodal_answer,
+    retrieve_resource_library_context,
+    run_intelligent_chat,
+)
 
 
 async def build_tutor_messages(
     question: str,
     topic: str,
     *,
+    user_id: str = "demo",
+    profile: dict | None = None,
+    resources: list[dict] | None = None,
     deep_thinking: bool = False,
 ) -> tuple[list[dict[str, str]], list[dict], str]:
-    chunks = await retrieve(question or topic, k=4)
-    context = "\n".join(c["text"] for c in chunks)
-    messages = [
-        {"role": "system", "content": tutor_system(deep_thinking)},
-        {
-            "role": "user",
-            "content": f"主题：{topic}\n问题：{question}\n\n知识库：{context}",
-        },
-    ]
-    return messages, chunks, context
+    from app.services.chat_intelligence_service import classify_question_type
+
+    qtype = classify_question_type(question)
+    retrieval = await retrieve_resource_library_context(user_id, question, resources)
+    messages, chunks, mode = build_intelligent_chat_messages(
+        question=question,
+        topic=topic,
+        question_type=qtype,
+        profile=profile,
+        retrieval=retrieval,
+        deep_thinking=deep_thinking,
+    )
+    return messages, chunks, mode
 
 
-def postprocess_tutor_answer(answer: str, chunks: list[dict], topic: str) -> str:
-    answer = filter_sensitive(answer)
-    if "```mermaid" not in answer:
-        answer += (
-            "\n\n### 知识关系图解\n\n```mermaid\nflowchart LR\n"
-            f"  A[{topic}] --> B[核心概念]\n  B --> C[练习巩固]\n```\n"
-        )
-    if "分镜" not in answer:
-        answer += (
-            "\n\n### 短视频分镜脚本\n"
-            "1. 开场：学习目标\n2. 讲解：关键公式/直觉\n3. 例题：一步推导\n4. 小结：易错点\n"
-        )
-    return attach_sources(answer, chunks)
+def postprocess_tutor_answer(
+    answer: str,
+    chunks: list[dict],
+    topic: str,
+    *,
+    question_type: str = "concept",
+    mode: str = "direct",
+) -> str:
+    return postprocess_multimodal_answer(
+        answer, question_type, chunks, topic, mode=mode
+    )
 
 
 async def run_tutor_llm(
     question: str,
     topic: str,
     *,
+    user_id: str = "demo",
+    profile: dict | None = None,
+    resources: list[dict] | None = None,
     deep_thinking: bool = False,
 ) -> str:
-    from app.core.llm import get_primary_llm
-
-    messages, chunks, _ctx = await build_tutor_messages(
-        question, topic, deep_thinking=deep_thinking
-    )
-    llm = get_primary_llm()
-    raw = await llm.chat(
-        messages,
-        temperature=tutor_temperature(deep_thinking),
+    result = await run_intelligent_chat(
+        user_id,
+        question,
+        topic,
+        profile=profile,
+        resources=resources,
         deep_thinking=deep_thinking,
+        update_profile=False,
     )
-    return postprocess_tutor_answer(raw, chunks, topic)
+    return result.get("reply", "")

@@ -5,9 +5,7 @@ import {
   Button,
   Form,
   Input,
-  Select,
   Typography,
-  Tabs,
   Tooltip,
   message,
   Divider,
@@ -37,14 +35,10 @@ const PAGE_CHUNKS = [
   () => import("@/components/pages/SettingsContent"),
 ];
 
-const COURSE_OPTIONS = [
-  { value: "机器学习导论", label: "机器学习导论" },
-  { value: "深度学习基础", label: "深度学习基础" },
-  { value: "数据结构与算法", label: "数据结构与算法" },
-  { value: "计算机网络", label: "计算机网络" },
-];
-
 const OTP_COOLDOWN = 60;
+
+/** 演示账号示例数据中的默认课程（登录后可在个人主页修改） */
+const DEMO_COURSE = "机器学习导论";
 
 export default function LoginContent() {
   const login = useAppStore((s) => s.login);
@@ -61,7 +55,6 @@ export default function LoginContent() {
   const [verifying, setVerifying] = useState(false);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // 登录页静默预加载（无进度 UI，登录后由 InitLoadingScreen 展示）
   useEffect(() => {
     PAGE_CHUNKS.forEach((fn) => void fn().catch(() => {}));
     void preloadEcharts().catch(() => {});
@@ -70,13 +63,13 @@ export default function LoginContent() {
   useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current); }, []);
 
   const handleDemoLogin = async () => {
-    const values = demoForm.getFieldsValue() as { name: string; course: string };
+    const values = demoForm.getFieldsValue() as { name: string };
     setSubmitting(true);
     try {
       const user = await fetchDemoToken(values.name || "演示学生");
       login(
         values.name || user.display_name || "演示学生",
-        values.course || "机器学习导论",
+        DEMO_COURSE,
         user.user_id,
         user.email
       );
@@ -128,7 +121,7 @@ export default function LoginContent() {
       setSubmitting(true);
       login(
         user.display_name || user.email.split("@")[0],
-        "机器学习导论",
+        "",
         user.user_id,
         user.email
       );
@@ -164,133 +157,124 @@ export default function LoginContent() {
           </div>
         </div>
 
-        <Tabs
-          activeKey={activeTab}
-          onChange={(k) => setActiveTab(k as "demo" | "real")}
-          items={[
-            {
-              key: "demo",
-              label: (
-                <span>
-                  <ThunderboltOutlined /> 快速体验
-                </span>
-              ),
-              children: (
-                <div>
-                  <Form
-                    form={demoForm}
-                    layout="vertical"
-                    initialValues={{ name: "演示学生", course: "机器学习导论" }}
-                    onFinish={handleDemoLogin}
-                  >
-                    <Form.Item
-                      label="学习者姓名"
-                      name="name"
-                      rules={[{ required: true, message: "请输入姓名" }]}
-                    >
-                      <Input size="large" placeholder="请输入你的姓名" />
-                    </Form.Item>
-                    <Form.Item label="学习课程" name="course">
-                      <Select size="large" options={COURSE_OPTIONS} />
-                    </Form.Item>
-                    <Form.Item style={{ marginBottom: 0 }}>
-                      <Button
-                        type="primary"
-                        htmlType="submit"
-                        size="large"
-                        icon={<ArrowRightOutlined />}
-                        iconPosition="end"
-                        loading={submitting}
-                        block
-                        className="login-submit-btn"
-                      >
-                        开始学习
-                      </Button>
-                    </Form.Item>
-                  </Form>
-                  <div className="login-hint login-hint--blue">
-                    💡 <strong>演示模式：</strong>默认账号 userId=&quot;demo&quot;，点击即可体验完整功能。
-                  </div>
-                </div>
-              ),
-            },
-            {
-              key: "real",
-              label: (
-                <span>
-                  <MailOutlined /> 登录 / 注册
-                </span>
-              ),
-              children: (
-                <div>
-                  <div className="login-field">
-                    <label>邮箱地址</label>
-                    <div className="login-field-row">
-                      <Input
-                        size="large"
-                        prefix={<MailOutlined style={{ color: "#bbb" }} />}
-                        placeholder="请输入邮箱"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        onPressEnter={!otpSent ? handleSendOtp : undefined}
-                      />
-                      <Button
-                        size="large"
-                        onClick={handleSendOtp}
-                        loading={sendingOtp}
-                        disabled={countdown > 0}
-                      >
-                        {countdown > 0 ? `${countdown}s` : otpSent ? "重发" : "发送验证码"}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="login-field">
-                    <label>验证码</label>
-                    <Input
-                      size="large"
-                      prefix={<SafetyOutlined style={{ color: "#bbb" }} />}
-                      placeholder="6 位验证码"
-                      maxLength={6}
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                      onPressEnter={handleOtpLogin}
-                      style={{ letterSpacing: 4, fontWeight: 600 }}
-                    />
-                  </div>
-                  <Button
-                    type="primary"
-                    size="large"
-                    icon={<ArrowRightOutlined />}
-                    iconPosition="end"
-                    onClick={handleOtpLogin}
-                    loading={verifying || submitting}
-                    disabled={!otpSent || otp.length < 6}
-                    block
-                    className="login-submit-btn"
-                  >
-                    登录 / 注册
-                  </Button>
-                  <Divider style={{ margin: "18px 0", fontSize: 12 }}>或使用社交账号</Divider>
-                  <div className="login-social">
-                    <Tooltip title="需配置 QQ AppID">
-                      <Button size="large" icon={<QqOutlined />} disabled block>
-                        QQ
-                      </Button>
-                    </Tooltip>
-                    <Tooltip title="需配置微信 AppID">
-                      <Button size="large" icon={<WechatOutlined />} disabled block>
-                        微信
-                      </Button>
-                    </Tooltip>
-                  </div>
-                  <div className="login-hint login-hint--warn">
-                    ⚠️ 未配置 SMTP 时验证码以弹窗展示；OTP 5 分钟有效，新邮箱自动注册。
-                  </div>
-                </div>
-              ),
-            },
-          ]}
-        />
+        <div className="login-tab-bar">
+          <button
+            type="button"
+            className={`login-tab${activeTab === "demo" ? " login-tab--active" : ""}`}
+            onClick={() => setActiveTab("demo")}
+          >
+            <ThunderboltOutlined /> 快速体验
+          </button>
+          <button
+            type="button"
+            className={`login-tab${activeTab === "real" ? " login-tab--active" : ""}`}
+            onClick={() => setActiveTab("real")}
+          >
+            <MailOutlined /> 登录 / 注册
+          </button>
+        </div>
+
+        {activeTab === "demo" ? (
+          <div>
+            <Form
+              form={demoForm}
+              layout="vertical"
+              initialValues={{ name: "演示学生" }}
+              onFinish={handleDemoLogin}
+            >
+              <Form.Item
+                label="学习者姓名"
+                name="name"
+                rules={[{ required: true, message: "请输入姓名" }]}
+              >
+                <Input size="large" placeholder="请输入你的姓名" />
+              </Form.Item>
+              <Form.Item style={{ marginBottom: 0 }}>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  size="large"
+                  icon={<ArrowRightOutlined />}
+                  iconPosition="end"
+                  loading={submitting}
+                  block
+                  className="login-submit-btn"
+                >
+                  开始学习
+                </Button>
+              </Form.Item>
+            </Form>
+            <div className="login-hint login-hint--blue">
+              💡 <strong>演示模式：</strong>默认账号 userId=&quot;demo&quot;，一键体验完整示例数据；主修课程可在登录后于「个人主页」修改。
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="login-field">
+              <label>邮箱地址</label>
+              <div className="login-field-row">
+                <Input
+                  size="large"
+                  prefix={<MailOutlined style={{ color: "#bbb" }} />}
+                  placeholder="请输入邮箱"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onPressEnter={!otpSent ? handleSendOtp : undefined}
+                />
+                <Button
+                  size="large"
+                  onClick={handleSendOtp}
+                  loading={sendingOtp}
+                  disabled={countdown > 0}
+                >
+                  {countdown > 0 ? `${countdown}s` : otpSent ? "重发" : "发送验证码"}
+                </Button>
+              </div>
+            </div>
+            <div className="login-field">
+              <label>验证码</label>
+              <Input
+                size="large"
+                prefix={<SafetyOutlined style={{ color: "#bbb" }} />}
+                placeholder="6 位验证码"
+                maxLength={6}
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+                onPressEnter={handleOtpLogin}
+                style={{ letterSpacing: 4, fontWeight: 600 }}
+              />
+            </div>
+            <Button
+              type="primary"
+              size="large"
+              icon={<ArrowRightOutlined />}
+              iconPosition="end"
+              onClick={handleOtpLogin}
+              loading={verifying || submitting}
+              disabled={!otpSent || otp.length < 6}
+              block
+              className="login-submit-btn"
+            >
+              登录 / 注册
+            </Button>
+            <Divider style={{ margin: "18px 0", fontSize: 12 }}>或使用社交账号</Divider>
+            <div className="login-social">
+              <Tooltip title="需配置 QQ AppID">
+                <Button size="large" icon={<QqOutlined />} disabled block>
+                  QQ
+                </Button>
+              </Tooltip>
+              <Tooltip title="需配置微信 AppID">
+                <Button size="large" icon={<WechatOutlined />} disabled block>
+                  微信
+                </Button>
+              </Tooltip>
+            </div>
+            <div className="login-hint login-hint--warn">
+              ⚠️ 未配置 SMTP 时验证码以弹窗展示；OTP 5 分钟有效，新邮箱自动注册。
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     )
 
     llm_mock: bool = False
+
+    # Kimi / Moonshot（测试与生产均可；配置后优先于星火与辅助通道）
+    kimi_api_key: str = ""
+    kimi_base_url: str = "https://api.moonshot.cn/v1"
+    kimi_model: str = "moonshot-v1-32k"
+
     spark_api_key: str = ""
     spark_base_url: str = "https://spark-api-open.xf-yun.com/v1"
     spark_model: str = "generalv3.5"
@@ -52,6 +58,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def has_kimi(self) -> bool:
+        return bool(self.kimi_api_key.strip())
 
     @property
     def has_spark(self) -> bool:

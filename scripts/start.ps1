@@ -1,19 +1,69 @@
 # LearnPath one-click launcher (Windows PowerShell 5.1+)
-# Usage: .\scripts\start.ps1  |  .\scripts\start.ps1 -NoBrowser
+# Usage: .\scripts\start.ps1  |  .\scripts\start.ps1 -NoBrowser  |  .\scripts\start.ps1 -ShowWindows
 param(
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$ShowWindows
 )
 
 # 不用 Stop：避免 Get-NetTCPConnection 等 cmdlet 缺失时整脚本闪退
 $ErrorActionPreference = "Continue"
 
 $Root = $PSScriptRoot | Split-Path -Parent
+$LogDir = Join-Path $Root "storage\logs"
 if (-not (Test-Path $Root)) {
     Write-Host "ERROR: cannot resolve project root." -ForegroundColor Red
     exit 1
 }
 
 function Write-Step([string]$msg) { Write-Host "  $msg" }
+
+function Ensure-LogDir {
+    if (-not (Test-Path $LogDir)) {
+        New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+    }
+}
+
+function Start-BackgroundLoggedProcess {
+    param(
+        [string]$Label,
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory,
+        [string]$LogFile
+    )
+    Ensure-LogDir
+    $errLog = "$LogFile.err"
+    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "`n==== $ts $Label ====" | Out-File -FilePath $LogFile -Append -Encoding utf8
+    Start-Process -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -WorkingDirectory $WorkingDirectory `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $LogFile `
+        -RedirectStandardError $errLog | Out-Null
+}
+
+function Get-NextDevLaunch {
+    param(
+        [string]$FrontDir,
+        [int]$Port = 3000
+    )
+    $node = (Get-Command node -ErrorAction SilentlyContinue).Source
+    if (-not $node) { return $null }
+    foreach ($candidate in @(
+        (Join-Path $FrontDir "node_modules\next\dist\bin\next"),
+        (Join-Path $FrontDir "node_modules\next\dist\bin\next.js")
+    )) {
+        if (Test-Path $candidate) {
+            return @{
+                FilePath = $node
+                ArgumentList = @($candidate, "dev", "-p", "$Port")
+                WorkingDirectory = $FrontDir
+            }
+        }
+    }
+    return $null
+}
 
 function Wait-HttpOk {
     param(
@@ -61,6 +111,7 @@ function Ensure-FrontendEnv {
         @(
             "# managed by scripts/start.ps1"
             "NEXT_PUBLIC_API_BASE="
+            "API_PROXY_TARGET=http://127.0.0.1:8000"
         ) | Set-Content -Path $localPath -Encoding UTF8
     } catch {
         Write-Step "frontend .env.local skipped: $($_.Exception.Message)"
@@ -163,32 +214,59 @@ try {
 
     Write-Host "[3/5] backend http://127.0.0.1:8000 ..."
     $py = $paths.Python
-    $reloadFlag = ""
+    $uvicornArgs = @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000")
     try {
         $envPath = Join-Path $Root ".env"
         if (Test-Path $envPath) {
             $envText = Get-Content $envPath -Raw -Encoding UTF8
             if ($envText -match '(?m)^\s*DEV_RELOAD\s*=\s*true\s*$') {
-                $reloadFlag = " --reload"
-                Write-Step "DEV_RELOAD=true, uvicorn hot reload enabled"
+                if ($ShowWindows) {
+                    $uvicornArgs += "--reload"
+                    Write-Step "DEV_RELOAD=true, uvicorn hot reload enabled"
+                } else {
+                    Write-Step "DEV_RELOAD ignored in background mode (use -ShowWindows for hot reload)"
+                }
             }
         }
     } catch {}
-    $backendArgs = '/k title LearnPath Backend & "' + $py + '" -m uvicorn app.main:app --host 127.0.0.1 --port 8000' + $reloadFlag
-    Start-Process -FilePath "cmd.exe" -ArgumentList $backendArgs -WorkingDirectory $paths.BackendDir -WindowStyle Normal
+    $backendLog = Join-Path $LogDir "backend.log"
+    if ($ShowWindows) {
+        Start-Process -FilePath $py -ArgumentList $uvicornArgs -WorkingDirectory $paths.BackendDir -WindowStyle Normal | Out-Null
+    } else {
+        Start-BackgroundLoggedProcess -Label "backend" -FilePath $py -ArgumentList $uvicornArgs `
+            -WorkingDirectory $paths.BackendDir -LogFile $backendLog
+    }
 
     $backendOk = Wait-HttpOk -Url "http://127.0.0.1:8000/api/health" -TimeoutSec 90 -Label "backend"
     if (-not $backendOk) {
         Write-Host ""
-        Write-Host "WARN: backend not ready in 90s. Check the LearnPath Backend window." -ForegroundColor Yellow
+        if ($ShowWindows) {
+            Write-Host "WARN: backend not ready in 90s. Check the backend console window." -ForegroundColor Yellow
+        } else {
+            Write-Host "WARN: backend not ready in 90s. Check storage\logs\backend.log" -ForegroundColor Yellow
+        }
     } else {
         Write-Host "      backend ready"
     }
 
     Write-Host "[4/5] frontend http://localhost:3000 ..."
     $frontDir = Join-Path $Root "frontend"
-    $frontendArgs = '/k title LearnPath Frontend & cd /d "' + $frontDir + '" & set PORT=3000&& npm run dev'
-    Start-Process -FilePath "cmd.exe" -ArgumentList $frontendArgs -WindowStyle Normal
+    $frontendLog = Join-Path $LogDir "frontend.log"
+    if ($ShowWindows) {
+        $frontendCmd = 'title LearnPath Frontend & cd /d "' + $frontDir + '" & set PORT=3000&& npm run dev'
+        Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $frontendCmd) -WorkingDirectory $frontDir -WindowStyle Normal | Out-Null
+    } else {
+        $nextLaunch = Get-NextDevLaunch -FrontDir $frontDir -Port 3000
+        if ($nextLaunch) {
+            Start-BackgroundLoggedProcess -Label "frontend" -FilePath $nextLaunch.FilePath `
+                -ArgumentList $nextLaunch.ArgumentList -WorkingDirectory $nextLaunch.WorkingDirectory -LogFile $frontendLog
+        } else {
+            Ensure-LogDir
+            $cmdLine = 'cmd /c "cd /d "' + $frontDir + '" && set PORT=3000&& npm run dev >> "' + $frontendLog + '" 2>&1"'
+            $ws = New-Object -ComObject WScript.Shell
+            [void]$ws.Run($cmdLine, 0, $false)
+        }
+    }
 
     $frontUrl = $null
     for ($i = 1; $i -le 60; $i++) {
@@ -217,6 +295,16 @@ try {
         Write-Host "Opening browser: $frontUrl"
         Start-Process $frontUrl
     }
+
+    if ($ShowWindows) {
+        Write-Host "  Service consoles visible (debug mode)."
+    } else {
+        Write-Host "  Services run in background (no console windows)."
+        Write-Host "  Logs: storage\logs\backend.log, storage\logs\frontend.log"
+        Write-Host "  Stop: .\scripts\stop.ps1  or  停止学径.bat"
+        Write-Host "  Debug: .\scripts\start.ps1 -ShowWindows"
+    }
+    Write-Host ""
 
     # 后端慢启动不算致命错误，避免 bat 误判失败
     exit 0

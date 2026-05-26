@@ -14,3 +14,5 @@ class AgentState(TypedDict, total=False):
     resource_types: list[str]
     reply: str
     deep_thinking: bool
+    library_id: str
+    generation_context: dict[str, Any]

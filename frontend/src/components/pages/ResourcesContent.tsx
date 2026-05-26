@@ -5,14 +5,17 @@ import {
   Button,
   Typography,
   Modal,
-  Space,
   Input,
   Spin,
   message,
   Radio,
+  Select,
+  Upload,
   Divider,
 } from "antd";
+import type { UploadFile } from "antd/es/upload/interface";
 import DownloadOutlined from "@ant-design/icons/DownloadOutlined";
+import CloudUploadOutlined from "@ant-design/icons/CloudUploadOutlined";
 import dynamic from "next/dynamic";
 import {
   getEvalStats,
@@ -24,12 +27,19 @@ import {
   recordResourceView,
   streamGenerateResources,
   submitEval,
+  listLibraries,
+  createLibrary,
+  uploadLibraryFiles,
+  getSupportedUploadFormats,
   type LearningResource,
+  type ResourceLibrary,
 } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
+import ResourceLibraryPanel from "@/components/ResourceLibraryPanel";
 import { ResourceJourneyView } from "@/components/ResourceJourneyView";
 import {
   EXTENDED_RESOURCE_TYPES,
+  GENERATABLE_RESOURCE_TYPES,
   RESOURCE_CONFIG,
   STANDARD_RESOURCE_TYPES,
   mapApiType,
@@ -66,6 +76,8 @@ const CATEGORY_CHIPS = [
 ];
 
 const GEN_STAGE_LABELS: Record<string, string> = {
+  context: "准备资料上下文",
+  web_research: "全网检索整理",
   doc: "讲解文档",
   mindmap: "思维导图",
   quiz: "练习题库",
@@ -105,10 +117,22 @@ export default function ResourcesContent() {
   const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<LearningResource | null>(null);
   const [starredIds, setStarredIds] = useState<string[]>([]);
-  const [topic, setTopic] = useState("线性回归");
+  const [topic, setTopic] = useState("");
   const [quizAnswers, setQuizAnswers] = useState<number[]>([]);
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [genStage, setGenStage] = useState("");
+  const [genModalOpen, setGenModalOpen] = useState(false);
+  const [pageTab, setPageTab] = useState("resources");
+  const [libraries, setLibraries] = useState<ResourceLibrary[]>([]);
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null);
+  const [genSource, setGenSource] = useState<"web" | "library" | "new">("library");
+  const [newLibraryName, setNewLibraryName] = useState("");
+  const [selectedGenTypes, setSelectedGenTypes] = useState<string[]>([
+    ...STANDARD_RESOURCE_TYPES,
+  ]);
+  const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
+  const [uploadExtensions, setUploadExtensions] = useState<string[]>([]);
+  const [preparingLibrary, setPreparingLibrary] = useState(false);
 
   const load = async (background = false) => {
     if (!background) setLoading(true);
@@ -136,14 +160,11 @@ export default function ResourcesContent() {
   }, [userId]);
 
   useEffect(() => {
-    if (cachedResources.length > 0) {
-      setItems(cachedResources);
-      setLoading(false);
-      return;
-    }
+    setItems([]);
+    setLoading(true);
     void load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, cachedResources.length]);
+  }, [userId]);
 
   useEffect(() => {
     if (!pendingPreviewId || !items.length) return;
@@ -184,23 +205,97 @@ export default function ResourcesContent() {
   const activeStep = pathSteps.find((s) => s.status === "in_progress");
   const visibleCount = filteredGrouped.stages.reduce((n, s) => n + s.resourceCount, 0);
 
-  const runStreamGenerate = async (types: readonly string[], label: string) => {
+  useEffect(() => {
+    void listLibraries(userId)
+      .then(setLibraries)
+      .catch(() => {});
+  }, [userId, pageTab, genModalOpen]);
+
+  useEffect(() => {
+    if (!genModalOpen) return;
+    void getSupportedUploadFormats()
+      .then((r) => setUploadExtensions(r.extensions))
+      .catch(() => {});
+  }, [genModalOpen]);
+
+  const toggleGenType = (apiType: string) => {
+    setSelectedGenTypes((prev) =>
+      prev.includes(apiType) ? prev.filter((t) => t !== apiType) : [...prev, apiType]
+    );
+  };
+
+  const buildGenerateOptions = async (): Promise<{
+    resourceTypes: string[];
+    libraryId?: string;
+    newLibraryName?: string;
+  }> => {
+    if (genSource === "new") {
+      if (!newLibraryName.trim()) {
+        throw new Error("请输入新资料库名称");
+      }
+      const files = pendingFiles
+        .map((f) => f.originFileObj)
+        .filter(Boolean) as File[];
+      if (files.length > 0) {
+        setPreparingLibrary(true);
+        try {
+          const lib = await createLibrary(userId, newLibraryName.trim());
+          await uploadLibraryFiles(userId, lib.id, files);
+          setSelectedLibraryId(lib.id);
+          setGenSource("library");
+          setLibraries((prev) => [lib, ...prev.filter((x) => x.id !== lib.id)]);
+          return { resourceTypes: selectedGenTypes, libraryId: lib.id };
+        } finally {
+          setPreparingLibrary(false);
+        }
+      }
+      return {
+        resourceTypes: selectedGenTypes,
+        newLibraryName: newLibraryName.trim(),
+      };
+    }
+    if (genSource === "library" && selectedLibraryId) {
+      return { resourceTypes: selectedGenTypes, libraryId: selectedLibraryId };
+    }
+    return { resourceTypes: selectedGenTypes };
+  };
+
+  const runStreamGenerate = async () => {
+    if (!topic.trim()) {
+      message.warning("请输入生成主题");
+      return;
+    }
+    if (!selectedGenTypes.length) {
+      message.warning("请至少选择一种资源类型");
+      return;
+    }
+    if (genSource === "library" && !selectedLibraryId) {
+      message.warning("请选择资料库，或切换为「新建资料库 / 全网检索」");
+      return;
+    }
+
     setGenerating(true);
     setGenStage("");
     const msgKey = "resource-gen";
-    message.loading({ content: `正在生成${label}…`, key: msgKey, duration: 0 });
+    message.loading({ content: "正在准备并生成资源…", key: msgKey, duration: 0 });
     try {
+      const options = await buildGenerateOptions();
       const before = items.length;
-      await streamGenerateResources(userId, topic, {
-        onProgress: (stage) => {
-          const text = GEN_STAGE_LABELS[stage] || stage;
-          setGenStage(text);
-          message.loading({ content: `生成中：${text}`, key: msgKey, duration: 0 });
+      await streamGenerateResources(
+        userId,
+        topic.trim(),
+        {
+          onProgress: (stage) => {
+            const text = GEN_STAGE_LABELS[stage] || stage;
+            setGenStage(text);
+            message.loading({ content: `生成中：${text}`, key: msgKey, duration: 0 });
+          },
+          onError: (err) => {
+            throw new Error(err);
+          },
         },
-        onError: (err) => {
-          throw new Error(err);
-        },
-      }, [...types]);
+        options
+      );
       const list = await listResources(userId);
       setItems(list);
       setResources(list);
@@ -211,19 +306,17 @@ export default function ResourcesContent() {
       } else {
         message.success(`资源库已更新，共 ${list.length} 项`);
       }
+      setGenModalOpen(false);
+      setPendingFiles([]);
     } catch (e: unknown) {
       message.destroy(msgKey);
       message.error(e instanceof Error ? e.message : "生成失败");
     } finally {
       setGenerating(false);
       setGenStage("");
+      setPreparingLibrary(false);
     }
   };
-
-  const handleGenerate = () => void runStreamGenerate(STANDARD_RESOURCE_TYPES, "标准资源");
-
-  const handleGenerateFullSuite = () =>
-    void runStreamGenerate(EXTENDED_RESOURCE_TYPES, "完整套件（含扩展类型）");
 
   return (
     <div>
@@ -236,41 +329,214 @@ export default function ResourcesContent() {
         }
         icon={<BookOutlined />}
         extra={
-          <Space wrap>
-            <Input
-              prefix={<SearchOutlined style={{ color: "#bfbfbf" }} />}
-              placeholder="搜索资源..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ width: 200, borderRadius: 8 }}
-              allowClear
-            />
-            <Input
-              placeholder="生成主题"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              style={{ width: 140, borderRadius: 8 }}
-            />
-            <Button
-              icon={<PlusOutlined />}
-              type="primary"
-              loading={generating}
-              onClick={handleGenerate}
-            >
-              生成新资源
-            </Button>
-            <Button loading={generating} onClick={handleGenerateFullSuite}>
-              完整套件
-            </Button>
-            {genStage && (
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {genStage}
-              </Text>
-            )}
-          </Space>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            loading={generating}
+            onClick={() => setGenModalOpen(true)}
+          >
+            生成资源
+          </Button>
         }
       />
+      <Modal
+        title="AI 生成学习资源"
+        open={genModalOpen}
+        onCancel={() => {
+          if (!generating && !preparingLibrary) {
+            setGenModalOpen(false);
+            setPendingFiles([]);
+          }
+        }}
+        maskClosable={!generating && !preparingLibrary}
+        width={520}
+        destroyOnClose={false}
+        className="lp-resource-gen-modal"
+        footer={
+          <div className="lp-resource-gen-footer">
+            <Button
+              onClick={() => {
+                setGenModalOpen(false);
+                setPendingFiles([]);
+              }}
+              disabled={generating || preparingLibrary}
+            >
+              取消
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              loading={generating || preparingLibrary}
+              onClick={() => void runStreamGenerate()}
+            >
+              开始生成
+            </Button>
+          </div>
+        }
+      >
+        <div className="lp-resource-gen-form">
+          {(genStage || preparingLibrary) && (
+            <div className="lp-resource-gen-progress">
+              <Spin size="small" />
+              <Text type="secondary">
+                {preparingLibrary ? "正在创建资料库并分析上传文件…" : genStage}
+              </Text>
+            </div>
+          )}
+          <div className="lp-resource-gen-field">
+            <Text className="lp-resource-gen-label">生成主题</Text>
+            <Input
+              placeholder="例如：线性回归、梯度下降"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+            />
+          </div>
+          <div className="lp-resource-gen-field">
+            <Text className="lp-resource-gen-label">资料来源</Text>
+            <Radio.Group
+              value={genSource}
+              onChange={(e) => setGenSource(e.target.value)}
+              className="lp-resource-gen-source"
+            >
+              <Radio value="library">依据已有资料库</Radio>
+              <Radio value="new">新建资料库</Radio>
+              <Radio value="web">无资料库 · 全网检索</Radio>
+            </Radio.Group>
+          </div>
+          {genSource === "library" && (
+            <div className="lp-resource-gen-field">
+              <Text className="lp-resource-gen-label">选择资料库</Text>
+              <Select
+                style={{ width: "100%" }}
+                placeholder="选择用于生成的资料库"
+                value={selectedLibraryId ?? undefined}
+                onChange={(v) => setSelectedLibraryId(v)}
+                options={libraries.map((l) => ({
+                  value: l.id,
+                  label: `${l.name}${l.chunk_count ? ` (${l.chunk_count} 片段)` : " (空)"}`,
+                }))}
+                allowClear
+              />
+            </div>
+          )}
+          {genSource === "new" && (
+            <>
+              <div className="lp-resource-gen-field">
+                <Text className="lp-resource-gen-label">新资料库名称</Text>
+                <Input
+                  placeholder="例如：机器学习讲义合集"
+                  value={newLibraryName}
+                  onChange={(e) => setNewLibraryName(e.target.value)}
+                />
+              </div>
+              <div className="lp-resource-gen-field">
+                <Text className="lp-resource-gen-label">上传文件（可多选）</Text>
+                <Upload
+                  multiple
+                  fileList={pendingFiles}
+                  beforeUpload={() => false}
+                  onChange={({ fileList }) => setPendingFiles(fileList)}
+                  accept={
+                    uploadExtensions.length
+                      ? uploadExtensions.map((e) => `.${e}`).join(",")
+                      : undefined
+                  }
+                  className="lp-resource-gen-upload"
+                >
+                  <Button icon={<CloudUploadOutlined />} disabled={generating || preparingLibrary}>
+                    选择文件
+                  </Button>
+                </Upload>
+                <Text type="secondary" className="lp-resource-gen-upload-hint">
+                  {pendingFiles.length > 0
+                    ? `已选择 ${pendingFiles.length} 个文件，生成前将自动创建资料库并入库分析`
+                    : uploadExtensions.length > 0
+                      ? `支持 ${uploadExtensions.slice(0, 10).join("、")}${uploadExtensions.length > 10 ? " 等" : ""}；也可不上传，生成时再补充`
+                      : "支持 PDF、Word、Markdown、代码等常见格式；也可不上传"}
+                </Text>
+              </div>
+            </>
+          )}
+          <div className="lp-resource-gen-field">
+            <div className="lp-resource-gen-type-head">
+              <Text className="lp-resource-gen-label">资源类型</Text>
+              <div className="lp-resource-gen-type-presets">
+                <button
+                  type="button"
+                  className="lp-resource-gen-preset"
+                  onClick={() => setSelectedGenTypes([...STANDARD_RESOURCE_TYPES])}
+                >
+                  标准套件
+                </button>
+                <button
+                  type="button"
+                  className="lp-resource-gen-preset"
+                  onClick={() => setSelectedGenTypes([...EXTENDED_RESOURCE_TYPES])}
+                >
+                  完整套件
+                </button>
+                <button
+                  type="button"
+                  className="lp-resource-gen-preset"
+                  onClick={() =>
+                    setSelectedGenTypes(GENERATABLE_RESOURCE_TYPES.map((t) => t.api))
+                  }
+                >
+                  全选
+                </button>
+              </div>
+            </div>
+            <div className="lp-resource-gen-types">
+              {GENERATABLE_RESOURCE_TYPES.map(({ api, ui }) => {
+                const cfg = RESOURCE_CONFIG[ui];
+                const active = selectedGenTypes.includes(api);
+                return (
+                  <button
+                    key={api}
+                    type="button"
+                    className={`lp-resource-gen-type${active ? " lp-resource-gen-type--active" : ""}`}
+                    onClick={() => toggleGenType(api)}
+                    style={{ "--type-color": cfg.color } as React.CSSProperties}
+                  >
+                    <span className="lp-resource-gen-type-icon">{cfg.icon}</span>
+                    <span>{cfg.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <Text type="secondary" className="lp-resource-gen-hint">
+              已选 {selectedGenTypes.length} 种，生成时将按所选类型依次产出。
+            </Text>
+          </div>
+        </div>
+      </Modal>
+      <div className="lp-resource-tabs">
+        <button
+          type="button"
+          className={`lp-resource-tab${pageTab === "resources" ? " lp-resource-tab--active" : ""}`}
+          onClick={() => setPageTab("resources")}
+        >
+          学习资源
+        </button>
+        <button
+          type="button"
+          className={`lp-resource-tab${pageTab === "libraries" ? " lp-resource-tab--active" : ""}`}
+          onClick={() => setPageTab("libraries")}
+        >
+          课程资料库
+        </button>
+      </div>
       <div className="lp-page-body lp-resource-page">
+        {pageTab === "libraries" ? (
+          <ResourceLibraryPanel
+            selectedId={selectedLibraryId}
+            onSelect={(id) => {
+              setSelectedLibraryId(id);
+              if (id) setGenSource("library");
+            }}
+          />
+        ) : (
+          <>
         {pathSteps.length > 0 && (
           <div className="lp-resource-summary">
             <div className="lp-resource-summary-icon">
@@ -344,6 +610,14 @@ export default function ResourcesContent() {
               </button>
             ))}
           </div>
+          <Input
+            className="lp-resource-search"
+            prefix={<SearchOutlined style={{ color: "var(--lp-text-secondary, #94a3b8)" }} />}
+            placeholder="搜索资源..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            allowClear
+          />
         </div>
 
         {loading && items.length === 0 ? (
@@ -353,7 +627,7 @@ export default function ResourcesContent() {
         ) : visibleCount === 0 ? (
           <div className="lp-resource-empty">
             {items.length === 0
-              ? "暂无资源，点击「生成新资源」或由智能对话触发"
+              ? "暂无资源，点击「生成资源」或由智能对话触发"
               : "没有匹配的资源，试试调整搜索或类型筛选"}
           </div>
         ) : (
@@ -364,6 +638,9 @@ export default function ResourcesContent() {
             onPreview={openPreview}
             onDownload={downloadMarkdown}
           />
+        )}
+
+        </>
         )}
 
         <Modal

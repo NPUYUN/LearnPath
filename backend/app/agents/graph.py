@@ -7,13 +7,17 @@ from app.agents.supervisor import supervisor_node
 from app.agents.nodes.profile_agent import profile_node
 from app.agents.nodes.generate_router import generate_router_node
 from app.agents.nodes.path_agent import path_node
+from app.agents.nodes.chat_agent import chat_node
 from app.agents.nodes.tutor_agent import tutor_node
 from app.agents.nodes.eval_agent import eval_node
 
 
 def _route_after_supervisor(state: AgentState) -> str:
-    intent = state.get("intent", "profile")
-    return intent if intent in {"profile", "generate", "path", "tutor", "eval"} else "profile"
+    intent = state.get("intent", "chat")
+    if intent == "tutor":
+        return "chat"
+    allowed = {"profile", "generate", "path", "eval", "chat"}
+    return intent if intent in allowed else "chat"
 
 
 @lru_cache
@@ -24,6 +28,7 @@ def build_graph():
     graph.add_node("profile", profile_node)
     graph.add_node("generate", generate_router_node)
     graph.add_node("path", path_node)
+    graph.add_node("chat", chat_node)
     graph.add_node("tutor", tutor_node)
     graph.add_node("eval", eval_node)
 
@@ -35,13 +40,15 @@ def build_graph():
             "profile": "profile",
             "generate": "generate",
             "path": "path",
-            "tutor": "tutor",
+            "chat": "chat",
+            "tutor": "chat",
             "eval": "eval",
         },
     )
     graph.add_edge("profile", END)
     graph.add_edge("generate", END)
     graph.add_edge("path", END)
+    graph.add_edge("chat", END)
     graph.add_edge("tutor", END)
     graph.add_edge("eval", END)
 

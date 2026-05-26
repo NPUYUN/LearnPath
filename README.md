@@ -129,12 +129,13 @@ npm run dev
 ### 4. 一键启动（Windows）
 
 ```powershell
-.\scripts\start.ps1   # 一键启动（等待后端就绪后打开浏览器）
-.\scripts\dev.ps1     # 同上，但不自动打开浏览器
-.\scripts\open.ps1   # 打开 entry.html 入口页
+.\scripts\start.ps1              # 一键启动（等待后端就绪后打开浏览器）
+.\scripts\start.ps1 -ShowWindows # 后端/前端控制台保持可见（调试用）
+.\scripts\dev.ps1                # 同上，但不自动打开浏览器
+.\scripts\open.ps1               # 打开 entry.html 入口页
 ```
 
-或双击根目录 **`打开学径.bat`** 打开本地入口导航页。Linux/macOS 使用 `scripts/dev.sh`。
+双击根目录 **`打开学径.bat`** 或 **`start.bat`**：启动成功后 **launcher 窗口自动关闭**；后端/前端在任务栏最小化运行（可用 `-ShowWindows` 改为常显）。Linux/macOS 使用 `scripts/dev.sh`。
 
 ---
 

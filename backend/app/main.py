@@ -30,6 +30,7 @@ from app.api.routes import (
     chat,
     chat_history,
     health,
+    libraries,
     path,
     preferences,
     profile,
@@ -49,6 +50,12 @@ load_dotenv(ROOT_DIR / ".env")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    from app.services.library_service import ensure_builtin_libraries
+
+    await ensure_builtin_libraries()
+    from app.services.demo_seed_service import ensure_demo_sample_data
+
+    await ensure_demo_sample_data()
     yield
 
 
@@ -72,6 +79,7 @@ app.include_router(health.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(resources.router, prefix="/api")
+app.include_router(libraries.router, prefix="/api")
 app.include_router(path.router, prefix="/api")
 app.include_router(tutor.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")

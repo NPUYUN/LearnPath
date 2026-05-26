@@ -107,11 +107,12 @@ export default function ProfileContent() {
   const [loading, setLoading] = useState(!storeProfile);
 
   useEffect(() => {
-    if (storeProfile) {
+    if (storeProfile && storeProfile.user_id === userId) {
       setLocal(storeProfile);
       setLoading(false);
       return;
     }
+    setLocal(null);
     setLoading(true);
     getProfile(userId)
       .then((p) => {

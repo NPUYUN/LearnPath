@@ -7,6 +7,9 @@ from app.agents.state import AgentState
 from app.db.repository import save_resources
 from app.models.schemas import GenerateResourcesRequest, LearningResource
 from app.services.graph_state import build_graph_state
+from app.db.repository import get_library
+from app.services.library_service import get_or_create_library
+from app.services.resource_context_service import build_generation_context
 
 
 def _extract_new_resources(result: dict, prior_ids: set[str]) -> list[dict]:
@@ -20,13 +23,42 @@ def _extract_new_resources(result: dict, prior_ids: set[str]) -> list[dict]:
     ]
 
 
+async def _resolve_generation_context(req: GenerateResourcesRequest) -> dict:
+    lib = await get_or_create_library(
+        req.user_id,
+        library_id=req.library_id,
+        new_library_name=req.new_library_name,
+    )
+    library_id_for_ctx: str | None = None
+    if lib and lib.get("status") == "ready" and lib.get("chunk_count", 0) > 0:
+        library_id_for_ctx = lib["id"]
+    elif req.library_id:
+        check = await get_library(req.library_id, req.user_id)
+        if check and check.get("chunk_count", 0) > 0:
+            library_id_for_ctx = req.library_id
+
+    gen_ctx = await build_generation_context(
+        topic=req.topic,
+        library_id=library_id_for_ctx,
+        user_id=req.user_id,
+    )
+    if lib:
+        gen_ctx["library_id"] = lib["id"]
+        if lib.get("name"):
+            gen_ctx["library_name"] = lib["name"]
+    return gen_ctx
+
+
 async def generate_resources(req: GenerateResourcesRequest) -> list[LearningResource]:
+    gen_ctx = await _resolve_generation_context(req)
     base = await build_graph_state(
         req.user_id,
         {
             "intent": "generate",
             "topic": req.topic,
             "resource_types": req.resource_types,
+            "library_id": gen_ctx.get("library_id", ""),
+            "generation_context": gen_ctx,
             "messages": [{"role": "user", "content": f"请生成关于{req.topic}的学习资源"}],
         },
     )
@@ -45,13 +77,24 @@ async def generate_resources(req: GenerateResourcesRequest) -> list[LearningReso
 async def stream_generate_resources(
     req: GenerateResourcesRequest,
 ) -> AsyncIterator[dict]:
-    """SSE: progress per type -> resources -> done"""
+    """SSE: context -> progress per type -> resources -> done"""
+    gen_ctx = await _resolve_generation_context(req)
+    yield {
+        "event": "progress",
+        "data": json.dumps(
+            {"stage": "context", "mode": gen_ctx.get("mode"), "library": gen_ctx.get("library_name", "")},
+            ensure_ascii=False,
+        ),
+    }
+
     base = await build_graph_state(
         req.user_id,
         {
             "intent": "generate",
             "topic": req.topic,
             "resource_types": req.resource_types,
+            "library_id": gen_ctx.get("library_id", ""),
+            "generation_context": gen_ctx,
             "messages": [{"role": "user", "content": f"请生成关于{req.topic}的学习资源"}],
         },
     )
@@ -59,6 +102,13 @@ async def stream_generate_resources(
     types = req.resource_types
     current: AgentState = dict(base)  # type: ignore
     current["resources"] = list(base.get("resources") or [])
+    current["generation_context"] = gen_ctx
+
+    if gen_ctx.get("mode") == "web":
+        yield {
+            "event": "progress",
+            "data": json.dumps({"stage": "web_research"}, ensure_ascii=False),
+        }
 
     for rt in types:
         yield {"event": "progress", "data": json.dumps({"stage": rt}, ensure_ascii=False)}
@@ -85,7 +135,10 @@ async def stream_generate_resources(
     full = await get_user_resources(req.user_id)
     yield {
         "event": "done",
-        "data": json.dumps({"count": len(new_items), "total": len(full)}, ensure_ascii=False),
+        "data": json.dumps(
+            {"count": len(new_items), "total": len(full), "mode": gen_ctx.get("mode")},
+            ensure_ascii=False,
+        ),
     }
 
 

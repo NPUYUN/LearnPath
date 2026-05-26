@@ -29,7 +29,7 @@ import { clientNavigate } from "@/lib/clientNav";
 import { computeInsights } from "@/lib/insightsCompute";
 import { pathProgress } from "@/lib/navMeta";
 import { getAccount, updateAccount, type UserAccount } from "@/lib/api";
-import { useAppStore } from "@/store/appStore";
+import { displayCourseName, isDemoUser, useAppStore } from "@/store/appStore";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -47,8 +47,11 @@ export default function AccountContent() {
   const userEmail = useAppStore((s) => s.userEmail);
   const setUserMeta = useAppStore((s) => s.setUserMeta);
 
-  const [account, setAccount] = useState<UserAccount | null>(null);
-  const [loading, setLoading] = useState(true);
+  const storeAccount = useAppStore((s) => s.account);
+  const setAccountStore = useAppStore((s) => s.setAccount);
+
+  const [account, setAccount] = useState<UserAccount | null>(storeAccount);
+  const [loading, setLoading] = useState(!storeAccount);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
@@ -58,24 +61,32 @@ export default function AccountContent() {
     try {
       const data = await getAccount(userId);
       setAccount(data);
+      setAccountStore(data);
     } catch {
-      setAccount({
+      const fallback = {
         user_id: userId,
         display_name: userName,
         email: userEmail,
-        course_name: courseName,
+        course_name: isDemoUser(userId) ? courseName || "机器学习导论" : "",
         major: "",
         bio: "",
         phone: "",
-      });
+      };
+      setAccount(fallback);
     } finally {
       setLoading(false);
     }
-  }, [userId, userName, userEmail, courseName]);
+  }, [userId, userName, userEmail, courseName, setAccountStore]);
 
   useEffect(() => {
+    if (storeAccount && storeAccount.user_id === userId) {
+      setAccount(storeAccount);
+      setLoading(false);
+      return;
+    }
+    setAccount(null);
     void load();
-  }, [load]);
+  }, [userId, storeAccount, load]);
 
   const startEdit = () => {
     if (!account) return;
@@ -181,7 +192,11 @@ export default function AccountContent() {
                 <Avatar size={72} className="learnpath-user-avatar">
                   {initial}
                 </Avatar>
-                <TitleBlock account={account} fallbackName={userName} fallbackCourse={courseName} />
+                <TitleBlock
+                  account={account}
+                  fallbackName={userName}
+                  fallbackCourse={displayCourseName(courseName, userId)}
+                />
                 <Space wrap style={{ marginTop: 12 }}>
                   <Button type="link" icon={<LinkOutlined />} onClick={() => clientNavigate("/profile")}>
                     查看学习画像
@@ -246,7 +261,9 @@ export default function AccountContent() {
                   <Descriptions.Item label="昵称">{account?.display_name ?? userName}</Descriptions.Item>
                   <Descriptions.Item label="主修课程">
                     <Tag icon={<ReadOutlined />} bordered={false}>
-                      {account?.course_name ?? courseName}
+                      {account?.course_name?.trim()
+                        ? account.course_name
+                        : displayCourseName(courseName, userId)}
                     </Tag>
                   </Descriptions.Item>
                   <Descriptions.Item label="专业">{account?.major || "—"}</Descriptions.Item>

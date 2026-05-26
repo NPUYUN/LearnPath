@@ -13,6 +13,10 @@ def chunk_markdown(text: str, *, chunk_size: int = 800, overlap: int = 120) -> l
     return chunks
 
 
+def split_text(text: str, *, chunk_size: int = 800, overlap: int = 120) -> list[str]:
+    return chunk_markdown(text, chunk_size=chunk_size, overlap=overlap)
+
+
 def load_markdown_files(base_dir: Path) -> list[dict]:
     documents = []
     chapters_dir = base_dir / "chapters"

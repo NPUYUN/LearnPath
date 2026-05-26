@@ -56,6 +56,9 @@ async def verify_otp(req: VerifyOtpRequest) -> AuthUser:
 @router.post("/demo-token", response_model=AuthUser)
 async def demo_token(req: DemoTokenRequest) -> AuthUser:
     """快速体验：为 demo 用户签发 JWT。"""
+    from app.services.demo_seed_service import ensure_demo_sample_data
+
+    await ensure_demo_sample_data()
     token = create_access_token("demo", extra={"demo": True})
     return AuthUser(
         user_id="demo",

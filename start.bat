@@ -2,14 +2,6 @@
 cd /d "%~dp0"
 title LearnPath Launcher
 
-echo.
-echo ========================================
-echo   LearnPath - Start Backend + Frontend
-echo ========================================
-echo.
-echo Project: %CD%
-echo.
-
 if not exist "%~dp0scripts\start.ps1" (
     echo ERROR: scripts\start.ps1 not found.
     pause
@@ -17,12 +9,12 @@ if not exist "%~dp0scripts\start.ps1" (
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start.ps1"
-set EXITCODE=%ERRORLEVEL%
-
-echo.
-if "%EXITCODE%"=="0" (
-    echo OK - http://localhost:3000/chat
-) else (
-    echo FAILED - exit code %EXITCODE%
+if errorlevel 1 (
+    echo.
+    echo FAILED - exit code %ERRORLEVEL%
+    pause
+    exit /b 1
 )
-pause
+
+rem 启动成功：自动关闭本 launcher 窗口（服务在后台运行，无控制台窗口）
+exit /b 0

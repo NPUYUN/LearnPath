@@ -6,6 +6,7 @@ from app.agents.supervisor import classify_intent
 from app.core.config import get_settings
 from app.db.repository import get_profile, list_resources, save_path, save_resources
 from app.models.schemas import ChatResponse, StudentProfile
+from app.services.chat_intelligence_service import stream_intelligent_chat
 from app.services.graph_state import build_graph_state
 
 
@@ -55,8 +56,9 @@ async def run_chat(
         existing = await get_profile(user_id)
         profile_obj = StudentProfile(**existing) if existing else None
 
+    reply = (result.get("reply") or "").strip()
     return ChatResponse(
-        reply=result.get("reply", "处理完成"),
+        reply=reply or "暂时无法生成回复，请稍后重试。",
         profile=profile_obj,
         intent=result.get("intent", intent),
         resources=_resource_summaries(saved_resources),
@@ -64,11 +66,19 @@ async def run_chat(
     )
 
 
+async def _yield_text_tokens(text: str, chunk_size: int = 1) -> AsyncIterator[dict]:
+    """将完整文本按字符/小片段推送，模拟打字效果。"""
+    step = max(1, min(chunk_size, 4))
+    for i in range(0, len(text), step):
+        yield {"event": "token", "data": text[i : i + step]}
+
+
 async def stream_chat(
     user_id: str, message: str, chunk_size: int = 8, *, deep_thinking: bool = False
 ) -> AsyncIterator[dict]:
-    """SSE 事件：intent / progress / token / profile / resources / path / done / error"""
+    """SSE：intent / progress / token（LLM 真流式或逐字输出）/ profile / resources / path / done"""
     intent = classify_intent(message)
+    topic = _extract_topic(message)
     yield {"event": "intent", "data": intent}
     if deep_thinking:
         yield {
@@ -78,12 +88,49 @@ async def stream_chat(
     yield {"event": "progress", "data": json.dumps({"stage": intent}, ensure_ascii=False)}
 
     try:
+        if intent == "chat":
+            yield {"event": "progress", "data": json.dumps({"stage": "retrieval"}, ensure_ascii=False)}
+            base = await build_graph_state(
+                user_id,
+                {
+                    "messages": [{"role": "user", "content": message}],
+                    "intent": intent,
+                    "topic": topic,
+                    "deep_thinking": deep_thinking,
+                },
+            )
+            yield {"event": "progress", "data": json.dumps({"stage": "chat"}, ensure_ascii=False)}
+
+            final_reply = ""
+            profile_data = None
+            async for item in stream_intelligent_chat(
+                user_id,
+                message,
+                topic,
+                profile=base.get("profile"),
+                resources=base.get("resources"),
+                deep_thinking=deep_thinking,
+            ):
+                if item["type"] == "token":
+                    yield {"event": "token", "data": item["data"]}
+                elif item["type"] == "done":
+                    final_reply = item.get("data") or ""
+                    profile_data = item.get("profile")
+
+            if profile_data:
+                yield {
+                    "event": "profile",
+                    "data": json.dumps(profile_data, ensure_ascii=False, default=str),
+                }
+            yield {"event": "done", "data": final_reply}
+            return
+
         base = await build_graph_state(
             user_id,
             {
                 "messages": [{"role": "user", "content": message}],
                 "intent": intent,
-                "topic": _extract_topic(message),
+                "topic": topic,
                 "deep_thinking": deep_thinking,
             },
         )
@@ -130,10 +177,10 @@ async def stream_chat(
         if profile:
             yield {"event": "profile", "data": json.dumps(profile, ensure_ascii=False, default=str)}
 
-        reply = result.get("reply", "处理完成")
-        chunk_size = max(1, min(chunk_size, 64))
-        for i in range(0, len(reply), chunk_size):
-            yield {"event": "token", "data": reply[i : i + chunk_size]}
+        reply = (result.get("reply") or "").strip()
+        stream_step = 1 if chunk_size <= 4 else min(chunk_size, 3)
+        async for tok in _yield_text_tokens(reply, stream_step):
+            yield tok
         yield {"event": "done", "data": reply}
     except Exception as exc:
         yield {"event": "error", "data": str(exc)}
@@ -159,7 +206,7 @@ def _resource_summaries(resources: list[dict]) -> list[dict]:
 
 
 def _extract_topic(message: str) -> str:
-    for kw in ["线性回归", "逻辑回归", "梯度下降", "过拟合", "机器学习"]:
+    for kw in ["线性回归", "逻辑回归", "梯度下降", "过拟合", "机器学习", "深度学习"]:
         if kw in message:
             return kw
-    return "机器学习导论"
+    return "综合学习"

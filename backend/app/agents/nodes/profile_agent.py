@@ -1,10 +1,14 @@
 from datetime import datetime
+import json
+import re
 
 from app.agents.state import AgentState
 from app.core.guardrails import filter_sensitive
 from app.core.llm import get_primary_llm
 from app.core.prompts import chat_reply_hint, profile_system, profile_temperature
 from app.db.repository import save_profile
+from app.services.chat_intelligence_service import classify_question_type, patch_profile_from_chat
+from app.services.user_defaults import profile_fallback_fields
 
 
 async def profile_node(state: AgentState) -> dict:
@@ -27,35 +31,70 @@ async def profile_node(state: AgentState) -> dict:
     raw = filter_sensitive(raw)
 
     existing = dict(state.get("profile") or {})
+    parsed = _parse_profile_json(raw)
+    fallbacks = profile_fallback_fields(user_id, existing)
+
     incoming = {
         "user_id": user_id,
-        "knowledge_level": _extract_or_default(raw, "knowledge_level", existing.get("knowledge_level", "入门")),
-        "learning_goal": _extract_or_default(
-            raw, "learning_goal", existing.get("learning_goal", "掌握机器学习导论核心概念")
-        ),
-        "cognitive_style": _extract_or_default(raw, "cognitive_style", existing.get("cognitive_style", "偏实践")),
+        "knowledge_level": parsed.get("knowledge_level")
+        or _extract_or_default(raw, "knowledge_level", fallbacks["knowledge_level"]),
+        "learning_goal": parsed.get("learning_goal")
+        or _extract_or_default(raw, "learning_goal", fallbacks["learning_goal"]),
+        "cognitive_style": parsed.get("cognitive_style")
+        or _extract_or_default(raw, "cognitive_style", fallbacks["cognitive_style"]),
         "error_prone_topics": (
-            ["线性回归", "梯度下降"]
-            if "回归" in user_text
-            else list(existing.get("error_prone_topics") or [])
+            parsed["error_prone_topics"]
+            if "error_prone_topics" in parsed
+            else list(fallbacks.get("error_prone_topics") or [])
         ),
-        "preferred_modality": _extract_or_default(
-            raw, "preferred_modality", existing.get("preferred_modality", "文档+练习")
-        ),
-        "pace_and_time": _extract_or_default(raw, "pace_and_time", existing.get("pace_and_time", "每周约5小时")),
-        "recent_progress": _extract_or_default(
-            raw, "recent_progress", existing.get("recent_progress", "已完成导论预习")
-        ),
+        "preferred_modality": parsed.get("preferred_modality")
+        or _extract_or_default(raw, "preferred_modality", fallbacks["preferred_modality"]),
+        "pace_and_time": parsed.get("pace_and_time")
+        or _extract_or_default(raw, "pace_and_time", fallbacks["pace_and_time"]),
+        "recent_progress": parsed.get("recent_progress")
+        or _extract_or_default(raw, "recent_progress", fallbacks["recent_progress"]),
         "updated_at": datetime.utcnow().isoformat(),
     }
     profile = {**existing, **incoming}
     await save_profile(profile)
+
+    qtype = classify_question_type(user_text)
+    topic = user_text[:24] if user_text else "学习"
+    patched = await patch_profile_from_chat(user_id, user_text, qtype, topic, profile)
+    if patched:
+        profile = patched
 
     reply = filter_sensitive(
         chat_reply_hint("profile", deep)
         + f"\n\n当前基础：{profile['knowledge_level']}；学习目标：{profile['learning_goal']}。"
     )
     return {"profile": profile, "reply": reply}
+
+
+def _parse_profile_json(text: str) -> dict:
+    try:
+        match = re.search(r"\{[\s\S]*\}", text)
+        if not match:
+            return {}
+        data = json.loads(match.group())
+        if not isinstance(data, dict):
+            return {}
+        out: dict = {}
+        for key in (
+            "knowledge_level",
+            "learning_goal",
+            "cognitive_style",
+            "preferred_modality",
+            "pace_and_time",
+            "recent_progress",
+        ):
+            if key in data and data[key]:
+                out[key] = str(data[key])[:200]
+        if isinstance(data.get("error_prone_topics"), list):
+            out["error_prone_topics"] = [str(x)[:80] for x in data["error_prone_topics"][:8]]
+        return out
+    except Exception:
+        return {}
 
 
 def _extract_or_default(text: str, key: str, default: str) -> str:

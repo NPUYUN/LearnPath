@@ -6,6 +6,7 @@ import json
 import re
 
 from app.core.llm import get_aux_llm
+from app.core.prompts import recommendation_polish_system
 from app.db.repository import get_profile, list_events, list_resources
 from app.models.schemas import ResourceRecommendation
 
@@ -57,13 +58,7 @@ async def _llm_polish_reasons(
     weak = "、".join(profile.get("error_prone_topics") or []) or "无"
     goal = profile.get("learning_goal") or "掌握课程核心"
     prompt = [
-        {
-            "role": "system",
-            "content": (
-                "你是学习路径推荐助手。根据用户画像为每条资源写一句中文推荐语（12字以内），"
-                "只输出 JSON 对象，键为资源 id，值为推荐语，不要 markdown。"
-            ),
-        },
+        {"role": "system", "content": recommendation_polish_system()},
         {
             "role": "user",
             "content": (

@@ -9,11 +9,18 @@ import {
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { getEvalStats, getPath, getProfile, listResources } from "@/lib/api";
-import { isNavRoute, isStandaloneRoute, NAV_ROUTES, type AppRoute, type NavRoute } from "@/hooks/navRoutes";
+import {
+  isNavRoute,
+  isStandaloneRoute,
+  NAV_ROUTES,
+  type AppRoute,
+  type NavRoute,
+  type StandaloneRoute,
+} from "@/hooks/navRoutes";
 import { PAGE_MODULES } from "@/lib/pageModules";
 import { prewarmEchartsEngine, preloadEcharts } from "@/lib/useEcharts";
 import { registerClientNav } from "@/lib/clientNav";
-import { useAppStore } from "@/store/appStore";
+import { useAppStore, displayCourseName } from "@/store/appStore";
 import type { ComponentType } from "react";
 import MessageOutlined from "@ant-design/icons/MessageOutlined";
 import UserOutlined from "@ant-design/icons/UserOutlined";
@@ -31,7 +38,7 @@ import InitLoadingScreen from "@/components/InitLoadingScreen";
 import RouteLoadingScreen from "@/components/RouteLoadingScreen";
 import PagePane from "@/components/PagePane";
 import ThemeProvider from "@/components/ThemeProvider";
-import { preloadStandaloneRoute } from "@/lib/routePreload";
+import { preloadLoggedInExtras, preloadStandaloneRoute } from "@/lib/routePreload";
 
 const LoginContent = dynamic(() => import("@/components/LoginContent"), { ssr: false });
 const LandingContent = dynamic(() => import("@/components/LandingContent"), { ssr: false });
@@ -49,7 +56,28 @@ const NAV_ITEMS_SECONDARY: { key: NavRoute; icon: React.ReactNode; label: string
   { key: "/settings", icon: <SettingOutlined />, label: "设置" },
 ];
 
-const PREVIEW_MS = 180;
+const PREVIEW_MS_DEFAULT = 260;
+const PREVIEW_MS_BY_ROUTE: Partial<Record<NavRoute, number>> = {
+  "/profile": 380,
+  "/path": 300,
+  "/resources": 340,
+  "/evaluation": 400,
+  "/account": 320,
+  "/settings": 240,
+};
+
+type StandaloneTransition = {
+  target: StandaloneRoute;
+  progress: number;
+  fading: boolean;
+  ready: boolean;
+};
+
+function waitPreviewFrames(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -60,6 +88,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [activeTab, setActiveTab] = useState<NavRoute>(routeFromPath);
 
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
+  const userId = useAppStore((s) => s.userId);
   const showLanding = useAppStore((s) => s.showLanding);
   const userName = useAppStore((s) => s.userName);
   const courseName = useAppStore((s) => s.courseName);
@@ -68,16 +97,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [pageComponents, setPageComponents] = useState<Partial<Record<NavRoute, ComponentType>>>({});
   const [dataReady, setDataReady] = useState(false);
   const [warmedRoutes, setWarmedRoutes] = useState<Set<NavRoute>>(() => new Set());
-  const [previewRoute, setPreviewRoute] = useState<NavRoute | null>(null);
   const [initProgress, setInitProgress] = useState(0);
   const [initDone, setInitDone] = useState(false);
   const [initFading, setInitFading] = useState(false);
   const finishCalled = useRef(false);
   const cycleStarted = useRef(false);
 
-  const [standaloneProgress, setStandaloneProgress] = useState(0);
-  const [standaloneFading, setStandaloneFading] = useState(false);
-  const [standaloneReady, setStandaloneReady] = useState(false);
+  const [standaloneTx, setStandaloneTx] = useState<StandaloneTransition | null>(null);
 
   useEffect(() => {
     if (isNavRoute(pathname)) setActiveTab(pathname);
@@ -86,10 +112,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const goTo = useCallback(
     (key: AppRoute) => {
       if (isStandaloneRoute(key)) {
+        setStandaloneTx({ target: key, progress: 10, fading: false, ready: false });
         router.push(key);
         return;
       }
+      setStandaloneTx(null);
       setActiveTab(key);
+      window.dispatchEvent(new CustomEvent("learnpath-pane-show", { detail: key }));
       if (pathname !== key) {
         startTransition(() => {
           router.push(key);
@@ -120,7 +149,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const finishInit = useCallback(() => {
     if (finishCalled.current) return;
     finishCalled.current = true;
-    setPreviewRoute(null);
     setInitProgress(100);
     setInitFading(true);
     setTimeout(() => setInitDone(true), 380);
@@ -132,7 +160,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       cycleStarted.current = false;
       setPageComponents({});
       setWarmedRoutes(new Set());
-      setPreviewRoute(null);
       setDataReady(false);
       setInitProgress(0);
       setInitDone(false);
@@ -144,14 +171,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     finishCalled.current = false;
     cycleStarted.current = false;
     setWarmedRoutes(new Set());
-    setPreviewRoute(null);
     setDataReady(false);
     setInitDone(false);
     setInitFading(false);
     setInitProgress(0);
 
     const {
-      userId,
       profile,
       resources,
       learningPath,
@@ -164,6 +189,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     } = useAppStore.getState();
 
     let cancelled = false;
+    const activeUserId = userId;
 
     void (async () => {
       const entries = await Promise.all(
@@ -182,48 +208,44 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     void (async () => {
       const tasks: Promise<void>[] = [];
-      if (!profile) {
-        tasks.push(
-          getProfile(userId)
-            .then((p) => {
-              if (p) setProfile(p);
-            })
-            .catch(() => {})
-        );
-      }
-      if (!resources.length) {
-        tasks.push(
-          listResources(userId)
-            .then((list) => {
-              setResources(list);
-              const titles: Record<string, string> = {};
-              list.forEach((r) => {
-                titles[r.id] = r.title;
-              });
-              setResourceTitles(titles);
-            })
-            .catch(() => {})
-        );
-      }
-      if (!learningPath) {
-        tasks.push(
-          getPath(userId)
-            .then((p) => {
-              if (p) setLearningPath(p);
-            })
-            .catch(() => {})
-        );
-      }
-      if (!evalStats) {
-        tasks.push(
-          getEvalStats(userId)
-            .then((s) => setEvalStats(s))
-            .catch(() => {})
-        );
-      }
+      tasks.push(
+        getProfile(activeUserId)
+          .then((p) => {
+            if (!cancelled) setProfile(p);
+          })
+          .catch(() => {})
+      );
+      tasks.push(
+        listResources(activeUserId)
+          .then((list) => {
+            if (cancelled) return;
+            setResources(list);
+            const titles: Record<string, string> = {};
+            list.forEach((r) => {
+              titles[r.id] = r.title;
+            });
+            setResourceTitles(titles);
+          })
+          .catch(() => {})
+      );
+      tasks.push(
+        getPath(activeUserId)
+          .then((p) => {
+            if (!cancelled) setLearningPath(p);
+          })
+          .catch(() => {})
+      );
+      tasks.push(
+        getEvalStats(activeUserId)
+          .then((s) => {
+            if (!cancelled) setEvalStats(s);
+          })
+          .catch(() => {})
+      );
       tasks.push(
         import("@/components/MarkdownPreview").then(() => {}).catch(() => {}),
-        preloadEcharts().then(() => prewarmEchartsEngine()).catch(() => {})
+        preloadEcharts().then(() => prewarmEchartsEngine()).catch(() => {}),
+        preloadLoggedInExtras().catch(() => {})
       );
       await Promise.all(tasks);
       if (!cancelled) setDataReady(true);
@@ -237,11 +259,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
       clearTimeout(fallback);
     };
-  }, [isLoggedIn, finishInit]);
+  }, [isLoggedIn, userId, finishInit]);
 
   const allModulesLoaded = NAV_ROUTES.every((r) => pageComponents[r]);
 
-  // 逐页短暂「点亮」预渲染（含 ECharts 首次绘制）
+  // 登录后后台静默预热各页（不切换可见内容，避免从对话页「闪跳」到画像等页面）
   useEffect(() => {
     if (!isLoggedIn || !allModulesLoaded || !dataReady || cycleStarted.current) return;
     cycleStarted.current = true;
@@ -252,9 +274,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       for (let i = 0; i < NAV_ROUTES.length; i++) {
         if (cancelled) return;
         const route = NAV_ROUTES[i];
-        setPreviewRoute(route);
         window.dispatchEvent(new CustomEvent("learnpath-pane-show", { detail: route }));
-        await new Promise((r) => setTimeout(r, PREVIEW_MS));
+        await waitPreviewFrames();
+        const dwellMs = PREVIEW_MS_BY_ROUTE[route] ?? PREVIEW_MS_DEFAULT;
+        await new Promise((r) => setTimeout(r, dwellMs));
         setWarmedRoutes((prev) => {
           const next = new Set(prev);
           next.add(route);
@@ -278,36 +301,46 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setInitProgress(Math.min(99, modulePct + dataPct + warmPct));
   }, [isLoggedIn, initDone, allModulesLoaded, dataReady, warmedRoutes]);
 
-  // 独立页（如成就馆）切换时预加载 + 进度条
+  // 独立页（成就馆等）：点击即显示加载屏，预加载完成后再展示内容
   useEffect(() => {
     if (!isLoggedIn || !isStandaloneRoute(pathname)) {
-      setStandaloneReady(true);
-      setStandaloneProgress(0);
-      setStandaloneFading(false);
       return;
     }
 
+    const target = pathname;
     let cancelled = false;
-    setStandaloneReady(false);
-    setStandaloneProgress(0);
-    setStandaloneFading(false);
+
+    setStandaloneTx((prev) => {
+      if (prev?.target === target) return prev;
+      return { target, progress: 8, fading: false, ready: false };
+    });
 
     const tick = setInterval(() => {
-      setStandaloneProgress((p) => Math.min(p + 5, 90));
+      setStandaloneTx((prev) => {
+        if (!prev || prev.target !== target || prev.ready) return prev;
+        return { ...prev, progress: Math.min(prev.progress + 5, 92) };
+      });
     }, 45);
 
     void (async () => {
       try {
-        await preloadStandaloneRoute(pathname);
+        await preloadStandaloneRoute(target);
       } catch {
         /* 预加载失败仍允许进入，由页面内重试 */
       }
       if (cancelled) return;
       clearInterval(tick);
-      setStandaloneProgress(100);
-      setStandaloneFading(true);
+      setStandaloneTx((prev) => {
+        if (!prev || prev.target !== target) return prev;
+        return { ...prev, progress: 100, fading: true };
+      });
       window.setTimeout(() => {
-        if (!cancelled) setStandaloneReady(true);
+        if (!cancelled) {
+          setStandaloneTx((prev) => {
+            if (!prev || prev.target !== target) return prev;
+            return { ...prev, ready: true, fading: false };
+          });
+        }
       }, 380);
     })();
 
@@ -316,6 +349,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       clearInterval(tick);
     };
   }, [pathname, isLoggedIn]);
+
+  useEffect(() => {
+    if (isStandaloneRoute(pathname)) return;
+    setStandaloneTx((prev) => {
+      if (!prev) return null;
+      if (!prev.ready) return prev;
+      return null;
+    });
+  }, [pathname]);
+
+  const showStandaloneLoader = standaloneTx != null && !standaloneTx.ready;
 
   if (!isLoggedIn) {
     return (
@@ -330,15 +374,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const loaderVariant = pathname === "/insights" ? "insights" : "default";
     return (
       <ThemeProvider>
-        {!standaloneReady && (
+        {showStandaloneLoader && (
           <RouteLoadingScreen
             variant={loaderVariant}
-            progress={standaloneProgress}
-            fading={standaloneFading}
+            progress={standaloneTx?.progress ?? 0}
+            fading={standaloneTx?.fading}
           />
         )}
         <div
-          className={`lp-standalone-mount${standaloneReady ? " lp-standalone-mount--ready" : ""}`}
+          className={`lp-standalone-mount${standaloneTx?.ready ? " lp-standalone-mount--ready" : ""}`}
         >
           {children}
         </div>
@@ -349,6 +393,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider>
       {!initDone && <InitLoadingScreen progress={initProgress} fading={initFading} />}
+      {showStandaloneLoader && (
+        <RouteLoadingScreen
+          variant={standaloneTx?.target === "/insights" ? "insights" : "default"}
+          progress={standaloneTx?.progress ?? 0}
+          fading={standaloneTx?.fading}
+        />
+      )}
 
       <div
         className={`learnpath-app${collapsed ? " learnpath-app--collapsed" : ""}${initDone ? "" : " learnpath-app--warming"}`}
@@ -361,7 +412,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           primaryItems={NAV_ITEMS_PRIMARY}
           secondaryItems={NAV_ITEMS_SECONDARY}
           userName={userName}
-          courseName={courseName}
+          courseName={displayCourseName(courseName, userId)}
           initDone={initDone}
           onLogout={() => {
             logout();
@@ -374,10 +425,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {allModulesLoaded &&
             NAV_ROUTES.map((route) => {
               const Comp = pageComponents[route]!;
-              const isActive = initDone && activeTab === route;
-              const isPreview = !initDone && previewRoute === route;
+              const isActive = activeTab === route;
+              const isWarm = warmedRoutes.has(route) && activeTab !== route;
               return (
-                <PagePane key={route} active={isActive} preview={isPreview}>
+                <PagePane key={route} active={isActive} preview={false} warm={isWarm}>
                   <Comp />
                 </PagePane>
               );

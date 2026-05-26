@@ -27,7 +27,7 @@ import { computeInsights } from "@/lib/insightsCompute";
 import { getChartPalette, isDarkTheme } from "@/lib/chartTheme";
 import { getChatHistory, getEvalStats, type EvalStats } from "@/lib/api";
 import { useEcharts } from "@/lib/useEcharts";
-import { useAppStore } from "@/store/appStore";
+import { displayCourseName, useAppStore } from "@/store/appStore";
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -95,12 +95,14 @@ export default function DataInsightsContent() {
   const profile = useAppStore((s) => s.profile);
   const learningPath = useAppStore((s) => s.learningPath);
   const storeStats = useAppStore((s) => s.evalStats);
+  const insightsChat = useAppStore((s) => s.insightsChat);
   const setEvalStats = useAppStore((s) => s.setEvalStats);
+  const setInsightsChat = useAppStore((s) => s.setInsightsChat);
 
   const [stats, setStats] = useState<EvalStats | null>(storeStats);
-  const [chatCount, setChatCount] = useState(0);
-  const [userMsgCount, setUserMsgCount] = useState(0);
-  const [loading, setLoading] = useState(!storeStats);
+  const [chatCount, setChatCount] = useState(insightsChat?.chatCount ?? 0);
+  const [userMsgCount, setUserMsgCount] = useState(insightsChat?.userMsgCount ?? 0);
+  const [loading, setLoading] = useState(!storeStats || !insightsChat);
   const [error, setError] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
 
@@ -121,28 +123,30 @@ export default function DataInsightsContent() {
       ]);
       setStats(evalData);
       setEvalStats(evalData);
-      setChatCount(history.length);
-      setUserMsgCount(history.filter((m) => m.role === "user").length);
+      const nextChatCount = history.length;
+      const nextUserMsgCount = history.filter((m) => m.role === "user").length;
+      setChatCount(nextChatCount);
+      setUserMsgCount(nextUserMsgCount);
+      setInsightsChat({ chatCount: nextChatCount, userMsgCount: nextUserMsgCount });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [userId, setEvalStats]);
+  }, [userId, setEvalStats, setInsightsChat]);
 
   useEffect(() => {
-    if (storeStats) {
-      setStats(storeStats);
-      setLoading(false);
+    if (storeStats) setStats(storeStats);
+    if (insightsChat) {
+      setChatCount(insightsChat.chatCount);
+      setUserMsgCount(insightsChat.userMsgCount);
     }
-    void getChatHistory(userId)
-      .then((history) => {
-        setChatCount(history.length);
-        setUserMsgCount(history.filter((m) => m.role === "user").length);
-      })
-      .catch(() => {});
-    if (!storeStats) void load();
-  }, [storeStats, load, userId]);
+    if (storeStats && insightsChat) {
+      setLoading(false);
+      return;
+    }
+    void load();
+  }, [storeStats, insightsChat, load]);
 
   const insight = useMemo(
     () =>
@@ -301,7 +305,7 @@ export default function DataInsightsContent() {
               <Title level={3} className="lp-insights-hero-name">
                 {userName}
               </Title>
-              <Text type="secondary">{courseName}</Text>
+              <Text type="secondary">{displayCourseName(courseName, userId)}</Text>
               <div className="lp-insights-xp-bar">
                 <Progress
                   percent={insight.levelProgress}

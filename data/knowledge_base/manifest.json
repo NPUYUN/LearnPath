@@ -1,0 +1,20 @@
+{
+  "libraries": [
+    {
+      "id": "builtin-ml-intro",
+      "name": "机器学习导论",
+      "description": "内置课程知识库：导论、线性回归、逻辑回归、模型评估、梯度下降等章节",
+      "path": "ml_intro",
+      "collection": "ml_intro",
+      "course": "机器学习导论"
+    },
+    {
+      "id": "builtin-python-basics",
+      "name": "Python 程序设计基础",
+      "description": "内置 Python 语法、数据结构与函数式编程入门资料",
+      "path": "python_basics",
+      "collection": "lib_builtin_python_basics",
+      "course": "Python 程序设计"
+    }
+  ]
+}

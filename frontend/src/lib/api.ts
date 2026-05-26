@@ -277,10 +277,93 @@ export async function getProfile(userId: string) {
   return res.json() as Promise<StudentProfile>;
 }
 
+export type ResourceLibrary = {
+  id: string;
+  name: string;
+  description: string;
+  source_type: "builtin" | "upload";
+  status: "empty" | "processing" | "ready" | "error";
+  file_count: number;
+  chunk_count: number;
+  course?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type GenerateResourceOptions = {
+  resourceTypes?: string[];
+  libraryId?: string | null;
+  newLibraryName?: string;
+};
+
+export async function listLibraries(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/libraries?user_id=${encodeURIComponent(userId)}`), {
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ResourceLibrary[]>;
+}
+
+export async function createLibrary(userId: string, name: string, description = "") {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/libraries"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ user_id: userId, name, description }),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ResourceLibrary>;
+}
+
+export async function getSupportedUploadFormats() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/libraries/supported-formats"), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ extensions: string[] }>;
+}
+
+export async function uploadLibraryFiles(userId: string, libraryId: string, files: File[]) {
+  const form = new FormData();
+  form.append("user_id", userId);
+  for (const f of files) form.append("files", f);
+  const token = getAccessToken();
+  const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/libraries/${libraryId}/upload`), {
+      method: "POST",
+      headers,
+      body: form,
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{
+    library_id: string;
+    ingested_chunks: number;
+    file_count: number;
+    errors: string[];
+    library?: ResourceLibrary;
+  }>;
+}
+
+export async function deleteLibrary(userId: string, libraryId: string) {
+  const res = await handleResponse(
+    await fetch(
+      apiUrl(`/api/libraries/${libraryId}?user_id=${encodeURIComponent(userId)}`),
+      { method: "DELETE", headers: authHeaders() }
+    )
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean }>;
+}
+
 export async function generateResources(
   userId: string,
   topic: string,
-  resourceTypes?: string[]
+  options?: GenerateResourceOptions
 ) {
   const res = await handleResponse(
     await fetch(apiUrl("/api/resources/generate"), {
@@ -289,7 +372,9 @@ export async function generateResources(
       body: JSON.stringify({
         user_id: userId,
         topic,
-        resource_types: resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
+        resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
+        library_id: options?.libraryId || null,
+        new_library_name: options?.newLibraryName || null,
       }),
     })
   );
@@ -338,7 +423,7 @@ export async function streamGenerateResources(
   userId: string,
   topic: string,
   callbacks: StreamChatCallbacks,
-  resourceTypes?: string[]
+  options?: GenerateResourceOptions
 ) {
   const res = await handleResponse(
     await fetch(apiUrl("/api/resources/generate/stream"), {
@@ -347,7 +432,9 @@ export async function streamGenerateResources(
       body: JSON.stringify({
         user_id: userId,
         topic,
-        resource_types: resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
+        resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
+        library_id: options?.libraryId || null,
+        new_library_name: options?.newLibraryName || null,
       }),
     })
   );

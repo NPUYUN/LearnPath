@@ -411,3 +411,155 @@ def list_resources_with_meta(user_id: str) -> list[dict]:
             }
             for r in rows
         ]
+
+
+# ── 资料库 ──────────────────────────────────────────────────────────────────
+
+
+async def save_library(library: dict) -> None:
+    from app.db.models import ResourceLibraryRecord
+
+    with SessionLocal() as db:
+        row = db.get(ResourceLibraryRecord, library["id"])
+        if row is None:
+            db.add(
+                ResourceLibraryRecord(
+                    id=library["id"],
+                    user_id=library.get("user_id", ""),
+                    name=library.get("name", ""),
+                    description=library.get("description", ""),
+                    source_type=library.get("source_type", "upload"),
+                    status=library.get("status", "empty"),
+                    collection_name=library.get("collection_name", ""),
+                    data_json=dumps(library),
+                )
+            )
+        else:
+            row.name = library.get("name", row.name)
+            row.description = library.get("description", row.description)
+            row.status = library.get("status", row.status)
+            row.collection_name = library.get("collection_name", row.collection_name)
+            row.data_json = dumps(library)
+            row.updated_at = datetime.utcnow()
+        db.commit()
+
+
+async def get_library(library_id: str, user_id: str = "") -> dict | None:
+    from app.db.models import ResourceLibraryRecord
+
+    with SessionLocal() as db:
+        row = db.get(ResourceLibraryRecord, library_id)
+        if not row:
+            return None
+        if row.source_type != "builtin" and row.user_id and row.user_id != user_id:
+            return None
+        data = loads(row.data_json)
+        return {
+            "id": row.id,
+            "user_id": row.user_id,
+            "name": row.name,
+            "description": row.description,
+            "source_type": row.source_type,
+            "status": row.status,
+            "collection_name": row.collection_name,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+            "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+            **data,
+        }
+
+
+async def list_libraries(user_id: str) -> list[dict]:
+    from app.db.models import ResourceLibraryRecord
+
+    with SessionLocal() as db:
+        rows = (
+            db.query(ResourceLibraryRecord)
+            .filter(
+                (ResourceLibraryRecord.source_type == "builtin")
+                | (ResourceLibraryRecord.user_id == user_id)
+            )
+            .order_by(ResourceLibraryRecord.source_type.desc(), ResourceLibraryRecord.updated_at.desc())
+            .all()
+        )
+        out = []
+        for row in rows:
+            data = loads(row.data_json)
+            out.append(
+                {
+                    "id": row.id,
+                    "user_id": row.user_id,
+                    "name": row.name,
+                    "description": row.description,
+                    "source_type": row.source_type,
+                    "status": row.status,
+                    "collection_name": row.collection_name,
+                    "file_count": data.get("file_count", 0),
+                    "chunk_count": data.get("chunk_count", 0),
+                    "course": data.get("course", ""),
+                    "created_at": row.created_at.isoformat() if row.created_at else "",
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+                }
+            )
+        return out
+
+
+async def delete_library(library_id: str, user_id: str) -> bool:
+    from app.db.models import LibraryFileRecord, ResourceLibraryRecord
+
+    with SessionLocal() as db:
+        row = db.get(ResourceLibraryRecord, library_id)
+        if not row or row.source_type == "builtin":
+            return False
+        if row.user_id != user_id:
+            return False
+        db.query(LibraryFileRecord).filter(LibraryFileRecord.library_id == library_id).delete()
+        db.delete(row)
+        db.commit()
+        return True
+
+
+async def save_library_file(record: dict) -> None:
+    from app.db.models import LibraryFileRecord
+
+    with SessionLocal() as db:
+        row = db.get(LibraryFileRecord, record["id"])
+        if row is None:
+            db.add(
+                LibraryFileRecord(
+                    id=record["id"],
+                    library_id=record["library_id"],
+                    filename=record.get("filename", ""),
+                    mime_type=record.get("mime_type", ""),
+                    size=record.get("size", 0),
+                    status=record.get("status", "pending"),
+                    data_json=dumps(record),
+                )
+            )
+        else:
+            row.status = record.get("status", row.status)
+            row.data_json = dumps(record)
+        db.commit()
+
+
+async def list_library_files(library_id: str) -> list[dict]:
+    from app.db.models import LibraryFileRecord
+
+    with SessionLocal() as db:
+        rows = (
+            db.query(LibraryFileRecord)
+            .filter(LibraryFileRecord.library_id == library_id)
+            .order_by(LibraryFileRecord.created_at.desc())
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "library_id": r.library_id,
+                "filename": r.filename,
+                "mime_type": r.mime_type,
+                "size": r.size,
+                "status": r.status,
+                **loads(r.data_json),
+            }
+            for r in rows
+        ]

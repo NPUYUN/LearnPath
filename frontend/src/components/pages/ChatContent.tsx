@@ -11,7 +11,6 @@ import dynamic from "next/dynamic";
 import PageHeader from "@/components/PageHeader";
 import {
   appendChatHistory,
-  chat,
   checkHealth,
   formatLlmRouting,
   getHealth,
@@ -22,14 +21,13 @@ import {
   getRecommendations,
   listResources,
   streamChat,
-  streamTutor,
   type ResourceRecommendation,
   type ResourceSummary,
 } from "@/lib/api";
 import { clientNavigate } from "@/lib/clientNav";
 import { RESOURCE_CONFIG, mapApiType } from "@/lib/resourceConfig";
 import { playAssistantSpeech } from "@/lib/tts";
-import { useAppStore } from "@/store/appStore";
+import { isDemoUser, useAppStore } from "@/store/appStore";
 import { useSettingsStore } from "@/store/settingsStore";
 
 // 懒加载重型 Markdown 渲染器，避免阻塞首屏
@@ -47,11 +45,18 @@ interface Message {
   isTyping?: boolean;
 }
 
-const QUICK_ACTIONS = [
+const DEMO_QUICK_ACTIONS = [
   "帮我构建学习画像",
   "生成线性回归学习资源",
   "制定一个月学习计划",
   "解释梯度下降算法",
+];
+
+const REAL_QUICK_ACTIONS = [
+  "帮我构建学习画像",
+  "我想开始学习一门课程",
+  "制定我的学习计划",
+  "解释一个我不太懂的概念",
 ];
 
 // 单条消息 —— 用 memo 确保流式更新时仅重绘当前气泡
@@ -137,27 +142,28 @@ const MessageItem = memo(function MessageItem({
   );
 });
 
-const TUTOR_HINT = /解释|为什么|怎么|如何|不懂|疑问|辅导/;
-
 const STAGE_LABELS: Record<string, string> = {
   deep_thinking: "深度思考中",
-  profile: "更新画像",
+  profile: "同步画像",
   generate: "生成资源",
   path: "规划路径",
   eval: "学习评估",
-  tutor: "智能辅导",
+  chat: "智能回答",
+  tutor: "智能回答",
+  retrieval: "检索资源库",
   running: "处理中",
 };
 
 const WELCOME_MSG: Message = {
   id: "0",
   role: "assistant",
-  content: `你好！我是 **学径 LearnPath 学习助手** 🎓\n\n我可以帮你：\n- 📊 **构建个人学习画像** — 通过对话了解你的学习情况\n- 📚 **生成个性化学习资源** — 文档、思维导图、题库、多模态说明、代码案例\n- 🗺️ **规划学习路径** — 科学分阶段的个性化学习计划\n- 🤔 **解答学习疑问** — 随时提问，RAG 知识库支撑\n\n请告诉我你想学习什么，或点击下方快捷操作开始 👇`,
+  content: `你好！我是 **学径 LearnPath 学习助手** 🎓\n\n我可以帮你：\n- 📊 **构建个人学习画像** — 通过对话了解你的学习情况\n- 📚 **生成个性化学习资源** — 文档、思维导图、题库、多模态说明、代码案例\n- 🗺️ **规划学习路径** — 科学分阶段的个性化学习计划\n- 🤔 **智能答疑** — 优先检索你的资源库，润色后作答；可输出代码、视频分镜等多模态内容\n\n请告诉我你想学习什么，或点击下方快捷操作开始 👇`,
   timestamp: new Date(),
 };
 
 export default function ChatContent() {
   const userId = useAppStore((s) => s.userId);
+  const quickActions = isDemoUser(userId) ? DEMO_QUICK_ACTIONS : REAL_QUICK_ACTIONS;
   const setProfile = useAppStore((s) => s.setProfile);
   const setResources = useAppStore((s) => s.setResources);
   const setResourceTitles = useAppStore((s) => s.setResourceTitles);
@@ -170,7 +176,7 @@ export default function ChatContent() {
   const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
   const voice = useSettingsStore((s) => s.voice);
   const setSettings = useSettingsStore((s) => s.setSettings);
-  const chunkSize = streamSpeed === "fast" ? 2 : 8;
+  const chunkSize = streamSpeed === "fast" ? 2 : 1;
   const [messages, setMessages] = useState<Message[]>([WELCOME_MSG]);
   const [recommendations, setRecommendations] = useState<ResourceRecommendation[]>([]);
   const [input, setInput] = useState("");
@@ -179,7 +185,6 @@ export default function ChatContent() {
   const [llmRouting, setLlmRouting] = useState("");
   const [stageLabel, setStageLabel] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
-  const historyLoaded = useRef(false);
 
   const handleResourceClick = useCallback(
     (id: string) => {
@@ -229,11 +234,11 @@ export default function ChatContent() {
   }, [probeBackend]);
 
   useEffect(() => {
-    if (historyLoaded.current) return;
-    historyLoaded.current = true;
+    setMessages([WELCOME_MSG]);
+    let cancelled = false;
     void getChatHistory(userId)
       .then((rows) => {
-        if (!rows.length) return;
+        if (cancelled || !rows.length) return;
         setMessages([
           WELCOME_MSG,
           ...rows.map((r) => ({
@@ -246,6 +251,9 @@ export default function ChatContent() {
         ]);
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -281,95 +289,104 @@ export default function ChatContent() {
       ]);
 
       try {
-        const replyId = (Date.now() + 1).toString();
-        setMessages((prev) =>
-          prev
-            .filter((m) => m.id !== typingId)
-            .concat({ id: replyId, role: "assistant", content: "", timestamp: new Date() })
-        );
-
         let acc = "";
         let finalReply = "";
         let msgResources: ResourceSummary[] | undefined;
-        const useTutor = TUTOR_HINT.test(content);
+        let replyId: string | null = null;
 
         const formatStage = (stage: string) => STAGE_LABELS[stage] || stage;
+
+        const ensureAssistantMessage = (content: string) => {
+          if (!replyId) {
+            replyId = (Date.now() + 1).toString();
+            setMessages((prev) =>
+              prev
+                .filter((m) => m.id !== typingId)
+                .concat({
+                  id: replyId!,
+                  role: "assistant",
+                  content,
+                  timestamp: new Date(),
+                })
+            );
+            return;
+          }
+          setMessages((prev) =>
+            prev.map((m) => (m.id === replyId ? { ...m, content } : m))
+          );
+        };
 
         const callbacks = {
           onToken: (token: string) => {
             acc += token;
-            setMessages((prev) =>
-              prev.map((m) => (m.id === replyId ? { ...m, content: acc } : m))
-            );
+            ensureAssistantMessage(acc);
           },
           onProgress: (stage: string) => setStageLabel(formatStage(stage)),
           onDone: (reply: string) => {
             finalReply = reply;
+            if (reply && reply !== acc) {
+              acc = reply;
+              ensureAssistantMessage(acc);
+            }
           },
           onError: (err: string) => {
             throw new Error(err);
           },
         };
 
-        if (useTutor) {
-          await streamTutor(userId, content, "机器学习导论", callbacks, chunkSize, deepThinking);
-        } else {
-          await streamChat(
-            userId,
-            content,
-            {
-              ...callbacks,
-              onIntent: (intent: string) => setStageLabel(formatStage(intent)),
-              onProfile: (p) => setProfile(p),
-              onResources: (items) => {
-                msgResources = items;
-                addResources(
-                  items.map((it) => ({
-                    id: it.id,
-                    type: it.type,
-                    title: it.title,
-                    content: "",
-                    sources: [],
-                    topic: "",
-                  }))
-                );
-              },
-              onPath: () => setStageLabel(formatStage("path")),
+        await streamChat(
+          userId,
+          content,
+          {
+            ...callbacks,
+            onIntent: (intent: string) => setStageLabel(formatStage(intent)),
+            onProfile: (p) => setProfile(p),
+            onResources: (items) => {
+              msgResources = items;
+              addResources(
+                items.map((it) => ({
+                  id: it.id,
+                  type: it.type,
+                  title: it.title,
+                  content: "",
+                  sources: [],
+                  topic: "",
+                }))
+              );
             },
-            chunkSize,
-            deepThinking
-          );
-        }
-
-        const display = finalReply || acc;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === replyId
-              ? {
-                  ...m,
-                  content: display || "处理完成",
-                  resources: msgResources,
-                }
-              : m
-          )
+            onPath: () => setStageLabel(formatStage("path")),
+          },
+          chunkSize,
+          deepThinking
         );
 
-        let assistantText = display || "处理完成";
-        if (!display && !acc) {
-          const res = await chat(userId, content, deepThinking);
-          assistantText = res.reply || "处理完成";
+        const assistantText = (finalReply || acc).trim();
+        if (!assistantText) {
+          setMessages((prev) =>
+            prev
+              .filter((m) => m.id !== typingId)
+              .concat({
+                id: (Date.now() + 1).toString(),
+                role: "assistant",
+                content: "暂时无法获取回复，请检查后端连接后重试。",
+                timestamp: new Date(),
+              })
+          );
+        } else if (msgResources?.length && replyId) {
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === replyId ? { ...m, content: assistantText } : m
+              m.id === replyId ? { ...m, resources: msgResources } : m
             )
           );
-          if (res.profile) setProfile(res.profile);
         }
-        void appendChatHistory(userId, "assistant", assistantText, msgResources || []).catch(
-          () => {}
-        );
-        if (ttsEnabled) {
-          void playAssistantSpeech(assistantText, voice);
+
+        if (assistantText) {
+          void appendChatHistory(userId, "assistant", assistantText, msgResources || []).catch(
+            () => {}
+          );
+          if (ttsEnabled) {
+            void playAssistantSpeech(assistantText, voice);
+          }
         }
 
         setStageLabel("");
@@ -473,7 +490,7 @@ export default function ChatContent() {
 
       {messages.length <= 1 && (
         <div className="lp-chat-quick-actions">
-          {QUICK_ACTIONS.map((a) => (
+          {quickActions.map((a) => (
             <Tag
               key={a}
               color="blue"

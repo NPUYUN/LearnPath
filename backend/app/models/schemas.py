@@ -96,6 +96,48 @@ class GenerateResourcesRequest(BaseModel):
     resource_types: list[ResourceType] = Field(
         default_factory=lambda: ["doc", "mindmap", "quiz", "reading", "media", "code"]
     )
+    library_id: str | None = None
+    new_library_name: str | None = None
+
+
+class ResourceLibrarySummary(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    source_type: Literal["builtin", "upload"] = "upload"
+    status: Literal["empty", "processing", "ready", "error"] = "empty"
+    file_count: int = 0
+    chunk_count: int = 0
+    course: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class CreateLibraryRequest(BaseModel):
+    user_id: str = "demo"
+    name: str
+    description: str = ""
+
+
+class LibraryFileInfo(BaseModel):
+    id: str
+    filename: str
+    mime_type: str = ""
+    size: int = 0
+    status: str = "pending"
+
+
+class LibraryDetail(ResourceLibrarySummary):
+    files: list[LibraryFileInfo] = Field(default_factory=list)
+    synthesis: dict[str, Any] = Field(default_factory=dict)
+
+
+class UploadLibraryResponse(BaseModel):
+    library_id: str
+    ingested_chunks: int = 0
+    file_count: int = 0
+    errors: list[str] = Field(default_factory=list)
+    library: ResourceLibrarySummary | None = None
 
 
 class TutorRequest(BaseModel):

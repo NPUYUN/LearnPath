@@ -31,7 +31,7 @@ import {
   type LearningPath,
   type PathStep,
 } from "@/lib/api";
-import { useAppStore } from "@/store/appStore";
+import { displayCourseName, useAppStore } from "@/store/appStore";
 import ApartmentOutlined from "@ant-design/icons/ApartmentOutlined";
 
 const { Title, Text, Paragraph } = Typography;
@@ -65,6 +65,8 @@ function mapStatus(s: string): keyof typeof STATUS_CONFIG {
 
 export default function PathContent() {
   const userId = useAppStore((s) => s.userId);
+  const courseName = useAppStore((s) => s.courseName);
+  const courseLabel = displayCourseName(courseName, userId);
   const cachedPath = useAppStore((s) => s.learningPath);
   const cachedTitles = useAppStore((s) => s.resourceTitles);
   const setLearningPath = useAppStore((s) => s.setLearningPath);
@@ -109,13 +111,14 @@ export default function PathContent() {
   };
 
   useEffect(() => {
-    if (cachedPath) {
+    if (cachedPath && cachedPath.user_id === userId) {
       setPath(cachedPath);
       setExpanded(`step-${cachedPath.steps?.[0]?.order ?? 1}`);
       if (Object.keys(cachedTitles).length) setResourceTitlesLocal(cachedTitles);
       setLoading(false);
       return;
     }
+    setPath(null);
     void load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, cachedPath]);
@@ -198,7 +201,7 @@ export default function PathContent() {
     <div>
       <PageHeader
         title="我的学习路径"
-        subtitle={`${steps.length} 个阶段 · 机器学习导论`}
+        subtitle={`${steps.length} 个阶段 · ${courseLabel}`}
         icon={<ApartmentOutlined />}
         extra={
           <Button icon={<FireOutlined />} type="primary" loading={refreshing} onClick={handleRefresh}>
