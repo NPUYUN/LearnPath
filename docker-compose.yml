@@ -1,0 +1,15 @@
+# 可选：生产环境 PostgreSQL。框架阶段默认使用 SQLite，无需启动本文件。
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: learnpath
+      POSTGRES_PASSWORD: learnpath
+      POSTGRES_DB: learnpath
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

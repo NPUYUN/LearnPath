@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>学径 LearnPath - 本地入口</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(135deg, #e6f4ff 0%, #f5f7fa 50%, #fff 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: #1a1a1a;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 8px 32px rgba(22, 119, 255, 0.12);
+      max-width: 520px;
+      width: 100%;
+      padding: 36px 32px;
+    }
+    h1 { font-size: 26px; color: #1677ff; margin-bottom: 4px; }
+    .sub { color: #8c8c8c; font-size: 14px; margin-bottom: 28px; }
+    .hint {
+      background: #fffbe6;
+      border: 1px solid #ffe58f;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #614700;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+    a.btn {
+      display: block;
+      text-align: center;
+      text-decoration: none;
+      padding: 14px 20px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    a.btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    a.primary { background: #1677ff; color: #fff; }
+    a.secondary { background: #f0f5ff; color: #1677ff; border: 1px solid #91caff; }
+    a.ghost { background: #fafafa; color: #595959; border: 1px solid #e8e8e8; font-weight: 500; }
+    .links { margin-top: 20px; font-size: 12px; color: #8c8c8c; text-align: center; }
+    .links a { color: #1677ff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>学径 LearnPath</h1>
+    <p class="sub">个性化学习多智能体系统 · 本地入口</p>
+    <p class="hint">
+      请先双击项目根目录 <code>start.bat</code>（或运行 <code>scripts\start.ps1</code>），
+      等待出现「backend ready」后再点击下方链接。默认地址：<code>http://localhost:3000/chat</code>
+    </p>
+
+    <a class="btn primary" href="http://localhost:3000/chat" target="_blank" rel="noopener">
+      打开前端 · 智能对话（端口 3000）
+    </a>
+    <a class="btn secondary" href="http://localhost:3001/chat" target="_blank" rel="noopener">
+      打开前端 · 备用端口 3001
+    </a>
+    <a class="btn secondary" href="http://localhost:3002/chat" target="_blank" rel="noopener">
+      打开前端 · 备用端口 3002
+    </a>
+    <a class="btn ghost" href="http://localhost:8000/docs" target="_blank" rel="noopener">
+      打开后端 API 文档
+    </a>
+    <a class="btn ghost" href="http://localhost:8000/api/health" target="_blank" rel="noopener">
+      健康检查
+    </a>
+
+    <p class="links">
+      <a href="./README.md">README</a> ·
+      <a href="./A3赛题内容.md">赛题说明</a>
+    </p>
+  </div>
+</body>
+</html>
