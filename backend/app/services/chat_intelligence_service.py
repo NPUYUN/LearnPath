@@ -198,6 +198,8 @@ def build_intelligent_chat_messages(
     profile: dict | None,
     retrieval: dict[str, Any],
     deep_thinking: bool = False,
+    web_context: str = "",
+    attachment_context: str = "",
 ) -> tuple[list[dict[str, str]], list[dict[str, Any]], str]:
     chunks = retrieval.get("chunks") or []
     mode = retrieval.get("mode", "direct")
@@ -212,6 +214,12 @@ def build_intelligent_chat_messages(
             f"偏好：{profile.get('preferred_modality', '')}"
         )
 
+    extra_blocks = ""
+    if attachment_context.strip():
+        extra_blocks += f"\n\n【用户上传附件摘要】\n{attachment_context.strip()[:12000]}"
+    if web_context.strip():
+        extra_blocks += f"\n\n【联网检索摘要（请标注为外部资料并批判性使用）】\n{web_context.strip()[:12000]}"
+
     if mode == "library_polish":
         system = chat_library_polish_system(question_type, deep_thinking)
         user = (
@@ -219,7 +227,8 @@ def build_intelligent_chat_messages(
             f"提问类型：{question_type}\n"
             f"学生画像：{profile_hint or '暂无'}\n"
             f"用户问题：{question}\n\n"
-            f"【资源库检索片段（请优先依据以下内容润色作答）】\n{ctx}\n\n"
+            f"【资源库检索片段（请优先依据以下内容润色作答）】\n{ctx}"
+            f"{extra_blocks}\n\n"
             "请输出结构化 Markdown 回答，并注明与资源库的对应关系。"
         )
     else:
@@ -231,9 +240,61 @@ def build_intelligent_chat_messages(
             f"用户问题：{question}\n\n"
             "说明：资源库匹配度较低，请基于你的学科知识直接作答；"
             "勿编造具体教材页码或链接。"
+            f"{extra_blocks}"
         )
 
     return [{"role": "system", "content": system}, {"role": "user", "content": user}], chunks, mode
+
+
+def _repair_mermaid_code(raw: str) -> str:
+    """修复单行/粘连的 Mermaid，保证边标签可渲染。"""
+    code = (raw or "").strip()
+    code = re.sub(r"^```mermaid\s*", "", code, flags=re.I)
+    code = re.sub(r"```\s*$", "", code).strip()
+    if not code:
+        return "flowchart TD\n  A[主题] --> B[说明]"
+    code = re.sub(
+        r"^graph\s+(TD|TB|LR|RL|BT)",
+        lambda m: f"flowchart {m.group(1)}",
+        code,
+        flags=re.I,
+    )
+    if ";" in code:
+        head = re.match(r"^(flowchart\s+(?:TD|TB|LR|RL|BT))", code, re.I)
+        header = head.group(1) if head else "flowchart TD"
+        body = re.sub(r"^flowchart\s+(?:TD|TB|LR|RL|BT)\s*;?\s*", "", code, flags=re.I)
+        lines = [ln.strip() for ln in body.split(";") if ln.strip()]
+        code = header + "\n" + "\n".join(f"  {ln}" if "-->" in ln else ln for ln in lines)
+    code = re.sub(r"\]([A-Z])(?=\s*--)", r"]\n  \1 ", code)
+    code = re.sub(r"\]([A-Z])(?=\[)", r"]\n  \1", code)
+    code = re.sub(r"\bBB\b", "B", code)
+
+    def _quote_label(m: re.Match) -> str:
+        label = m.group(1).strip()
+        if re.search(r"[\u4e00-\u9fff]", label) and not label.startswith(('"', "'")):
+            return f'-->|"{label.replace(chr(34), chr(39))}"|'
+        return m.group(0)
+
+    code = re.sub(r"-->\|([^|\n]+)\|", _quote_label, code)
+    return code
+
+
+def _normalize_markdown_answer(text: str) -> str:
+    """修复 LLM 常见 Markdown 格式问题，便于前端渲染。"""
+    if not (text or "").strip():
+        return text or ""
+    answer = text.replace("\r\n", "\n")
+    answer = re.sub(r"([^\n])\s*```\s*mermaid", r"\1\n\n```mermaid", answer, flags=re.I)
+    answer = re.sub(r"```\s*mermaid\s*([^\n`])", r"```mermaid\n\1", answer, flags=re.I)
+
+    def _fix_fence(m: re.Match) -> str:
+        return f"\n\n```mermaid\n{_repair_mermaid_code(m.group(1))}\n```\n\n"
+
+    answer = re.sub(r"```mermaid\n([\s\S]*?)```", _fix_fence, answer, flags=re.I)
+    answer = re.sub(r"([^\n])\n?(#{1,6}\s)", r"\1\n\n\2", answer)
+    answer = re.sub(r"```\s*([\u4e00-\u9fff])", r"```\n\n\1", answer)
+    answer = re.sub(r"([。！？；])(?=[^\n#`\d\s-])", r"\1\n", answer)
+    return answer
 
 
 def postprocess_multimodal_answer(
@@ -245,6 +306,7 @@ def postprocess_multimodal_answer(
     mode: str = "direct",
 ) -> str:
     answer = filter_sensitive(answer)
+    answer = _normalize_markdown_answer(answer)
 
     if question_type == "code" and "```" not in answer:
         answer += (
@@ -266,7 +328,8 @@ def postprocess_multimodal_answer(
     if question_type in ("concept", "general", "practice") and "```mermaid" not in answer:
         answer += (
             "\n\n### 知识关系图解\n\n```mermaid\nflowchart LR\n"
-            f"  A[{topic}] --> B[核心概念]\n  B --> C[应用/练习]\n```\n"
+            f'  A["{topic}"] --> B["核心概念"]\n'
+            '  B --> C["应用练习"]\n```\n'
         )
     if question_type == "practice" and "步骤" not in answer and "解题" not in answer:
         answer += "\n\n### 解题思路\n1. 明确已知与求解目标\n2. 选择公式或方法\n3. 分步推导并检验\n"
@@ -406,12 +469,34 @@ async def run_intelligent_chat(
         deep_thinking=deep_thinking,
     )
 
-    llm = get_primary_llm()
-    raw = await llm.chat(
-        messages,
-        temperature=chat_temperature(deep_thinking),
-        deep_thinking=deep_thinking,
-    )
+    from app.core.llm import get_chat_llm_fallback_chain
+    from app.core.llm.resilience import chat_with_retry
+
+    raw = ""
+    last_err: Exception | None = None
+    for client in get_chat_llm_fallback_chain():
+        try:
+            chat_once = getattr(client, "_chat_once", None)
+            if chat_once:
+                raw = await chat_with_retry(
+                    chat_once,
+                    messages,
+                    temperature=chat_temperature(deep_thinking),
+                    deep_thinking=deep_thinking,
+                )
+            else:
+                raw = await client.chat(
+                    messages,
+                    temperature=chat_temperature(deep_thinking),
+                    deep_thinking=deep_thinking,
+                )
+            if raw.strip():
+                break
+        except Exception as exc:
+            last_err = exc
+            continue
+    if not raw.strip():
+        raise last_err or RuntimeError("LLM 未返回内容")
     answer = postprocess_multimodal_answer(
         raw, question_type, chunks, topic, mode=mode
     )
@@ -440,10 +525,32 @@ async def prepare_intelligent_chat(
     profile: dict | None = None,
     resources: list[dict] | None = None,
     deep_thinking: bool = False,
+    web_search: bool = False,
+    attachment_context: str = "",
 ) -> dict[str, Any]:
     """检索 + 构建 LLM 消息（供流式与非流式共用）。"""
+    import asyncio
+
     question_type = classify_question_type(question)
-    retrieval = await retrieve_resource_library_context(user_id, question, resources)
+    try:
+        retrieval = await asyncio.wait_for(
+            retrieve_resource_library_context(user_id, question, resources),
+            timeout=30.0,
+        )
+    except Exception:
+        retrieval = {"chunks": [], "match_score": 0.0, "mode": "direct", "resource_count": 0}
+    web_context = ""
+    if web_search:
+        from app.services.web_research_service import full_web_research
+
+        try:
+            summary, _queries = await asyncio.wait_for(
+                full_web_research(question),
+                timeout=45.0,
+            )
+            web_context = summary
+        except Exception:
+            web_context = ""
     messages, chunks, mode = build_intelligent_chat_messages(
         question=question,
         topic=topic,
@@ -451,6 +558,8 @@ async def prepare_intelligent_chat(
         profile=profile,
         retrieval=retrieval,
         deep_thinking=deep_thinking,
+        web_context=web_context,
+        attachment_context=attachment_context,
     )
     return {
         "question_type": question_type,
@@ -469,26 +578,45 @@ async def stream_intelligent_chat(
     profile: dict | None = None,
     resources: list[dict] | None = None,
     deep_thinking: bool = False,
+    web_search: bool = False,
+    attachment_context: str = "",
     update_profile: bool = True,
 ) -> AsyncIterator[dict[str, Any]]:
     """
     真流式智能对话：逐 token 推送 LLM 输出，结束后补全后处理与画像。
     产出: {"type": "token", "data": str} | {"type": "done", "data": str, "profile": ...}
     """
-    from app.core.llm import get_primary_llm
+    import asyncio
 
-    ctx = await prepare_intelligent_chat(
-        user_id, question, topic,
-        profile=profile, resources=resources, deep_thinking=deep_thinking,
-    )
+    from app.core.llm import get_chat_llm_fallback_chain
+    from app.core.llm.resilience import stream_with_client_fallback
+
+    try:
+        ctx = await asyncio.wait_for(
+            prepare_intelligent_chat(
+                user_id,
+                question,
+                topic,
+                profile=profile,
+                resources=resources,
+                deep_thinking=deep_thinking,
+                web_search=web_search,
+                attachment_context=attachment_context,
+            ),
+            timeout=60.0,
+        )
+    except Exception as exc:
+        yield {"type": "error", "data": f"准备对话上下文失败：{exc}"}
+        return
+
     question_type = ctx["question_type"]
     chunks = ctx["chunks"]
     mode = ctx["mode"]
 
-    llm = get_primary_llm()
     acc = ""
     try:
-        async for token in llm.stream_chat(
+        async for token in stream_with_client_fallback(
+            get_chat_llm_fallback_chain(),
             ctx["messages"],
             temperature=chat_temperature(deep_thinking),
             deep_thinking=deep_thinking,
@@ -496,13 +624,17 @@ async def stream_intelligent_chat(
             acc += token
             yield {"type": "token", "data": token}
     except Exception as exc:
-        yield {"type": "error", "data": str(exc)}
+        hint = str(exc).strip() or "LLM 调用失败"
+        yield {
+            "type": "error",
+            "data": f"{hint}。可稍后重试，或在 .env 设置 LLM_MOCK=true 后重启后端。",
+        }
         return
 
     if not acc.strip():
         yield {
             "type": "error",
-            "data": "LLM 未返回内容。请检查 .env 中 KIMI_API_KEY，或设置 LLM_MOCK=true 后重启后端。",
+            "data": "LLM 未返回内容。请检查 Kimi/星火 Key，或设置 LLM_MOCK=true 后重启后端。",
         }
         return
 
@@ -513,15 +645,20 @@ async def stream_intelligent_chat(
         for ch in final[len(acc) :]:
             yield {"type": "token", "data": ch}
 
+    final = filter_sensitive(final)
+    yield {"type": "done", "data": final, "profile": None}
+
     updated_profile = None
     if update_profile:
-        updated_profile = await patch_profile_from_chat(
-            user_id, question, question_type, topic, profile
-        )
-
-    yield {
-        "type": "done",
-        "data": filter_sensitive(final),
-        "profile": updated_profile,
-    }
+        try:
+            updated_profile = await asyncio.wait_for(
+                patch_profile_from_chat(
+                    user_id, question, question_type, topic, profile
+                ),
+                timeout=25.0,
+            )
+        except Exception:
+            updated_profile = None
+        if updated_profile:
+            yield {"type": "profile", "data": updated_profile}
 

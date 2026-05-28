@@ -41,8 +41,26 @@ def _migrate_users_columns() -> None:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {ddl}"))
 
 
+def _migrate_chat_messages_columns() -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if "chat_messages" in insp.get_table_names():
+        existing = {c["name"] for c in insp.get_columns("chat_messages")}
+        alters = [
+            ("turn_id", "VARCHAR(64) DEFAULT ''"),
+            ("attachments_json", "TEXT DEFAULT '[]'"),
+            ("conversation_id", "VARCHAR(64) DEFAULT ''"),
+        ]
+        with engine.begin() as conn:
+            for col, ddl in alters:
+                if col not in existing:
+                    conn.execute(text(f"ALTER TABLE chat_messages ADD COLUMN {col} {ddl}"))
+
+
 def init_db() -> None:
     from app.db import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _migrate_users_columns()
+    _migrate_chat_messages_columns()

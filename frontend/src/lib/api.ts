@@ -1,15 +1,12 @@
 import { clearAccessToken, getAccessToken, setAccessToken } from "@/store/authStore";
-import { getApiBase } from "./apiBase";
+import { apiUrl } from "./apiBase";
 
-function apiUrl(path: string): string {
-  const base = getApiBase();
-  return base ? `${base}${path}` : path;
-}
+export { apiUrl };
 
-export function authHeaders(extra?: HeadersInit): HeadersInit {
+export function authHeaders(extra?: HeadersInit, json = true): HeadersInit {
   const token = getAccessToken();
   return {
-    "Content-Type": "application/json",
+    ...(json ? { "Content-Type": "application/json" } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...extra,
   };
@@ -140,33 +137,53 @@ export async function streamChat(
   message: string,
   callbacks: StreamChatCallbacks,
   chunkSize = 8,
-  deepThinking = false
+  deepThinking = false,
+  webSearch = false,
+  attachmentContext = "",
+  timeoutMs = 120000
 ) {
-  const res = await handleResponse(
-    await fetch(apiUrl("/api/chat/stream"), {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({
-        user_id: userId,
-        message,
-        stream: true,
-        chunk_size: chunkSize,
-        deep_thinking: deepThinking,
-      }),
-    })
-  );
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await handleResponse(
+      await fetch(apiUrl("/api/chat/stream"), {
+        method: "POST",
+        headers: authHeaders(),
+        signal: controller.signal,
+        body: JSON.stringify({
+          user_id: userId,
+          message,
+          stream: true,
+          chunk_size: chunkSize,
+          deep_thinking: deepThinking,
+          web_search: webSearch,
+          attachment_context: attachmentContext,
+        }),
+      })
+    );
+  } catch (e: unknown) {
+    clearTimeout(timer);
+    if (e instanceof Error && e.name === "AbortError") {
+      throw new Error("请求超时（120s），Kimi/智能体可能未响应，请稍后重试");
+    }
+    throw e;
+  }
+  clearTimeout(timer);
   if (!res.ok || !res.body) throw new Error("流式请求失败");
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let lastReply = "";
+  let gotToken = false;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split("\n\n");
+    const normalized = buffer.replace(/\r\n/g, "\n");
+    const parts = normalized.split("\n\n");
     buffer = parts.pop() || "";
     for (const part of parts) {
       const lines = part.split("\n");
@@ -176,7 +193,10 @@ export async function streamChat(
         if (line.startsWith("event:")) event = line.slice(6).trim();
         if (line.startsWith("data:")) data += line.slice(5).trim();
       }
-      if (event === "token" && data) callbacks.onToken?.(data);
+      if (event === "token" && data) {
+        gotToken = true;
+        callbacks.onToken?.(data);
+      }
       if (event === "intent" && data) callbacks.onIntent?.(data);
       if (event === "progress" && data) {
         try {
@@ -209,10 +229,19 @@ export async function streamChat(
       }
       if (event === "error" && data) {
         callbacks.onError?.(data);
+        if (!gotToken) callbacks.onToken?.(`⚠️ ${data}`);
+        callbacks.onDone?.(data.startsWith("⚠️") ? data : `⚠️ ${data}`);
         return;
       }
       if (event === "done") lastReply = data;
     }
+  }
+  if (!lastReply && !gotToken) {
+    const fallback = "未收到助手回复，请检查后端服务或 Kimi API 配置后重试。";
+    callbacks.onError?.(fallback);
+    callbacks.onToken?.(`⚠️ ${fallback}`);
+    callbacks.onDone?.(`⚠️ ${fallback}`);
+    return;
   }
   callbacks.onDone?.(lastReply);
 }
@@ -249,7 +278,8 @@ export async function streamTutor(
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split("\n\n");
+    const normalized = buffer.replace(/\r\n/g, "\n");
+    const parts = normalized.split("\n\n");
     buffer = parts.pop() || "";
     for (const part of parts) {
       const lines = part.split("\n");
@@ -282,6 +312,36 @@ export async function getProfile(userId: string) {
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<StudentProfile>;
+}
+
+export type ProfileRefreshResult = {
+  profile: StudentProfile;
+  message: string;
+  sources: {
+    chat_turns?: number;
+    resource_views?: number;
+    resources_owned?: number;
+    topics?: string[];
+  };
+};
+
+export async function getProfileSignals(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/profile/${userId}/signals`), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ProfileRefreshResult["sources"]>;
+}
+
+export async function refreshProfile(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/profile/${userId}/refresh`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ProfileRefreshResult>;
 }
 
 export type ResourceLibrary = {
@@ -527,17 +587,80 @@ export async function updatePathStep(
   return res.json() as Promise<LearningPath>;
 }
 
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  kind: "image" | "file";
+  mime_type: string;
+  url: string;
+  size: number;
+  text_preview?: string;
+};
+
+export type ChatConversationSummary = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+};
+
 export type ChatMessageItem = {
   id: string;
   role: "user" | "assistant";
   content: string;
   resources: ResourceSummary[];
+  turn_id?: string;
+  conversation_id?: string;
+  attachments?: ChatAttachment[];
   created_at: string;
 };
 
-export async function getChatHistory(userId: string) {
+export async function getChatConversations(userId: string) {
   const res = await handleResponse(
-    await fetch(apiUrl(`/api/chat/history/${userId}`), { headers: authHeaders() })
+    await fetch(apiUrl(`/api/chat/conversations/${userId}`), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ChatConversationSummary[]>;
+}
+
+export async function createChatConversation(userId: string, title = "新对话") {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/chat/conversations"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ user_id: userId, title }),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ChatConversationSummary>;
+}
+
+export async function getConversationMessages(userId: string, conversationId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/chat/conversations/${userId}/${conversationId}`), {
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ChatMessageItem[]>;
+}
+
+export async function deleteChatConversation(userId: string, conversationId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/chat/conversations/${userId}/${conversationId}`), {
+      method: "DELETE",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean }>;
+}
+
+export async function getChatHistory(userId: string, conversationId?: string) {
+  const q = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/chat/history/${userId}${q}`), { headers: authHeaders() })
   );
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<ChatMessageItem[]>;
@@ -547,17 +670,79 @@ export async function appendChatHistory(
   userId: string,
   role: "user" | "assistant",
   content: string,
-  resources: ResourceSummary[] = []
+  resources: ResourceSummary[] = [],
+  options?: {
+    turnId?: string;
+    attachments?: ChatAttachment[];
+    conversationId?: string;
+  }
 ) {
   const res = await handleResponse(
     await fetch(apiUrl("/api/chat/history"), {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ user_id: userId, role, content, resources }),
+      body: JSON.stringify({
+        user_id: userId,
+        conversation_id: options?.conversationId || "",
+        role,
+        content,
+        resources,
+        turn_id: options?.turnId || "",
+        attachments: options?.attachments || [],
+      }),
     })
   );
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<ChatMessageItem>;
+}
+
+export async function deleteChatTurn(userId: string, userMessageId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/chat/history/${userId}/turn/${userMessageId}`), {
+      method: "DELETE",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean }>;
+}
+
+export async function deleteAssistantForTurn(userId: string, userMessageId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/chat/history/${userId}/turn/${userMessageId}/assistant`), {
+      method: "DELETE",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean }>;
+}
+
+export async function clearChatHistory(userId: string, conversationId?: string) {
+  const q = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/chat/history/${userId}${q}`), {
+      method: "DELETE",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean; deleted: number }>;
+}
+
+export async function uploadChatAttachments(userId: string, files: File[]) {
+  const form = new FormData();
+  form.append("user_id", userId);
+  files.forEach((f) => form.append("files", f));
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/chat/attachments"), {
+      method: "POST",
+      headers: authHeaders(undefined, false),
+      body: form,
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ChatAttachment[]>;
 }
 
 export type UserPreferences = {

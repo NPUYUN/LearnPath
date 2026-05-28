@@ -385,7 +385,21 @@ def profile_system(deep: bool = False) -> str:
     return text
 
 
-
+def profile_refresh_system(deep: bool = False) -> str:
+    text = (
+        "你是「学径 LearnPath」学习画像分析专家。根据【当前画像】与【学习行为信号】"
+        "（智能体对话记录、资源浏览、测验成绩、已生成资源列表）综合推理，输出更新后的完整画像。\n"
+        "要求：\n"
+        "1. 对话内容反映兴趣与基础；资源浏览反映偏好模态；测验低分主题加入 error_prone_topics。\n"
+        "2. learning_goal 与 recent_progress 必须体现最近真实行为（含具体学科/资源名）。\n"
+        "3. knowledge_level 随对话深度与测验表现合理调整，勿一律「未评估」。\n"
+        "4. preferred_modality 结合 modality_hints 与资源类型（doc/code/quiz/media 等）。\n"
+        "【输出格式】仅输出一个 JSON 对象，无 markdown 包裹。字段：knowledge_level, learning_goal, "
+        "cognitive_style, error_prone_topics(数组), preferred_modality, pace_and_time, recent_progress。"
+    )
+    if deep:
+        text += DEEP_THINKING_APPEND
+    return text
 
 
 def tutor_system(deep: bool = False) -> str:
@@ -729,11 +743,14 @@ def chat_library_polish_system(question_type: str, deep: bool = False) -> str:
 
         "1. 不得与片段明显矛盾；片段不足处可简要补充，并标注「延伸说明」。\n"
 
-        "2. 学术严谨、分点清晰，使用 Markdown。\n"
+        "2. 学术严谨、分点清晰，使用标准 Markdown（##/### 标题、- 列表、**加粗**）。\n"
 
-        f"3. 本问类型侧重：{hint}\n"
+        "3. 关系图必须用围栏代码块：```mermaid 独占一行，内用 flowchart TD，每条边单独一行，"
+        "节点 ID 用字母数字；边标签写 |标签|；禁止一行内用分号串联多条边。\n"
 
-        "4. 禁止编造文献页码、URL 或测验分数。"
+        f"4. 本问类型侧重：{hint}\n"
+
+        "5. 禁止编造文献页码、URL 或测验分数。"
 
     )
 
@@ -757,7 +774,9 @@ def chat_direct_system(question_type: str, deep: bool = False) -> str:
 
         f"本问类型侧重：{hint}\n"
 
-        "要求：结构清晰、Markdown 格式；不确定处明确说明；禁止编造来源。"
+        "要求：结构清晰、标准 Markdown（标题/列表/加粗）；"
+        "关系图仅用 ```mermaid 围栏代码块，勿输出裸 mermaid 文本；"
+        "不确定处明确说明；禁止编造来源。"
 
     )
 

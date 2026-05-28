@@ -21,7 +21,13 @@ async def chat(
     current_user_id: str = Depends(get_current_user_id),
 ):
     _check_user(req.user_id, current_user_id)
-    return await run_chat(req.user_id, req.message, deep_thinking=req.deep_thinking)
+    return await run_chat(
+        req.user_id,
+        req.message,
+        deep_thinking=req.deep_thinking,
+        web_search=req.web_search,
+        attachment_context=req.attachment_context,
+    )
 
 
 @router.post("/stream")
@@ -37,10 +43,18 @@ async def chat_stream(
             req.message,
             chunk_size=req.chunk_size,
             deep_thinking=req.deep_thinking,
+            web_search=req.web_search,
+            attachment_context=req.attachment_context,
         ):
             yield {
                 "event": item["event"],
                 "data": item["data"] if isinstance(item["data"], str) else json.dumps(item["data"], ensure_ascii=False),
             }
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(
+        event_generator(),
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

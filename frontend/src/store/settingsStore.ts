@@ -15,6 +15,7 @@ export type AppSettings = {
   streamSpeed: StreamSpeed;
   reduceMotion: boolean;
   deepThinking: boolean;
+  webSearch: boolean;
 };
 
 const DEFAULTS: AppSettings = {
@@ -25,6 +26,7 @@ const DEFAULTS: AppSettings = {
   streamSpeed: "normal",
   reduceMotion: false,
   deepThinking: false,
+  webSearch: false,
 };
 
 type SettingsState = AppSettings & {
@@ -61,6 +63,7 @@ export const useSettingsStore = create<SettingsState>()(
         streamSpeed: s.streamSpeed,
         reduceMotion: s.reduceMotion,
         deepThinking: s.deepThinking,
+        webSearch: s.webSearch,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {

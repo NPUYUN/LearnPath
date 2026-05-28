@@ -94,7 +94,7 @@ function Ensure-EnvFiles([string]$Root) {
 
     @(
         "# Managed by scripts/start.ps1"
-        "NEXT_PUBLIC_API_BASE="
+        "NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000"
         "API_PROXY_TARGET=http://127.0.0.1:8000"
     ) | Set-Content -Path (Join-Path $Root "frontend\.env.local") -Encoding UTF8
 }
