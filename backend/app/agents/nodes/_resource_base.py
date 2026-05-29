@@ -107,5 +107,6 @@ async def _build_resource(
         "sources": source_labels[:8],
         "topic": topic,
         "library_id": gen_ctx.get("library_id", ""),
+        "library_name": gen_ctx.get("library_name", ""),
         "generation_mode": gen_ctx.get("mode", ""),
     }

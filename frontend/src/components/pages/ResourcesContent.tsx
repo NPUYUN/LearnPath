@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Button,
   Typography,
@@ -11,22 +12,15 @@ import {
   Radio,
   Select,
   Upload,
-  Divider,
 } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
-import DownloadOutlined from "@ant-design/icons/DownloadOutlined";
 import CloudUploadOutlined from "@ant-design/icons/CloudUploadOutlined";
-import dynamic from "next/dynamic";
 import {
-  getEvalStats,
-  getPath,
+  deleteResource,
   getPreferences,
   listResources,
   patchPreferences,
-  recordResourceComplete,
-  recordResourceView,
   streamGenerateResources,
-  submitEval,
   listLibraries,
   createLibrary,
   uploadLibraryFiles,
@@ -38,11 +32,9 @@ import PageHeader from "@/components/PageHeader";
 import ResourceLibraryPanel from "@/components/ResourceLibraryPanel";
 import { ResourceJourneyView } from "@/components/ResourceJourneyView";
 import {
-  EXTENDED_RESOURCE_TYPES,
   GENERATABLE_RESOURCE_TYPES,
   RESOURCE_CONFIG,
   STANDARD_RESOURCE_TYPES,
-  mapApiType,
 } from "@/lib/resourceConfig";
 import {
   filterGroupedResources,
@@ -55,12 +47,9 @@ import SearchOutlined from "@ant-design/icons/SearchOutlined";
 import BookOutlined from "@ant-design/icons/BookOutlined";
 import CompassOutlined from "@ant-design/icons/CompassOutlined";
 
-const MarkdownPreview = dynamic(() => import("@/components/MarkdownPreview"), {
-  loading: () => <Spin />,
-  ssr: false,
-});
-
 const { Text } = Typography;
+
+type GenSource = "web" | "library" | "new" | "";
 
 const CATEGORY_CHIPS = [
   { key: "all", label: "全部类型" },
@@ -102,12 +91,11 @@ function downloadMarkdown(r: LearningResource) {
 }
 
 export default function ResourcesContent() {
+  const router = useRouter();
   const userId = useAppStore((s) => s.userId);
   const learningPath = useAppStore((s) => s.learningPath);
   const cachedResources = useAppStore((s) => s.resources);
   const setResources = useAppStore((s) => s.setResources);
-  const setLearningPath = useAppStore((s) => s.setLearningPath);
-  const setEvalStats = useAppStore((s) => s.setEvalStats);
   const pendingPreviewId = useAppStore((s) => s.pendingResourcePreviewId);
   const setPendingPreviewId = useAppStore((s) => s.setPendingResourcePreviewId);
   const [items, setItems] = useState<LearningResource[]>(cachedResources);
@@ -115,21 +103,24 @@ export default function ResourcesContent() {
   const [generating, setGenerating] = useState(false);
   const [activeCategory, setActiveCategory] = useState("all");
   const [search, setSearch] = useState("");
-  const [preview, setPreview] = useState<LearningResource | null>(null);
   const [starredIds, setStarredIds] = useState<string[]>([]);
   const [topic, setTopic] = useState("");
-  const [quizAnswers, setQuizAnswers] = useState<number[]>([]);
-  const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [genStage, setGenStage] = useState("");
   const [genModalOpen, setGenModalOpen] = useState(false);
   const [pageTab, setPageTab] = useState("resources");
+
+  useEffect(() => {
+    if (typeof sessionStorage === "undefined") return;
+    if (sessionStorage.getItem("lp-resources-tab") === "libraries") {
+      setPageTab("libraries");
+      sessionStorage.removeItem("lp-resources-tab");
+    }
+  }, []);
   const [libraries, setLibraries] = useState<ResourceLibrary[]>([]);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null);
-  const [genSource, setGenSource] = useState<"web" | "library" | "new">("library");
+  const [genSource, setGenSource] = useState<GenSource>("");
   const [newLibraryName, setNewLibraryName] = useState("");
-  const [selectedGenTypes, setSelectedGenTypes] = useState<string[]>([
-    ...STANDARD_RESOURCE_TYPES,
-  ]);
+  const [selectedGenTypes, setSelectedGenTypes] = useState<string[]>([]);
   const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
   const [uploadExtensions, setUploadExtensions] = useState<string[]>([]);
   const [preparingLibrary, setPreparingLibrary] = useState(false);
@@ -147,10 +138,48 @@ export default function ResourcesContent() {
     }
   };
 
+  const resetGenForm = () => {
+    setTopic("");
+    setGenSource("");
+    setSelectedLibraryId(null);
+    setNewLibraryName("");
+    setPendingFiles([]);
+    setSelectedGenTypes([]);
+  };
+
+  const openGenModal = () => {
+    resetGenForm();
+    setGenModalOpen(true);
+  };
+
   const openPreview = (r: LearningResource) => {
-    setPreview(r);
-    setQuizAnswers([]);
-    void recordResourceView(userId, r.id).catch(() => {});
+    router.push(`/resources/view/${encodeURIComponent(r.id)}`);
+  };
+
+  const handleDeleteResource = (r: LearningResource) => {
+    Modal.confirm({
+      title: `删除「${r.title}」？`,
+      content: "删除后无法恢复，学习路径中的关联也会移除。",
+      okText: "删除",
+      okType: "danger",
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          await deleteResource(userId, r.id);
+          const next = items.filter((x) => x.id !== r.id);
+          setItems(next);
+          setResources(next);
+          if (starredIds.includes(r.id)) {
+            const ids = starredIds.filter((x) => x !== r.id);
+            setStarredIds(ids);
+            await patchPreferences(userId, ids);
+          }
+          message.success("已删除");
+        } catch (e: unknown) {
+          message.error(e instanceof Error ? e.message : "删除失败");
+        }
+      },
+    });
   };
 
   useEffect(() => {
@@ -167,14 +196,11 @@ export default function ResourcesContent() {
   }, [userId]);
 
   useEffect(() => {
-    if (!pendingPreviewId || !items.length) return;
-    const r = items.find((x) => x.id === pendingPreviewId);
-    if (r) {
-      openPreview(r);
-      setPendingPreviewId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingPreviewId, items]);
+    if (!pendingPreviewId) return;
+    const id = pendingPreviewId;
+    setPendingPreviewId(null);
+    router.push(`/resources/view/${encodeURIComponent(id)}`);
+  }, [pendingPreviewId, router, setPendingPreviewId]);
 
   const toggleStar = async (id: string) => {
     const next = starredIds.includes(id)
@@ -265,12 +291,20 @@ export default function ResourcesContent() {
       message.warning("请输入生成主题");
       return;
     }
+    if (!genSource) {
+      message.warning("请选择资料来源");
+      return;
+    }
     if (!selectedGenTypes.length) {
       message.warning("请至少选择一种资源类型");
       return;
     }
     if (genSource === "library" && !selectedLibraryId) {
       message.warning("请选择资料库，或切换为「新建资料库 / 全网检索」");
+      return;
+    }
+    if (genSource === "new" && !newLibraryName.trim()) {
+      message.warning("请输入新资料库名称");
       return;
     }
 
@@ -333,7 +367,7 @@ export default function ResourcesContent() {
             type="primary"
             icon={<PlusOutlined />}
             loading={generating}
-            onClick={() => setGenModalOpen(true)}
+            onClick={openGenModal}
           >
             生成资源
           </Button>
@@ -345,7 +379,7 @@ export default function ResourcesContent() {
         onCancel={() => {
           if (!generating && !preparingLibrary) {
             setGenModalOpen(false);
-            setPendingFiles([]);
+            resetGenForm();
           }
         }}
         maskClosable={!generating && !preparingLibrary}
@@ -394,8 +428,8 @@ export default function ResourcesContent() {
           <div className="lp-resource-gen-field">
             <Text className="lp-resource-gen-label">资料来源</Text>
             <Radio.Group
-              value={genSource}
-              onChange={(e) => setGenSource(e.target.value)}
+              value={genSource || undefined}
+              onChange={(e) => setGenSource(e.target.value as GenSource)}
               className="lp-resource-gen-source"
             >
               <Radio value="library">依据已有资料库</Radio>
@@ -471,18 +505,9 @@ export default function ResourcesContent() {
                 <button
                   type="button"
                   className="lp-resource-gen-preset"
-                  onClick={() => setSelectedGenTypes([...EXTENDED_RESOURCE_TYPES])}
+                  onClick={() => setSelectedGenTypes([])}
                 >
-                  完整套件
-                </button>
-                <button
-                  type="button"
-                  className="lp-resource-gen-preset"
-                  onClick={() =>
-                    setSelectedGenTypes(GENERATABLE_RESOURCE_TYPES.map((t) => t.api))
-                  }
-                >
-                  全选
+                  全不选
                 </button>
               </div>
             </div>
@@ -637,150 +662,13 @@ export default function ResourcesContent() {
             onStar={(id) => void toggleStar(id)}
             onPreview={openPreview}
             onDownload={downloadMarkdown}
+            onDelete={handleDeleteResource}
           />
         )}
 
         </>
         )}
-
-        <Modal
-          open={!!preview}
-          onCancel={() => setPreview(null)}
-          footer={[
-            <Button key="close" onClick={() => setPreview(null)}>
-              关闭
-            </Button>,
-            <Button
-              key="dl"
-              icon={<DownloadOutlined />}
-              type="primary"
-              onClick={() => preview && downloadMarkdown(preview)}
-            >
-              下载
-            </Button>,
-          ]}
-          title={
-            preview && (
-              <span>
-                <span
-                  style={{
-                    color: RESOURCE_CONFIG[mapApiType(preview.type)].color,
-                    marginRight: 8,
-                  }}
-                >
-                  {RESOURCE_CONFIG[mapApiType(preview.type)].icon}
-                </span>
-                {preview.title}
-              </span>
-            )
-          }
-          width={720}
-        >
-          {preview && (
-            <div
-              className="md-content"
-              style={{ maxHeight: "60vh", overflowY: "auto", padding: "0 4px" }}
-            >
-              {preview.type === "quiz" ? (
-                <QuizPanel
-                  content={preview.content}
-                  answers={quizAnswers}
-                  onAnswersChange={setQuizAnswers}
-                  submitting={submittingQuiz}
-                  onSubmit={async () => {
-                    setSubmittingQuiz(true);
-                    try {
-                      const res = await submitEval(userId, preview.id, quizAnswers);
-                      await recordResourceComplete(userId, preview.id).catch(() => {});
-                      const [pathData, evalS] = await Promise.all([
-                        getPath(userId),
-                        getEvalStats(userId),
-                      ]);
-                      if (pathData) setLearningPath(pathData);
-                      setEvalStats(evalS);
-                      message.success(res.feedback);
-                      setPreview(null);
-                    } catch (e: unknown) {
-                      message.error(e instanceof Error ? e.message : "提交失败");
-                    } finally {
-                      setSubmittingQuiz(false);
-                    }
-                  }}
-                />
-              ) : (
-                <MarkdownPreview content={preview.content} />
-              )}
-            </div>
-          )}
-        </Modal>
       </div>
-    </div>
-  );
-}
-
-type QuizQuestion = {
-  id: string;
-  stem: string;
-  options: string[];
-  answer?: number;
-};
-
-function parseQuiz(content: string): QuizQuestion[] {
-  const match = content.match(/\{[\s\S]*"questions"[\s\S]*\}/);
-  if (!match) return [];
-  try {
-    const data = JSON.parse(match[0]) as { questions?: QuizQuestion[] };
-    return data.questions || [];
-  } catch {
-    return [];
-  }
-}
-
-function QuizPanel({
-  content,
-  answers,
-  onAnswersChange,
-  onSubmit,
-  submitting,
-}: {
-  content: string;
-  answers: number[];
-  onAnswersChange: (a: number[]) => void;
-  onSubmit: () => void;
-  submitting: boolean;
-}) {
-  const questions = parseQuiz(content);
-  if (!questions.length) {
-    return <MarkdownPreview content={content} />;
-  }
-  return (
-    <div>
-      {questions.map((q, i) => (
-        <div key={q.id || i} style={{ marginBottom: 16 }}>
-          <Text strong>
-            {i + 1}. {q.stem}
-          </Text>
-          <Radio.Group
-            style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}
-            value={answers[i]}
-            onChange={(e) => {
-              const next = [...answers];
-              next[i] = e.target.value;
-              onAnswersChange(next);
-            }}
-            options={q.options.map((opt, idx) => ({ label: opt, value: idx }))}
-          />
-        </div>
-      ))}
-      <Divider />
-      <Button
-        type="primary"
-        loading={submitting}
-        onClick={onSubmit}
-        disabled={answers.length < questions.length}
-      >
-        提交测验并更新评估
-      </Button>
     </div>
   );
 }

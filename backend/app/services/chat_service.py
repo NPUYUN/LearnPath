@@ -11,7 +11,12 @@ from app.services.graph_state import build_graph_state
 
 
 async def run_chat(
-    user_id: str, message: str, *, deep_thinking: bool = False
+    user_id: str,
+    message: str,
+    *,
+    deep_thinking: bool = False,
+    web_search: bool = False,
+    attachment_context: str = "",
 ) -> ChatResponse:
     intent = classify_intent(message)
     base = await build_graph_state(
@@ -74,7 +79,13 @@ async def _yield_text_tokens(text: str, chunk_size: int = 1) -> AsyncIterator[di
 
 
 async def stream_chat(
-    user_id: str, message: str, chunk_size: int = 8, *, deep_thinking: bool = False
+    user_id: str,
+    message: str,
+    chunk_size: int = 8,
+    *,
+    deep_thinking: bool = False,
+    web_search: bool = False,
+    attachment_context: str = "",
 ) -> AsyncIterator[dict]:
     """SSE：intent / progress / token（LLM 真流式或逐字输出）/ profile / resources / path / done"""
     intent = classify_intent(message)
@@ -84,6 +95,11 @@ async def stream_chat(
         yield {
             "event": "progress",
             "data": json.dumps({"stage": "deep_thinking"}, ensure_ascii=False),
+        }
+    if web_search:
+        yield {
+            "event": "progress",
+            "data": json.dumps({"stage": "web_research"}, ensure_ascii=False),
         }
     yield {"event": "progress", "data": json.dumps({"stage": intent}, ensure_ascii=False)}
 
@@ -110,12 +126,37 @@ async def stream_chat(
                 profile=base.get("profile"),
                 resources=base.get("resources"),
                 deep_thinking=deep_thinking,
+                web_search=web_search,
+                attachment_context=attachment_context,
             ):
                 if item["type"] == "token":
                     yield {"event": "token", "data": item["data"]}
+                elif item["type"] == "error":
+                    err = item.get("data") or "LLM error"
+                    yield {"event": "token", "data": f"⚠️ {err}"}
+                    yield {"event": "done", "data": f"⚠️ {err}"}
+                    return
+                elif item["type"] == "profile":
+                    profile_data = item.get("data")
+                    if profile_data:
+                        yield {
+                            "event": "profile",
+                            "data": json.dumps(profile_data, ensure_ascii=False, default=str),
+                        }
                 elif item["type"] == "done":
                     final_reply = item.get("data") or ""
-                    profile_data = item.get("profile")
+                    if item.get("profile"):
+                        profile_data = item.get("profile")
+
+            if not (final_reply or "").strip():
+                fallback = (
+                    "⚠️ 对话生成结果为空。Kimi 接口可能不稳定，请稍后重试；"
+                    "或在 .env 设置 LLM_MOCK=true 后重启后端。"
+                )
+                async for tok in _yield_text_tokens(fallback, 1):
+                    yield tok
+                yield {"event": "done", "data": fallback}
+                return
 
             if profile_data:
                 yield {
@@ -179,11 +220,19 @@ async def stream_chat(
 
         reply = (result.get("reply") or "").strip()
         stream_step = 1 if chunk_size <= 4 else min(chunk_size, 3)
+        if not reply:
+            reply = (
+                "⚠️ 智能体未返回有效内容（可能为 Kimi 接口超时）。"
+                "请稍后重试，或检查 .env 中的 API Key / LLM_MOCK 配置。"
+            )
         async for tok in _yield_text_tokens(reply, stream_step):
             yield tok
         yield {"event": "done", "data": reply}
     except Exception as exc:
-        yield {"event": "error", "data": str(exc)}
+        err = f"⚠️ 智能体调用失败：{exc}"
+        async for tok in _yield_text_tokens(err, 1):
+            yield tok
+        yield {"event": "done", "data": err}
 
 
 def _new_resources_from_result(result: dict, prior_ids: set[str]) -> list[dict]:

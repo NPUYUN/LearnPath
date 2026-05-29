@@ -4,6 +4,7 @@ import string
 import uuid
 
 from app.db.models import (
+    ChatConversationRecord,
     ChatMessageRecord,
     LearningEventRecord,
     OtpRecord,
@@ -97,6 +98,40 @@ async def get_resource(user_id: str, resource_id: str) -> dict | None:
         data.setdefault("title", row.title)
         data.setdefault("content", row.content)
         return data
+
+
+async def delete_resource(user_id: str, resource_id: str) -> bool:
+    from app.db.models import QuizAttemptRecord, ResourceRecord
+
+    with SessionLocal() as db:
+        row = db.get(ResourceRecord, resource_id)
+        if not row or row.user_id != user_id:
+            return False
+        db.query(QuizAttemptRecord).filter(
+            QuizAttemptRecord.quiz_resource_id == resource_id
+        ).delete()
+        db.delete(row)
+        db.commit()
+
+    path = await get_path(user_id)
+    if path:
+        changed = False
+        for step in path.get("steps") or []:
+            ids = step.get("resource_ids") or []
+            if resource_id in ids:
+                step["resource_ids"] = [rid for rid in ids if rid != resource_id]
+                changed = True
+        if changed:
+            await save_path(path)
+
+    prefs = await get_preferences(user_id)
+    starred = prefs.get("starred_resource_ids") or []
+    if resource_id in starred:
+        await set_preferences(
+            user_id,
+            {"starred_resource_ids": [x for x in starred if x != resource_id]},
+        )
+    return True
 
 
 async def save_quiz_attempt(
@@ -345,51 +380,301 @@ async def set_preferences(user_id: str, patch: dict) -> dict:
     return current
 
 
-async def append_chat_message(
-    user_id: str,
-    role: str,
-    content: str,
-    resources: list[dict] | None = None,
-) -> dict:
+def _chat_row_dict(row: ChatMessageRecord) -> dict:
+    return {
+        "id": row.id,
+        "role": row.role,
+        "content": row.content,
+        "resources": loads(row.resources_json),
+        "turn_id": getattr(row, "turn_id", "") or "",
+        "conversation_id": getattr(row, "conversation_id", "") or "",
+        "attachments": loads(getattr(row, "attachments_json", None) or "[]"),
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+    }
+
+
+def _preview_title(text: str, max_len: int = 40) -> str:
+    t = (text or "").replace("\n", " ").strip()
+    if not t:
+        return "新对话"
+    return t[:max_len] + ("…" if len(t) > max_len else "")
+
+
+def _migrate_orphan_messages(db, user_id: str) -> None:
+    from sqlalchemy import or_
+
+    orphans = (
+        db.query(ChatMessageRecord)
+        .filter(
+            ChatMessageRecord.user_id == user_id,
+            or_(ChatMessageRecord.conversation_id == "", ChatMessageRecord.conversation_id.is_(None)),
+        )
+        .order_by(ChatMessageRecord.created_at.asc())
+        .all()
+    )
+    if not orphans:
+        return
+    first_user = next((m for m in orphans if m.role == "user"), orphans[0])
+    title = _preview_title(first_user.content) if first_user else "历史对话"
+    conv = ChatConversationRecord(id=str(uuid.uuid4()), user_id=user_id, title=title)
+    db.add(conv)
+    for m in orphans:
+        m.conversation_id = conv.id
+    conv.updated_at = orphans[-1].created_at or conv.updated_at
+
+
+async def ensure_chat_conversations_migrated(user_id: str) -> None:
     with SessionLocal() as db:
-        row = ChatMessageRecord(
+        _migrate_orphan_messages(db, user_id)
+        db.commit()
+
+
+async def create_chat_conversation(user_id: str, title: str = "新对话") -> dict:
+    with SessionLocal() as db:
+        row = ChatConversationRecord(
             id=str(uuid.uuid4()),
             user_id=user_id,
-            role=role,
-            content=content,
-            resources_json=dumps(resources or []),
+            title=(title or "新对话").strip()[:256] or "新对话",
         )
         db.add(row)
         db.commit()
         db.refresh(row)
         return {
             "id": row.id,
-            "role": row.role,
-            "content": row.content,
-            "resources": loads(row.resources_json),
+            "title": row.title,
             "created_at": row.created_at.isoformat() if row.created_at else "",
+            "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+            "message_count": 0,
         }
 
 
-def list_chat_messages(user_id: str, limit: int = 100) -> list[dict]:
+async def list_chat_conversations(user_id: str) -> list[dict]:
+    await ensure_chat_conversations_migrated(user_id)
     with SessionLocal() as db:
         rows = (
-            db.query(ChatMessageRecord)
-            .filter(ChatMessageRecord.user_id == user_id)
-            .order_by(ChatMessageRecord.created_at.asc())
-            .limit(limit)
+            db.query(ChatConversationRecord)
+            .filter(ChatConversationRecord.user_id == user_id)
+            .order_by(ChatConversationRecord.updated_at.desc())
             .all()
         )
-        return [
-            {
-                "id": r.id,
-                "role": r.role,
-                "content": r.content,
-                "resources": loads(r.resources_json),
-                "created_at": r.created_at.isoformat() if r.created_at else "",
-            }
-            for r in rows
-        ]
+        out = []
+        for row in rows:
+            count = (
+                db.query(ChatMessageRecord)
+                .filter(ChatMessageRecord.conversation_id == row.id)
+                .count()
+            )
+            out.append(
+                {
+                    "id": row.id,
+                    "title": row.title,
+                    "created_at": row.created_at.isoformat() if row.created_at else "",
+                    "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+                    "message_count": count,
+                }
+            )
+        return out
+
+
+async def get_chat_conversation(conversation_id: str, user_id: str) -> dict | None:
+    with SessionLocal() as db:
+        row = db.get(ChatConversationRecord, conversation_id)
+        if not row or row.user_id != user_id:
+            return None
+        return {
+            "id": row.id,
+            "title": row.title,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+            "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+        }
+
+
+async def delete_chat_conversation(conversation_id: str, user_id: str) -> bool:
+    with SessionLocal() as db:
+        conv = db.get(ChatConversationRecord, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return False
+        db.query(ChatMessageRecord).filter(
+            ChatMessageRecord.conversation_id == conversation_id
+        ).delete()
+        db.delete(conv)
+        db.commit()
+        return True
+
+
+def _touch_conversation(db, conversation_id: str, *, title_from: str = "") -> None:
+    conv = db.get(ChatConversationRecord, conversation_id)
+    if not conv:
+        return
+    conv.updated_at = datetime.utcnow()
+    if title_from and (conv.title or "新对话") in ("新对话", "历史对话"):
+        conv.title = _preview_title(title_from)
+
+
+async def append_chat_message(
+    user_id: str,
+    role: str,
+    content: str,
+    resources: list[dict] | None = None,
+    *,
+    conversation_id: str = "",
+    turn_id: str | None = None,
+    attachments: list[dict] | None = None,
+) -> dict:
+    tid = (turn_id or "").strip() or str(uuid.uuid4())
+    cid = (conversation_id or "").strip()
+
+    with SessionLocal() as db:
+        conv = db.get(ChatConversationRecord, cid) if cid else None
+        if not conv or conv.user_id != user_id:
+            conv = ChatConversationRecord(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                title="新对话",
+            )
+            db.add(conv)
+            db.flush()
+            cid = conv.id
+
+        row = ChatMessageRecord(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            conversation_id=cid,
+            role=role,
+            content=content,
+            resources_json=dumps(resources or []),
+            turn_id=tid,
+            attachments_json=dumps(attachments or []),
+        )
+        db.add(row)
+        if role == "user":
+            _touch_conversation(db, cid, title_from=content)
+        else:
+            _touch_conversation(db, cid)
+        db.commit()
+        db.refresh(row)
+        return _chat_row_dict(row)
+
+
+def list_chat_messages(
+    user_id: str,
+    conversation_id: str | None = None,
+    limit: int = 500,
+) -> list[dict]:
+    with SessionLocal() as db:
+        q = db.query(ChatMessageRecord).filter(ChatMessageRecord.user_id == user_id)
+        if conversation_id:
+            q = q.filter(ChatMessageRecord.conversation_id == conversation_id)
+        rows = q.order_by(ChatMessageRecord.created_at.asc()).limit(limit).all()
+        return [_chat_row_dict(r) for r in rows]
+
+
+async def delete_chat_turn(user_id: str, user_message_id: str) -> bool:
+    with SessionLocal() as db:
+        user_row = db.get(ChatMessageRecord, user_message_id)
+        if not user_row or user_row.user_id != user_id or user_row.role != "user":
+            return False
+        conv_id = user_row.conversation_id
+        ids: set[str] = {user_row.id}
+        if user_row.turn_id:
+            for r in (
+                db.query(ChatMessageRecord)
+                .filter(
+                    ChatMessageRecord.user_id == user_id,
+                    ChatMessageRecord.turn_id == user_row.turn_id,
+                )
+                .all()
+            ):
+                ids.add(r.id)
+        else:
+            nxt = (
+                db.query(ChatMessageRecord)
+                .filter(
+                    ChatMessageRecord.user_id == user_id,
+                    ChatMessageRecord.conversation_id == conv_id,
+                    ChatMessageRecord.role == "assistant",
+                    ChatMessageRecord.created_at > user_row.created_at,
+                )
+                .order_by(ChatMessageRecord.created_at.asc())
+                .first()
+            )
+            if nxt:
+                ids.add(nxt.id)
+        for rid in ids:
+            db.query(ChatMessageRecord).filter(ChatMessageRecord.id == rid).delete()
+        if conv_id:
+            _touch_conversation(db, conv_id)
+            remaining = (
+                db.query(ChatMessageRecord)
+                .filter(
+                    ChatMessageRecord.conversation_id == conv_id,
+                    ChatMessageRecord.role == "user",
+                )
+                .order_by(ChatMessageRecord.created_at.asc())
+                .first()
+            )
+            if remaining:
+                conv = db.get(ChatConversationRecord, conv_id)
+                if conv:
+                    conv.title = _preview_title(remaining.content)
+            else:
+                conv = db.get(ChatConversationRecord, conv_id)
+                if conv:
+                    db.delete(conv)
+        db.commit()
+        return True
+
+
+async def delete_assistant_for_user_message(user_id: str, user_message_id: str) -> bool:
+    """仅删除某轮用户消息对应的助手回复，保留用户提问。"""
+    with SessionLocal() as db:
+        user_row = db.get(ChatMessageRecord, user_message_id)
+        if not user_row or user_row.user_id != user_id or user_row.role != "user":
+            return False
+        conv_id = user_row.conversation_id
+        q = db.query(ChatMessageRecord).filter(
+            ChatMessageRecord.user_id == user_id,
+            ChatMessageRecord.role == "assistant",
+        )
+        if user_row.turn_id:
+            q = q.filter(ChatMessageRecord.turn_id == user_row.turn_id)
+        else:
+            q = q.filter(
+                ChatMessageRecord.conversation_id == conv_id,
+                ChatMessageRecord.created_at > user_row.created_at,
+            )
+        deleted = q.delete(synchronize_session=False)
+        if conv_id:
+            _touch_conversation(db, conv_id)
+        db.commit()
+        return deleted > 0
+
+
+async def clear_chat_messages(user_id: str, conversation_id: str | None = None) -> int:
+    with SessionLocal() as db:
+        if conversation_id:
+            count = (
+                db.query(ChatMessageRecord)
+                .filter(
+                    ChatMessageRecord.user_id == user_id,
+                    ChatMessageRecord.conversation_id == conversation_id,
+                )
+                .delete()
+            )
+            conv = db.get(ChatConversationRecord, conversation_id)
+            if conv and conv.user_id == user_id:
+                db.delete(conv)
+        else:
+            count = (
+                db.query(ChatMessageRecord)
+                .filter(ChatMessageRecord.user_id == user_id)
+                .delete()
+            )
+            db.query(ChatConversationRecord).filter(
+                ChatConversationRecord.user_id == user_id
+            ).delete()
+        db.commit()
+        return count
 
 
 def list_resources_with_meta(user_id: str) -> list[dict]:

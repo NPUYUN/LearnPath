@@ -3,7 +3,7 @@ import json
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.api.deps import ensure_same_user, get_current_user_id
-from app.db.repository import delete_library, get_library, list_library_files
+from app.db.repository import delete_library, get_library
 from app.models.schemas import (
     CreateLibraryRequest,
     LibraryDetail,
@@ -13,7 +13,11 @@ from app.models.schemas import (
 )
 from app.services.file_extract_service import supported_extensions
 from app.services.library_ingest_service import process_uploaded_files
-from app.services.library_service import create_user_library, list_all_libraries
+from app.services.library_service import (
+    create_user_library,
+    list_all_libraries,
+    list_library_files_resolved,
+)
 
 router = APIRouter(prefix="/libraries", tags=["libraries"])
 
@@ -54,14 +58,15 @@ async def get_lib_detail(
     lib = await get_library(library_id, user_id)
     if not lib:
         raise HTTPException(404, "资料库不存在")
-    files = await list_library_files(library_id)
+    files = await list_library_files_resolved(lib)
+    resolved_count = len(files)
     return LibraryDetail(
         id=lib["id"],
         name=lib["name"],
         description=lib.get("description", ""),
         source_type=lib.get("source_type", "upload"),
         status=lib.get("status", "empty"),
-        file_count=lib.get("file_count", len(files)),
+        file_count=resolved_count if resolved_count else lib.get("file_count", 0),
         chunk_count=lib.get("chunk_count", 0),
         course=lib.get("course", ""),
         created_at=lib.get("created_at", ""),

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
   RightOutlined,
@@ -10,6 +11,7 @@ import {
 } from "@ant-design/icons";
 import { Button, Tag, Tooltip, Typography } from "antd";
 import type { LearningResource } from "@/lib/api";
+import { generationSourceMeta } from "@/lib/resourceSource";
 import {
   RESOURCE_CONFIG,
   mapApiType,
@@ -33,6 +35,7 @@ type ResourceCardProps = {
   onStar: () => void;
   onPreview: () => void;
   onDownload: () => void;
+  onDelete: () => void;
   compact?: boolean;
 };
 
@@ -42,10 +45,12 @@ function ResourceCard({
   onStar,
   onPreview,
   onDownload,
+  onDelete,
   compact,
 }: ResourceCardProps) {
   const uiType = mapApiType(resource.type) as UiResourceType;
   const cfg = RESOURCE_CONFIG[uiType];
+  const sourceMeta = generationSourceMeta(resource);
 
   return (
     <article
@@ -58,6 +63,11 @@ function ResourceCard({
         <Text strong className="lp-resource-card-title">
           {resource.title}
         </Text>
+        <div className="lp-resource-card-tags">
+          <Tag className="lp-resource-source-tag" color={sourceMeta.color}>
+            {sourceMeta.short}
+          </Tag>
+        </div>
         {!compact && resource.topic && (
           <Text type="secondary" className="lp-resource-card-topic">
             {resource.topic}
@@ -85,6 +95,18 @@ function ResourceCard({
         <Tooltip title="下载">
           <Button type="text" size="small" icon={<DownloadOutlined />} onClick={onDownload} />
         </Tooltip>
+        <Tooltip title="删除">
+          <Button
+            type="text"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          />
+        </Tooltip>
       </div>
     </article>
   );
@@ -98,6 +120,7 @@ type ResourceStageSectionProps = {
   onStar: (id: string) => void;
   onPreview: (r: LearningResource) => void;
   onDownload: (r: LearningResource) => void;
+  onDelete: (r: LearningResource) => void;
 };
 
 export function ResourceStageSection({
@@ -108,6 +131,7 @@ export function ResourceStageSection({
   onStar,
   onPreview,
   onDownload,
+  onDelete,
 }: ResourceStageSectionProps) {
   const statusMeta = STAGE_STATUS_META[stage.status];
 
@@ -179,6 +203,7 @@ export function ResourceStageSection({
             onStar={onStar}
             onPreview={onPreview}
             onDownload={onDownload}
+            onDelete={onDelete}
           />
         ))}
       </div>
@@ -192,12 +217,14 @@ function CategoryLane({
   onStar,
   onPreview,
   onDownload,
+  onDelete,
 }: {
   category: ResourceCategoryGroup;
   starredIds: string[];
   onStar: (id: string) => void;
   onPreview: (r: LearningResource) => void;
   onDownload: (r: LearningResource) => void;
+  onDelete: (r: LearningResource) => void;
 }) {
   const cfg = RESOURCE_CONFIG[category.type];
 
@@ -220,6 +247,7 @@ function CategoryLane({
             onStar={() => onStar(r.id)}
             onPreview={() => onPreview(r)}
             onDownload={() => onDownload(r)}
+            onDelete={() => onDelete(r)}
             compact
           />
         ))}
@@ -234,6 +262,7 @@ type ResourceJourneyViewProps = {
   onStar: (id: string) => void;
   onPreview: (r: LearningResource) => void;
   onDownload: (r: LearningResource) => void;
+  onDelete: (r: LearningResource) => void;
 };
 
 export function ResourceJourneyView({
@@ -242,6 +271,7 @@ export function ResourceJourneyView({
   onStar,
   onPreview,
   onDownload,
+  onDelete,
 }: ResourceJourneyViewProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() =>
     defaultExpandedIds(stages)
@@ -308,6 +338,7 @@ export function ResourceJourneyView({
           onStar={onStar}
           onPreview={onPreview}
           onDownload={onDownload}
+          onDelete={onDelete}
         />
       ))}
     </div>

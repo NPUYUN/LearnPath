@@ -49,6 +49,12 @@ class StudentProfile(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ProfileRefreshResponse(BaseModel):
+    profile: StudentProfile
+    message: str = ""
+    sources: dict = Field(default_factory=dict)
+
+
 class PathStep(BaseModel):
     order: int
     title: str
@@ -71,6 +77,9 @@ class LearningResource(BaseModel):
     content: str
     sources: list[str] = Field(default_factory=list)
     topic: str = ""
+    generation_mode: str = ""
+    library_id: str = ""
+    library_name: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -80,6 +89,8 @@ class ChatRequest(BaseModel):
     stream: bool = True
     chunk_size: int = 8
     deep_thinking: bool = False
+    web_search: bool = False
+    attachment_context: str = ""
 
 
 class ChatResponse(BaseModel):
@@ -250,19 +261,48 @@ class UserPreferencesUpdate(BaseModel):
     account_patch: dict | None = None
 
 
+class ChatAttachmentMeta(BaseModel):
+    id: str
+    name: str
+    kind: Literal["image", "file"] = "file"
+    mime_type: str = ""
+    url: str = ""
+    size: int = 0
+    text_preview: str = ""
+
+
+class ChatConversationSummary(BaseModel):
+    id: str
+    title: str = "新对话"
+    created_at: str = ""
+    updated_at: str = ""
+    message_count: int = 0
+
+
+class CreateChatConversationRequest(BaseModel):
+    user_id: str = "demo"
+    title: str = "新对话"
+
+
 class ChatMessageItem(BaseModel):
     id: str
     role: Literal["user", "assistant"]
     content: str
     resources: list[dict] = Field(default_factory=list)
+    turn_id: str = ""
+    conversation_id: str = ""
+    attachments: list[ChatAttachmentMeta] = Field(default_factory=list)
     created_at: str = ""
 
 
 class ChatHistoryAppend(BaseModel):
     user_id: str = "demo"
+    conversation_id: str = ""
     role: Literal["user", "assistant"]
     content: str
     resources: list[dict] = Field(default_factory=list)
+    turn_id: str = ""
+    attachments: list[ChatAttachmentMeta] = Field(default_factory=list)
 
 
 class TtsSpeakRequest(BaseModel):

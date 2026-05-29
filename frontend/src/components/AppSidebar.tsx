@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Avatar, Button, Flex, Tag, Tooltip, Typography } from "antd";
 import { getRecommendations, type ResourceRecommendation } from "@/lib/api";
 import { NAV_META, pathProgress } from "@/lib/navMeta";
@@ -137,9 +138,9 @@ export default function AppSidebar({
   initDone,
 }: AppSidebarProps) {
   const initial = userName?.charAt(0) || "学";
+  const router = useRouter();
   const userId = useAppStore((s) => s.userId);
   const learningPath = useAppStore((s) => s.learningPath);
-  const setPendingResourcePreviewId = useAppStore((s) => s.setPendingResourcePreviewId);
   const [recommendations, setRecommendations] = useState<ResourceRecommendation[]>([]);
 
   const progressPct = useMemo(
@@ -218,8 +219,7 @@ export default function AppSidebar({
                   key={rec.id}
                   className="learnpath-rec-chip"
                   onClick={() => {
-                    setPendingResourcePreviewId(rec.id);
-                    onNavigate("/resources");
+                    router.push(`/resources/view/${encodeURIComponent(rec.id)}`);
                   }}
                 >
                   {rec.title.length > 12 ? `${rec.title.slice(0, 12)}…` : rec.title}

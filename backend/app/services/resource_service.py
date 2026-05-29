@@ -156,6 +156,9 @@ async def get_user_resources(user_id: str) -> list[LearningResource]:
             content=r.get("content", ""),
             sources=r.get("sources", []),
             topic=r.get("topic", ""),
+            generation_mode=r.get("generation_mode", ""),
+            library_id=r.get("library_id", ""),
+            library_name=r.get("library_name", ""),
         )
         for r in raw
     ]

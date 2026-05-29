@@ -10,6 +10,7 @@ import {
 import { usePathname, useRouter } from "next/navigation";
 import { getEvalStats, getPath, getProfile, listResources } from "@/lib/api";
 import {
+  isResourcesSubPath,
   isNavRoute,
   isStandaloneRoute,
   NAV_ROUTES,
@@ -84,7 +85,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
-  const routeFromPath: NavRoute = isNavRoute(pathname) ? pathname : "/chat";
+  const routeFromPath: NavRoute = isNavRoute(pathname)
+    ? pathname
+    : isResourcesSubPath(pathname)
+      ? "/resources"
+      : "/chat";
+  const showResourcesSubPage = isResourcesSubPath(pathname);
   const [activeTab, setActiveTab] = useState<NavRoute>(routeFromPath);
 
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
@@ -140,7 +146,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [isLoggedIn, router]);
 
   useEffect(() => {
-    if (isLoggedIn && !isNavRoute(pathname) && !isStandaloneRoute(pathname)) {
+    if (
+      isLoggedIn &&
+      !isNavRoute(pathname) &&
+      !isStandaloneRoute(pathname) &&
+      !isResourcesSubPath(pathname)
+    ) {
       router.replace("/chat");
       setActiveTab("/chat");
     }
@@ -422,7 +433,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         <main className="learnpath-main learnpath-panel learnpath-keepalive">
           <AppCanvas activeRoute={activeTab} />
-          {allModulesLoaded &&
+          {showResourcesSubPage ? (
+            <div className="lp-resources-sub-route">{children}</div>
+          ) : (
+            allModulesLoaded &&
             NAV_ROUTES.map((route) => {
               const Comp = pageComponents[route]!;
               const isActive = activeTab === route;
@@ -432,7 +446,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <Comp />
                 </PagePane>
               );
-            })}
+            })
+          )}
         </main>
       </div>
     </ThemeProvider>

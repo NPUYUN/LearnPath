@@ -129,13 +129,15 @@ npm run dev
 ### 4. 一键启动（Windows）
 
 ```powershell
-.\scripts\start.ps1              # 一键启动（等待后端就绪后打开浏览器）
-.\scripts\start.ps1 -ShowWindows # 后端/前端控制台保持可见（调试用）
-.\scripts\dev.ps1                # 同上，但不自动打开浏览器
-.\scripts\open.ps1               # 打开 entry.html 入口页
+.\start.bat                      # 双击或命令行：一键启动并打开浏览器
+.\stop.bat                       # 停止后端与前端
+.\scripts\start.ps1              # 同上（PowerShell）
+.\scripts\start.ps1 -ShowWindows # 显示后端/前端控制台（调试）
+.\scripts\dev.ps1                # 调试模式，不自动打开浏览器
+.\scripts\stop.ps1               # 停止服务
 ```
 
-双击根目录 **`打开学径.bat`** 或 **`start.bat`**：启动成功后 **launcher 窗口自动关闭**；后端/前端在任务栏最小化运行（可用 `-ShowWindows` 改为常显）。Linux/macOS 使用 `scripts/dev.sh`。
+双击根目录 **`start.bat`**：启动成功后 launcher 窗口约 8 秒后关闭；服务在后台运行，日志见 `storage/logs/`。Linux/macOS 使用 `scripts/dev.sh`。
 
 ---
 
@@ -286,7 +288,7 @@ flowchart LR
 可以。`.env` 中保持 `LLM_MOCK=true`，对话与资源生成返回 Mock 结构化内容，前端完整可用。
 
 **前端提示无法连接后端？**  
-确认后端已启动（运行 `.\scripts\start.ps1` 或双击 `打开学径.bat`）。本地开发时 `frontend/.env.local` 中 **`NEXT_PUBLIC_API_BASE` 应留空**，由 Next 将 `/api` 代理到 `http://127.0.0.1:8000`；若必须直连后端，再填写完整地址并同步 `.env` 的 `CORS_ORIGINS`。
+确认后端已启动（运行 `.\start.bat` 或 `.\scripts\start.ps1`）。本地开发时 `frontend/.env.local` 中 **`NEXT_PUBLIC_API_BASE` 应留空**，由 Next 将 `/api` 代理到 `http://127.0.0.1:8000`；若必须直连后端，再填写完整地址并同步 `.env` 的 `CORS_ORIGINS`。
 
 **知识库检索无结果？**  
 执行 `.\backend\.venv\Scripts\python scripts\ingest_kb.py`（使用 venv 内的 Python），确认 `data/knowledge_base/ml_intro/chapters/` 下存在 Markdown 章节文件。

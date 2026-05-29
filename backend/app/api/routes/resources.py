@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.deps import assert_user_access, ensure_same_user, get_current_user_id
-from app.db.repository import get_resource, record_event
+from app.db.repository import delete_resource, get_resource, record_event
 from app.models.schemas import GenerateResourcesRequest, LearningResource, ResourceRecommendation
 from app.services.recommendation_service import get_recommendations
 from app.services.resource_service import generate_resources, get_user_resources, stream_generate_resources
@@ -80,4 +80,40 @@ async def resource_complete(
     if not await get_resource(user_id, resource_id):
         raise HTTPException(404, "资源不存在")
     await record_event(user_id, "resource_complete", resource_id=resource_id)
+    return {"ok": True}
+
+
+@router.get("/{resource_id}", response_model=LearningResource)
+async def get_one(
+    resource_id: str,
+    user_id: str = "demo",
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ensure_same_user(user_id, current_user_id)
+    row = await get_resource(user_id, resource_id)
+    if not row:
+        raise HTTPException(404, "资源不存在")
+    return LearningResource(
+        id=row.get("id", resource_id),
+        type=row.get("type", "doc"),
+        title=row.get("title", ""),
+        content=row.get("content", ""),
+        sources=row.get("sources", []),
+        topic=row.get("topic", ""),
+        generation_mode=row.get("generation_mode", ""),
+        library_id=row.get("library_id", ""),
+        library_name=row.get("library_name", ""),
+    )
+
+
+@router.delete("/{resource_id}")
+async def remove_one(
+    resource_id: str,
+    user_id: str = "demo",
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ensure_same_user(user_id, current_user_id)
+    ok = await delete_resource(user_id, resource_id)
+    if not ok:
+        raise HTTPException(404, "资源不存在")
     return {"ok": True}

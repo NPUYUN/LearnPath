@@ -210,10 +210,7 @@ export default function LandingContent() {
           让成长更<span className="lp-gradient-text">高效</span>
         </h1>
 
-        <p className="lp-hero-typed">
-          {typed}
-          <span className="lp-cursor">|</span>
-        </p>
+        <p className="lp-hero-typed">{typed}</p>
 
         <p className="lp-hero-sub">
           学径融合多 Agent 协作、RAG 知识检索与个性化推荐，

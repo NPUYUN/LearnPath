@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Button,
   Card,
@@ -42,14 +43,15 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
 };
 
 type ResourceLibraryPanelProps = {
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  selectedId?: string | null;
+  onSelect?: (id: string | null) => void;
 };
 
 export default function ResourceLibraryPanel({
   selectedId,
   onSelect,
 }: ResourceLibraryPanelProps) {
+  const router = useRouter();
   const userId = useAppStore((s) => s.userId);
   const [libraries, setLibraries] = useState<ResourceLibrary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +80,14 @@ export default function ResourceLibraryPanel({
       .catch(() => {});
   }, [load]);
 
+  const openLibrary = (lib: ResourceLibrary) => {
+    onSelect?.(lib.id);
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem("lp-resources-tab", "libraries");
+    }
+    router.push(`/resources/library/${encodeURIComponent(lib.id)}`);
+  };
+
   const handleCreate = async () => {
     if (!newName.trim()) {
       message.warning("请输入资料库名称");
@@ -90,7 +100,7 @@ export default function ResourceLibraryPanel({
       setNewName("");
       setNewDesc("");
       await load();
-      onSelect(lib.id);
+      openLibrary(lib);
     } catch (e: unknown) {
       message.error(e instanceof Error ? e.message : "创建失败");
     }
@@ -128,7 +138,7 @@ export default function ResourceLibraryPanel({
       okType: "danger",
       onOk: async () => {
         await deleteLibrary(userId, lib.id);
-        if (selectedId === lib.id) onSelect(null);
+        if (selectedId === lib.id) onSelect?.(null);
         message.success("已删除");
         await load();
       },
@@ -151,7 +161,7 @@ export default function ResourceLibraryPanel({
             课程资料库
           </Text>
           <Paragraph type="secondary" className="lp-library-panel-desc">
-            上传课件、讲义、代码等文件，经大模型分析后形成 RAG 资料库；生成资源时可选择依据哪个资料库。
+            点击资料库卡片进入详情页，按 Markdown、Word、PDF 等类型浏览全部文件；上传后可作为 RAG 生成依据。
           </Paragraph>
           {extensions.length > 0 && (
             <Text type="secondary" style={{ fontSize: 12 }}>
@@ -168,20 +178,23 @@ export default function ResourceLibraryPanel({
       {libraries.length === 0 ? (
         <Empty description="暂无资料库" />
       ) : (
-        <div className="lp-library-grid">
+        <div className="lp-library-grid lp-library-grid--solo">
           {libraries.map((lib) => {
             const st = STATUS_LABEL[lib.status] || STATUS_LABEL.empty;
-            const selected = selectedId === lib.id;
             return (
               <Card
                 key={lib.id}
-                className={`lp-library-card${selected ? " lp-library-card--selected" : ""}`}
+                className="lp-library-card"
                 hoverable
-                onClick={() => onSelect(selected ? null : lib.id)}
+                onClick={() => openLibrary(lib)}
               >
                 <div className="lp-library-card-top">
                   <span className="lp-library-card-icon">
-                    {lib.source_type === "builtin" ? <DatabaseOutlined /> : <FolderOpenOutlined />}
+                    {lib.source_type === "builtin" ? (
+                      <DatabaseOutlined />
+                    ) : (
+                      <FolderOpenOutlined />
+                    )}
                   </span>
                   <div className="lp-library-card-meta">
                     <Text strong>{lib.name}</Text>
@@ -217,11 +230,7 @@ export default function ResourceLibraryPanel({
                         }
                       }}
                     >
-                      <Button
-                        size="small"
-                        icon={<CloudUploadOutlined />}
-                        loading={uploading && selectedId === lib.id}
-                      >
+                      <Button size="small" icon={<CloudUploadOutlined />} loading={uploading}>
                         上传文件
                       </Button>
                     </Upload>

@@ -29,6 +29,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import (
     chat,
     chat_history,
+    chat_conversations,
+    chat_attachments,
     health,
     libraries,
     path,
@@ -87,4 +89,6 @@ app.include_router(eval_route.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
 app.include_router(preferences.router, prefix="/api")
 app.include_router(chat_history.router, prefix="/api")
+app.include_router(chat_conversations.router, prefix="/api")
+app.include_router(chat_attachments.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")

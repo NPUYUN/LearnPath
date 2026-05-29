@@ -9,6 +9,7 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.llm.mock_client import MockLLMClient, mock_chat_response
+from app.core.llm.resilience import chat_with_retry, llm_http_timeout
 
 
 class LLMClient(Protocol):
@@ -83,12 +84,32 @@ class OpenAICompatClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        return await chat_with_retry(
+            self._chat_once,
+            messages,
+            temperature=temperature,
+            deep_thinking=deep_thinking,
+        )
+
+    async def _chat_once(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.7,
+        deep_thinking: bool = False,
+    ) -> str:
+        url = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
         payload = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        timeout = llm_http_timeout()
+        async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -122,9 +143,15 @@ class OpenAICompatClient:
             "temperature": temperature,
             "stream": True,
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        timeout = llm_http_timeout()
+        async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    body = (await resp.aread()).decode("utf-8", errors="replace")
+                    raise RuntimeError(
+                        f"{self.provider} API HTTP {resp.status_code}: {body[:800]}"
+                    )
+                got_token = False
                 async for line in resp.aiter_lines():
                     if not line or not line.startswith("data:"):
                         continue
@@ -133,9 +160,18 @@ class OpenAICompatClient:
                         break
                     try:
                         chunk = json.loads(data)
+                        err = chunk.get("error")
+                        if err:
+                            msg = err.get("message") if isinstance(err, dict) else str(err)
+                            raise RuntimeError(f"{self.provider} API: {msg}")
                         delta = chunk["choices"][0].get("delta", {})
                         text = delta.get("content") or ""
                         if text:
+                            got_token = True
                             yield text
-                    except Exception:
+                    except json.JSONDecodeError:
                         continue
+                if not got_token:
+                    raise RuntimeError(
+                        f"{self.provider} API returned an empty stream; check KIMI_API_KEY / model name"
+                    )

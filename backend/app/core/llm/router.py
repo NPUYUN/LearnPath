@@ -86,11 +86,34 @@ def get_llm_client() -> LLMClient:
     return get_primary_llm()
 
 
+def get_chat_llm_fallback_chain() -> list[LLMClient]:
+    """智能对话流式调用：主通道失败后依次尝试其它已配置通道。"""
+    settings = get_settings()
+    seen: set[str] = set()
+    chain: list[LLMClient] = []
+
+    def add(client: LLMClient) -> None:
+        if client.provider in seen:
+            return
+        seen.add(client.provider)
+        chain.append(client)
+
+    add(get_primary_llm())
+    if settings.has_aux:
+        add(get_aux_client())
+    if settings.has_spark:
+        add(get_spark_client())
+    if not chain or all(getattr(c, "use_mock", False) for c in chain):
+        chain.append(MockLLMClient())
+    return chain
+
+
 __all__ = [
     "LLMRole",
     "get_primary_llm",
     "get_aux_llm",
     "get_llm_for_role",
     "get_llm_client",
+    "get_chat_llm_fallback_chain",
     "llm_runtime_status",
 ]

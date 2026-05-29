@@ -47,7 +47,7 @@ async def ensure_builtin_libraries() -> int:
             "collection_name": item.get("collection", f"lib_{lib_id}"),
             "kb_path": kb_path,
             "course": item.get("course", ""),
-            "file_count": len(list(kb_dir.glob("chapters/*.md"))) if kb_dir else 0,
+            "file_count": _count_kb_files(kb_dir),
             "chunk_count": chunk_count,
             "updated_at": datetime.utcnow().isoformat(),
         }
@@ -91,3 +91,77 @@ async def get_or_create_library(
 async def list_all_libraries(user_id: str) -> list[dict]:
     await ensure_builtin_libraries()
     return await list_libraries(user_id)
+
+
+def _mime_for_filename(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    return {
+        ".md": "text/markdown",
+        ".markdown": "text/markdown",
+        ".txt": "text/plain",
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".ppt": "application/vnd.ms-powerpoint",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".xls": "application/vnd.ms-excel",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".html": "text/html",
+        ".py": "text/x-python",
+    }.get(ext, "application/octet-stream")
+
+
+def _count_kb_files(kb_dir: Path | None) -> int:
+    if not kb_dir or not kb_dir.exists():
+        return 0
+    from app.services.file_extract_service import supported_extensions
+
+    allowed = {e.lower() for e in supported_extensions()}
+    return sum(
+        1
+        for path in kb_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in allowed
+    )
+
+
+def _builtin_library_files(lib: dict) -> list[dict]:
+    """内置库：从 knowledge_base 目录枚举章节与说明文件。"""
+    kb_path = lib.get("kb_path") or ""
+    if not kb_path:
+        return []
+    root = builtin_kb_root() / kb_path
+    if not root.exists():
+        return []
+    from app.services.file_extract_service import supported_extensions
+
+    allowed = {e.lower() for e in supported_extensions()}
+    out: list[dict] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in allowed:
+            continue
+        rel = path.relative_to(root).as_posix()
+        out.append(
+            {
+                "id": f"builtin-{lib['id']}-{rel}",
+                "library_id": lib["id"],
+                "filename": rel,
+                "mime_type": _mime_for_filename(path.name),
+                "size": path.stat().st_size,
+                "status": "ready",
+            }
+        )
+    return out
+
+
+async def list_library_files_resolved(lib: dict) -> list[dict]:
+    """用户上传文件走数据库；内置库优先磁盘枚举以保证与知识库目录一致。"""
+    from app.db.repository import list_library_files
+
+    if lib.get("source_type") == "builtin":
+        disk = _builtin_library_files(lib)
+        if disk:
+            return disk
+    files = await list_library_files(lib["id"])
+    return files

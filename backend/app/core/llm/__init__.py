@@ -4,6 +4,7 @@ from app.core.llm.openai_compat import LLMClient, OpenAICompatClient
 from app.core.llm.router import (
     LLMRole,
     get_aux_llm,
+    get_chat_llm_fallback_chain,
     get_llm_client,
     get_llm_for_role,
     get_primary_llm,
@@ -25,5 +26,6 @@ __all__ = [
     "get_aux_llm",
     "get_llm_for_role",
     "get_llm_client",
+    "get_chat_llm_fallback_chain",
     "llm_runtime_status",
 ]
