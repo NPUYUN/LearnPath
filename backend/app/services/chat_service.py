@@ -6,6 +6,7 @@ from app.agents.supervisor import classify_intent
 from app.core.config import get_settings
 from app.db.repository import get_profile, list_resources, save_path, save_resources
 from app.models.schemas import ChatResponse, StudentProfile
+from app.core.llm.deep_thinking import graph_stream_chunk_size
 from app.services.chat_intelligence_service import stream_intelligent_chat
 from app.services.graph_state import build_graph_state
 
@@ -72,8 +73,8 @@ async def run_chat(
 
 
 async def _yield_text_tokens(text: str, chunk_size: int = 1) -> AsyncIterator[dict]:
-    """将完整文本按字符/小片段推送，模拟打字效果。"""
-    step = max(1, min(chunk_size, 4))
+    """将完整文本按较大分段推送，由前端控制展示节奏。"""
+    step = max(8, min(chunk_size, 32))
     for i in range(0, len(text), step):
         yield {"event": "token", "data": text[i : i + step]}
 
@@ -95,6 +96,11 @@ async def stream_chat(
         yield {
             "event": "progress",
             "data": json.dumps({"stage": "deep_thinking"}, ensure_ascii=False),
+        }
+    else:
+        yield {
+            "event": "progress",
+            "data": json.dumps({"stage": "fast_reply"}, ensure_ascii=False),
         }
     if web_search:
         yield {
@@ -128,6 +134,7 @@ async def stream_chat(
                 deep_thinking=deep_thinking,
                 web_search=web_search,
                 attachment_context=attachment_context,
+                chunk_size=chunk_size,
             ):
                 if item["type"] == "token":
                     yield {"event": "token", "data": item["data"]}
@@ -219,7 +226,9 @@ async def stream_chat(
             yield {"event": "profile", "data": json.dumps(profile, ensure_ascii=False, default=str)}
 
         reply = (result.get("reply") or "").strip()
-        stream_step = 1 if chunk_size <= 4 else min(chunk_size, 3)
+        stream_step = graph_stream_chunk_size(
+            deep_thinking=deep_thinking, chunk_size=chunk_size
+        )
         if not reply:
             reply = (
                 "⚠️ 智能体未返回有效内容（可能为 Kimi 接口超时）。"

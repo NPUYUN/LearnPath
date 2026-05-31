@@ -60,6 +60,11 @@ async def ask_stream(
                 "event": "progress",
                 "data": json.dumps({"stage": "deep_thinking"}, ensure_ascii=False),
             }
+        else:
+            yield {
+                "event": "progress",
+                "data": json.dumps({"stage": "fast_reply"}, ensure_ascii=False),
+            }
         yield {
             "event": "progress",
             "data": json.dumps({"stage": "retrieval"}, ensure_ascii=False),

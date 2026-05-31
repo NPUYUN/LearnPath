@@ -23,6 +23,7 @@ from app.services.user_defaults import profile_fallback_fields
 MATCH_THRESHOLD = 2.8
 
 QUESTION_TYPES = (
+    "chitchat",
     "concept",
     "code",
     "media",
@@ -31,10 +32,66 @@ QUESTION_TYPES = (
     "general",
 )
 
+_CHITCHAT_EXACT = {
+    "你好", "您好", "hi", "hello", "hey", "在吗", "在么", "在不在",
+    "谢谢", "谢了", "感谢", "多谢", "好的", "ok", "okay", "嗯", "嗯嗯",
+    "再见", "拜拜", "bye", "早上好", "晚上好", "下午好",
+}
+
+
+def is_chitchat_message(message: str) -> bool:
+    """寒暄、致谢、告别等无具体学习诉求的短句。"""
+    text = message.strip()
+    if not text or len(text) > 32:
+        return False
+    lowered = text.lower()
+    if lowered in _CHITCHAT_EXACT or text in _CHITCHAT_EXACT:
+        return True
+    if re.match(
+        r"^(你好|您好|hi|hello|hey|在吗|在么|谢谢|感谢|多谢|再见|拜拜|"
+        r"早上好|晚上好|下午好|好的|嗯)[!！。?？~～\s]*$",
+        text,
+        re.I,
+    ):
+        return True
+    if re.match(r"^(你是谁|你叫什么|你能做什么|你有什么功能|介绍一下你自己)", text):
+        return True
+    return False
+
+
+def build_chitchat_reply(question: str, profile: dict | None = None) -> str:
+    """寒暄类短回复（不调用 LLM，避免答非所问）。"""
+    q = question.strip()
+    goal = str((profile or {}).get("learning_goal") or "").strip()
+    course_hint = ""
+    if goal and goal not in ("待补充", "未设定"):
+        course_hint = f"看到你在学 **{goal[:40]}**，"
+
+    if re.match(r"^(谢谢|感谢|多谢)", q):
+        return "不客气！有学习上的问题，随时在对话里问我。"
+    if re.match(r"^(再见|拜拜)", q, re.I):
+        return "再见，祝你学习顺利！下次有问题再来找我 👋"
+    if re.search(r"(你是谁|你叫什么|你能做什么|你有什么功能|介绍一下)", q):
+        return (
+            "我是 **学径学习助手**，可以帮你：\n"
+            "- 通过对话了解并更新你的学习画像\n"
+            "- 生成文档、导图、练习等学习资源\n"
+            "- 规划学习路径、解答课程疑问\n\n"
+            "直接告诉我你想学什么，或哪里不太懂就好。"
+        )
+
+    return (
+        f"你好！{course_hint}我是 **学径学习助手**。\n\n"
+        "你可以告诉我：想学什么、哪里薄弱，或让我帮你生成资源、规划路径。"
+        "我会结合你的画像来回答 😊"
+    )
+
 
 def classify_question_type(message: str) -> str:
     """根据用户提问判断回答形态（关键词优先，轻量快速）。"""
     text = message.strip()
+    if is_chitchat_message(text):
+        return "chitchat"
     if any(k in text for k in ["代码", "编程", "python", "实现", "报错", "调试", "运行", "程序"]):
         return "code"
     if any(k in text for k in ["视频", "分镜", "动画", "多媒体", "演示", "镜头"]):
@@ -220,6 +277,13 @@ def build_intelligent_chat_messages(
     if web_context.strip():
         extra_blocks += f"\n\n【联网检索摘要（请标注为外部资料并批判性使用）】\n{web_context.strip()[:12000]}"
 
+    if question_type == "chitchat":
+        from app.core.prompts import chat_chitchat_system
+
+        system = chat_chitchat_system(deep_thinking)
+        user = f"用户说：{question}\n请按系统要求简短回复，不要讲解任何学科知识。"
+        return [{"role": "system", "content": system}, {"role": "user", "content": user}], chunks, mode
+
     if mode == "library_polish":
         system = chat_library_polish_system(question_type, deep_thinking)
         user = (
@@ -246,6 +310,37 @@ def build_intelligent_chat_messages(
     return [{"role": "system", "content": system}, {"role": "user", "content": user}], chunks, mode
 
 
+def _normalize_mermaid_arrows(code: str) -> str:
+    code = code.replace("-->", "\0ARROW\0")
+    code = code.replace("->", " --> ")
+    code = code.replace("\0ARROW\0", " --> ")
+    code = re.sub(r"\s+-->\s+", " --> ", code)
+    return code
+
+
+def _quote_mermaid_node_labels(code: str) -> str:
+    code = re.sub(r"(\w+)\['([^']*)'\]", r'\1["\2"]', code)
+
+    def _bracket(m: re.Match) -> str:
+        label = m.group(2).strip()
+        if re.search(r"[\u4e00-\u9fff]", label) and not label.startswith(('"', "'")):
+            return f'{m.group(1)}["{label.replace(chr(34), chr(39))}"]'
+        return m.group(0)
+
+    code = re.sub(r"(\w+)\[([^\"'\n]+)\]", _bracket, code)
+    return code
+
+
+def _build_fallback_flowchart(raw: str) -> str:
+    edges = re.findall(
+        r"([A-Za-z]\w*)\s*(?:\[[^\]]+\]|\([^)]+\)|\{[^}]+\})?\s*-->\s*([A-Za-z]\w*)",
+        raw,
+    )
+    if edges:
+        return "flowchart LR\n" + "\n".join(f"  {a} --> {b}" for a, b in edges)
+    return "flowchart TD\n  A[主题] --> B[说明]"
+
+
 def _repair_mermaid_code(raw: str) -> str:
     """修复单行/粘连的 Mermaid，保证边标签可渲染。"""
     code = (raw or "").strip()
@@ -253,21 +348,67 @@ def _repair_mermaid_code(raw: str) -> str:
     code = re.sub(r"```\s*$", "", code).strip()
     if not code:
         return "flowchart TD\n  A[主题] --> B[说明]"
+
+    if re.match(r"^(mindmap|sequenceDiagram|classDiagram|stateDiagram)", code, re.I):
+        return code
+
+    code = _normalize_mermaid_arrows(code)
+    code = _quote_mermaid_node_labels(code)
     code = re.sub(
         r"^graph\s+(TD|TB|LR|RL|BT)",
         lambda m: f"flowchart {m.group(1)}",
         code,
         flags=re.I,
     )
+    code = re.sub(
+        r"^flowchart\s+(td|tb|lr|rl|bt)\b",
+        lambda m: f"flowchart {m.group(1).upper()}",
+        code,
+        flags=re.I,
+    )
+
     if ";" in code:
         head = re.match(r"^(flowchart\s+(?:TD|TB|LR|RL|BT))", code, re.I)
         header = head.group(1) if head else "flowchart TD"
         body = re.sub(r"^flowchart\s+(?:TD|TB|LR|RL|BT)\s*;?\s*", "", code, flags=re.I)
         lines = [ln.strip() for ln in body.split(";") if ln.strip()]
         code = header + "\n" + "\n".join(f"  {ln}" if "-->" in ln else ln for ln in lines)
+
+    code = re.sub(
+        r"^(flowchart\s+(?:TD|TB|LR|RL|BT))\s+(.+)$",
+        r"\1\n\2",
+        code,
+        flags=re.I | re.M,
+    )
+    code = re.sub(r"([\]\)])\s+([A-Za-z][\w]*\s*-->)", r"\1\n  \2", code)
     code = re.sub(r"\]([A-Z])(?=\s*--)", r"]\n  \1 ", code)
     code = re.sub(r"\]([A-Z])(?=\[)", r"]\n  \1", code)
     code = re.sub(r"\bBB\b", "B", code)
+
+    out: list[str] = []
+    for line in code.split("\n"):
+        t = line.strip()
+        if not t:
+            continue
+        if re.match(r"^flowchart", t, re.I):
+            glued = re.match(r"^(flowchart\s+(?:TD|TB|LR|RL|BT))\s+(.+)$", t, re.I)
+            if glued:
+                out.append(glued.group(1))
+                t = glued.group(2)
+            else:
+                out.append(t)
+                continue
+        parts = re.split(r"\s+(?=[A-Za-z][\w]*\s*-->)", t)
+        for part in parts:
+            p = part.strip()
+            if not p:
+                continue
+            if "-->" in p or re.match(r"^[A-Za-z]", p):
+                out.append(f"  {p}")
+            else:
+                out.append(p)
+    code = "\n".join(out) if out else "flowchart TD\n  A[内容] --> B[说明]"
+    code = _quote_mermaid_node_labels(code)
 
     def _quote_label(m: re.Match) -> str:
         label = m.group(1).strip()
@@ -277,6 +418,37 @@ def _repair_mermaid_code(raw: str) -> str:
 
     code = re.sub(r"-->\|([^|\n]+)\|", _quote_label, code)
     return code
+
+
+def _fix_markdown_headings(text: str) -> str:
+    """修复 ##标题 粘连、缺空格、标题与正文同行等 LLM 常见格式问题。"""
+    out = text.replace("\r\n", "\n")
+    out = re.sub(r"(?<=\S)(#{2,6})([^\s#\n])", r"\n\n\1 \2", out)
+    out = re.sub(r"(^|\n)(#{1,6})([^\s#\n])", r"\1\2 \3", out, flags=re.M)
+    out = re.sub(r"^(#{1,6}\s+[^\n\d]+?)(\d+\.\s)", r"\1\n\n\2", out, flags=re.M)
+
+    section_suffixes = (
+        "定义", "概念", "类型", "应用", "目标", "简介", "概述", "总结", "图解", "要点", "示例", "方向",
+    )
+
+    def _split_heading_line(line: str) -> str:
+        hm = re.match(r"^(#{1,6}\s+)(.+)$", line)
+        if not hm:
+            return line
+        marks, content = hm.group(1), hm.group(2)
+        for suffix in section_suffixes:
+            idx = content.find(suffix)
+            if 0 <= idx <= 18 and len(content) > idx + len(suffix):
+                return f"{marks}{content[: idx + len(suffix)]}\n\n{content[idx + len(suffix) :].lstrip()}"
+        lst = re.match(r"^(.{2,28}?)(\d+\.\s[\s\S]+)$", content)
+        if lst:
+            return f"{marks}{lst.group(1).strip()}\n\n{lst.group(2).lstrip()}"
+        return line
+
+    out = "\n".join(_split_heading_line(ln) for ln in out.split("\n"))
+    out = re.sub(r"([^\n\d])(\d+\.\s)", r"\1\n\2", out)
+    out = re.sub(r"([^\n#])(#{1,6}\s)", r"\1\n\n\2", out)
+    return out
 
 
 def _normalize_markdown_answer(text: str) -> str:
@@ -291,7 +463,7 @@ def _normalize_markdown_answer(text: str) -> str:
         return f"\n\n```mermaid\n{_repair_mermaid_code(m.group(1))}\n```\n\n"
 
     answer = re.sub(r"```mermaid\n([\s\S]*?)```", _fix_fence, answer, flags=re.I)
-    answer = re.sub(r"([^\n])\n?(#{1,6}\s)", r"\1\n\n\2", answer)
+    answer = _fix_markdown_headings(answer)
     answer = re.sub(r"```\s*([\u4e00-\u9fff])", r"```\n\n\1", answer)
     answer = re.sub(r"([。！？；])(?=[^\n#`\d\s-])", r"\1\n", answer)
     return answer
@@ -307,6 +479,9 @@ def postprocess_multimodal_answer(
 ) -> str:
     answer = filter_sensitive(answer)
     answer = _normalize_markdown_answer(answer)
+
+    if question_type == "chitchat":
+        return answer
 
     if question_type == "code" and "```" not in answer:
         answer += (
@@ -456,6 +631,18 @@ async def run_intelligent_chat(
 ) -> dict[str, Any]:
     """执行完整智能对话管线。"""
     question_type = classify_question_type(question)
+
+    if question_type == "chitchat" and not deep_thinking:
+        reply = build_chitchat_reply(question, profile)
+        return {
+            "reply": filter_sensitive(reply),
+            "profile": None,
+            "question_type": question_type,
+            "retrieval_mode": "direct",
+            "match_score": 0.0,
+            "chunks": [],
+        }
+
     retrieval = await retrieve_resource_library_context(
         user_id, question, resources
     )
@@ -483,6 +670,7 @@ async def run_intelligent_chat(
                     messages,
                     temperature=chat_temperature(deep_thinking),
                     deep_thinking=deep_thinking,
+                    task="chat",
                 )
             else:
                 raw = await client.chat(
@@ -502,7 +690,7 @@ async def run_intelligent_chat(
     )
 
     updated_profile = None
-    if update_profile:
+    if update_profile and question_type != "chitchat":
         updated_profile = await patch_profile_from_chat(
             user_id, question, question_type, topic, profile
         )
@@ -532,25 +720,30 @@ async def prepare_intelligent_chat(
     import asyncio
 
     question_type = classify_question_type(question)
-    try:
-        retrieval = await asyncio.wait_for(
-            retrieve_resource_library_context(user_id, question, resources),
-            timeout=30.0,
-        )
-    except Exception:
-        retrieval = {"chunks": [], "match_score": 0.0, "mode": "direct", "resource_count": 0}
-    web_context = ""
-    if web_search:
-        from app.services.web_research_service import full_web_research
 
+    if question_type == "chitchat":
+        retrieval = {"chunks": [], "match_score": 0.0, "mode": "direct", "resource_count": 0}
+        web_context = ""
+    else:
         try:
-            summary, _queries = await asyncio.wait_for(
-                full_web_research(question),
-                timeout=45.0,
+            retrieval = await asyncio.wait_for(
+                retrieve_resource_library_context(user_id, question, resources),
+                timeout=30.0,
             )
-            web_context = summary
         except Exception:
-            web_context = ""
+            retrieval = {"chunks": [], "match_score": 0.0, "mode": "direct", "resource_count": 0}
+        web_context = ""
+        if web_search:
+            from app.services.web_research_service import full_web_research
+
+            try:
+                summary, _queries = await asyncio.wait_for(
+                    full_web_research(question),
+                    timeout=45.0,
+                )
+                web_context = summary
+            except Exception:
+                web_context = ""
     messages, chunks, mode = build_intelligent_chat_messages(
         question=question,
         topic=topic,
@@ -570,6 +763,16 @@ async def prepare_intelligent_chat(
     }
 
 
+async def _stream_local_text(
+    text: str,
+    chunk_size: int = 2,
+) -> AsyncIterator[dict[str, Any]]:
+    """本地模板文本的伪流式输出（较大分段、无人工延迟，由前端控制刷新节奏）。"""
+    step = max(8, min(chunk_size, 32))
+    for i in range(0, len(text), step):
+        yield {"type": "token", "data": text[i : i + step]}
+
+
 async def stream_intelligent_chat(
     user_id: str,
     question: str,
@@ -581,6 +784,7 @@ async def stream_intelligent_chat(
     web_search: bool = False,
     attachment_context: str = "",
     update_profile: bool = True,
+    chunk_size: int = 8,
 ) -> AsyncIterator[dict[str, Any]]:
     """
     真流式智能对话：逐 token 推送 LLM 输出，结束后补全后处理与画像。
@@ -613,6 +817,14 @@ async def stream_intelligent_chat(
     chunks = ctx["chunks"]
     mode = ctx["mode"]
 
+    if question_type == "chitchat" and not deep_thinking and not attachment_context.strip():
+        reply = build_chitchat_reply(question, profile)
+        stream_step = max(8, min(chunk_size, 32))
+        async for item in _stream_local_text(reply, stream_step):
+            yield item
+        yield {"type": "done", "data": reply, "profile": None}
+        return
+
     acc = ""
     try:
         async for token in stream_with_client_fallback(
@@ -620,6 +832,7 @@ async def stream_intelligent_chat(
             ctx["messages"],
             temperature=chat_temperature(deep_thinking),
             deep_thinking=deep_thinking,
+            task="chat",
         ):
             acc += token
             yield {"type": "token", "data": token}
@@ -642,14 +855,13 @@ async def stream_intelligent_chat(
         acc, question_type, chunks, topic, mode=mode
     )
     if len(final) > len(acc):
-        for ch in final[len(acc) :]:
-            yield {"type": "token", "data": ch}
+        yield {"type": "token", "data": final[len(acc) :]}
 
     final = filter_sensitive(final)
     yield {"type": "done", "data": final, "profile": None}
 
     updated_profile = None
-    if update_profile:
+    if update_profile and question_type != "chitchat":
         try:
             updated_profile = await asyncio.wait_for(
                 patch_profile_from_chat(

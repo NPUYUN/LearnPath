@@ -59,6 +59,7 @@ async def generate_resources(req: GenerateResourcesRequest) -> list[LearningReso
             "resource_types": req.resource_types,
             "library_id": gen_ctx.get("library_id", ""),
             "generation_context": gen_ctx,
+            "deep_thinking": req.deep_thinking,
             "messages": [{"role": "user", "content": f"请生成关于{req.topic}的学习资源"}],
         },
     )
@@ -95,6 +96,7 @@ async def stream_generate_resources(
             "resource_types": req.resource_types,
             "library_id": gen_ctx.get("library_id", ""),
             "generation_context": gen_ctx,
+            "deep_thinking": req.deep_thinking,
             "messages": [{"role": "user", "content": f"请生成关于{req.topic}的学习资源"}],
         },
     )
@@ -108,6 +110,17 @@ async def stream_generate_resources(
         yield {
             "event": "progress",
             "data": json.dumps({"stage": "web_research"}, ensure_ascii=False),
+        }
+
+    if req.deep_thinking:
+        yield {
+            "event": "progress",
+            "data": json.dumps({"stage": "deep_thinking"}, ensure_ascii=False),
+        }
+    else:
+        yield {
+            "event": "progress",
+            "data": json.dumps({"stage": "fast_resource"}, ensure_ascii=False),
         }
 
     for rt in types:

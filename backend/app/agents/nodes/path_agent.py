@@ -111,6 +111,7 @@ async def _llm_plan_steps(
             ],
             temperature=0.35 if deep else 0.5,
             deep_thinking=deep,
+            task="path",
         )
         match = re.search(r"\[[\s\S]*\]", raw)
         if not match:

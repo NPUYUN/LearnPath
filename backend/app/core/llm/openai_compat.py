@@ -8,8 +8,14 @@ from typing import AsyncIterator, Protocol
 import httpx
 
 from app.core.config import get_settings
+from app.core.llm.deep_thinking import (
+    TaskKind,
+    apply_temperature,
+    completion_max_tokens,
+    completion_read_timeout,
+)
 from app.core.llm.mock_client import MockLLMClient, mock_chat_response
-from app.core.llm.resilience import chat_with_retry, llm_http_timeout
+from app.core.llm.resilience import chat_with_retry
 
 
 class LLMClient(Protocol):
@@ -71,24 +77,20 @@ class OpenAICompatClient:
         *,
         temperature: float = 0.7,
         deep_thinking: bool = False,
+        task: TaskKind = "chat",
     ) -> str:
-        if deep_thinking:
-            temperature = min(temperature, 0.45)
+        temperature = apply_temperature(temperature, deep_thinking=deep_thinking)
         if self.use_mock:
             return mock_chat_response(
                 messages, deep=deep_thinking, quick=self.mock_quick
             )
 
-        url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
         return await chat_with_retry(
             self._chat_once,
             messages,
             temperature=temperature,
             deep_thinking=deep_thinking,
+            task=task,
         )
 
     async def _chat_once(
@@ -97,6 +99,7 @@ class OpenAICompatClient:
         *,
         temperature: float = 0.7,
         deep_thinking: bool = False,
+        task: TaskKind = "chat",
     ) -> str:
         url = f"{self.base_url}/chat/completions"
         headers = {
@@ -107,8 +110,14 @@ class OpenAICompatClient:
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": completion_max_tokens(deep_thinking=deep_thinking, task=task),
         }
-        timeout = llm_http_timeout()
+        timeout = httpx.Timeout(
+            connect=20.0,
+            read=completion_read_timeout(deep_thinking=deep_thinking),
+            write=30.0,
+            pool=10.0,
+        )
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
@@ -121,9 +130,9 @@ class OpenAICompatClient:
         *,
         temperature: float = 0.7,
         deep_thinking: bool = False,
+        task: TaskKind = "chat",
     ) -> AsyncIterator[str]:
-        if deep_thinking:
-            temperature = min(temperature, 0.45)
+        temperature = apply_temperature(temperature, deep_thinking=deep_thinking)
         if self.use_mock:
             mock = MockLLMClient(quick=self.mock_quick)
             async for chunk in mock.stream_chat(
@@ -141,9 +150,15 @@ class OpenAICompatClient:
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": completion_max_tokens(deep_thinking=deep_thinking, task=task),
             "stream": True,
         }
-        timeout = llm_http_timeout()
+        timeout = httpx.Timeout(
+            connect=20.0,
+            read=completion_read_timeout(deep_thinking=deep_thinking),
+            write=30.0,
+            pool=10.0,
+        )
         async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as resp:
                 if resp.status_code >= 400:

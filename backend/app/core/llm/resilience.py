@@ -43,6 +43,7 @@ async def chat_with_retry(
     *,
     temperature: float = 0.7,
     deep_thinking: bool = False,
+    task: str = "chat",
     max_attempts: int = 3,
 ) -> str:
     last: BaseException | None = None
@@ -52,6 +53,7 @@ async def chat_with_retry(
                 messages,
                 temperature=temperature,
                 deep_thinking=deep_thinking,
+                task=task,
             )
         except Exception as exc:
             last = exc
@@ -67,6 +69,7 @@ async def stream_chat_with_retry(
     *,
     temperature: float = 0.7,
     deep_thinking: bool = False,
+    task: str = "chat",
     max_attempts: int = 3,
 ) -> AsyncIterator[str]:
     """流式优先；空流或瞬态错误时重试，末次失败则回退为非流式 chat。"""
@@ -78,6 +81,7 @@ async def stream_chat_with_retry(
                 messages,
                 temperature=temperature,
                 deep_thinking=deep_thinking,
+                task=task,
             ):
                 acc += token
                 yield token
@@ -100,6 +104,7 @@ async def stream_chat_with_retry(
             messages,
             temperature=temperature,
             deep_thinking=deep_thinking,
+            task=task,
             max_attempts=2,
         )
         if text.strip():
@@ -117,6 +122,7 @@ async def stream_with_client_fallback(
     *,
     temperature: float = 0.7,
     deep_thinking: bool = False,
+    task: str = "chat",
 ) -> AsyncIterator[str]:
     errors: list[str] = []
     for client in clients:
@@ -126,6 +132,7 @@ async def stream_with_client_fallback(
                 messages,
                 temperature=temperature,
                 deep_thinking=deep_thinking,
+                task=task,
             ):
                 yield token
             return

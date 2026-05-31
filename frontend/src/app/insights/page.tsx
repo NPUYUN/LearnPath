@@ -1,7 +1,12 @@
 "use client";
 
 import DataInsightsContent from "@/components/pages/DataInsightsContent";
+import { PageScope } from "@/contexts/PageScopeContext";
 
 export default function InsightsPage() {
-  return <DataInsightsContent />;
+  return (
+    <PageScope route="/insights">
+      <DataInsightsContent />
+    </PageScope>
+  );
 }

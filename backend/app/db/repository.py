@@ -347,7 +347,12 @@ def list_events(user_id: str, limit: int = 50) -> list[dict]:
 
 
 def _default_preferences(user_id: str) -> dict:
-    return {"user_id": user_id, "starred_resource_ids": [], "account_patch": {}}
+    return {
+        "user_id": user_id,
+        "starred_resource_ids": [],
+        "account_patch": {},
+        "daily_plan": {"date": "", "tasks": []},
+    }
 
 
 async def get_preferences(user_id: str) -> dict:
@@ -359,6 +364,7 @@ async def get_preferences(user_id: str) -> dict:
         data.setdefault("user_id", user_id)
         data.setdefault("starred_resource_ids", [])
         data.setdefault("account_patch", {})
+        data.setdefault("daily_plan", {"date": "", "tasks": []})
         return data
 
 
@@ -368,6 +374,8 @@ async def set_preferences(user_id: str, patch: dict) -> dict:
         current["starred_resource_ids"] = list(patch["starred_resource_ids"])
     if "account_patch" in patch and patch["account_patch"] is not None:
         current["account_patch"] = {**current.get("account_patch", {}), **patch["account_patch"]}
+    if "daily_plan" in patch and patch["daily_plan"] is not None:
+        current["daily_plan"] = patch["daily_plan"]
     with SessionLocal() as db:
         row = db.get(UserPreferencesRecord, user_id)
         if row is None:

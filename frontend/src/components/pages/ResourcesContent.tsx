@@ -28,9 +28,6 @@ import {
   type LearningResource,
   type ResourceLibrary,
 } from "@/lib/api";
-import PageHeader from "@/components/PageHeader";
-import ResourceLibraryPanel from "@/components/ResourceLibraryPanel";
-import { ResourceJourneyView } from "@/components/ResourceJourneyView";
 import {
   GENERATABLE_RESOURCE_TYPES,
   RESOURCE_CONFIG,
@@ -41,7 +38,11 @@ import {
   groupResourcesByStage,
   STAGE_STATUS_META,
 } from "@/lib/resourceGrouping";
+import PageHeader from "@/components/PageHeader";
+import ResourceLibraryPanel from "@/components/ResourceLibraryPanel";
+import { ResourceJourneyView } from "@/components/ResourceJourneyView";
 import { useAppStore } from "@/store/appStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import PlusOutlined from "@ant-design/icons/PlusOutlined";
 import SearchOutlined from "@ant-design/icons/SearchOutlined";
 import BookOutlined from "@ant-design/icons/BookOutlined";
@@ -77,6 +78,8 @@ const GEN_STAGE_LABELS: Record<string, string> = {
   design: "资源设计方案",
   project: "实践项目",
   reviewer: "质量复审",
+  deep_thinking: "深度生成中",
+  fast_resource: "快速生成中",
 };
 
 function downloadMarkdown(r: LearningResource) {
@@ -96,6 +99,7 @@ export default function ResourcesContent() {
   const learningPath = useAppStore((s) => s.learningPath);
   const cachedResources = useAppStore((s) => s.resources);
   const setResources = useAppStore((s) => s.setResources);
+  const deepThinking = useSettingsStore((s) => s.deepThinking);
   const pendingPreviewId = useAppStore((s) => s.pendingResourcePreviewId);
   const setPendingPreviewId = useAppStore((s) => s.setPendingResourcePreviewId);
   const [items, setItems] = useState<LearningResource[]>(cachedResources);
@@ -172,7 +176,7 @@ export default function ResourcesContent() {
           if (starredIds.includes(r.id)) {
             const ids = starredIds.filter((x) => x !== r.id);
             setStarredIds(ids);
-            await patchPreferences(userId, ids);
+            await patchPreferences(userId, { starred_resource_ids: ids });
           }
           message.success("已删除");
         } catch (e: unknown) {
@@ -208,7 +212,7 @@ export default function ResourcesContent() {
       : [...starredIds, id];
     setStarredIds(next);
     try {
-      await patchPreferences(userId, next);
+      await patchPreferences(userId, { starred_resource_ids: next });
       message.success(next.includes(id) ? "已收藏" : "已取消收藏");
     } catch {
       setStarredIds(starredIds);
@@ -254,7 +258,9 @@ export default function ResourcesContent() {
     resourceTypes: string[];
     libraryId?: string;
     newLibraryName?: string;
+    deepThinking?: boolean;
   }> => {
+    const base = { deepThinking };
     if (genSource === "new") {
       if (!newLibraryName.trim()) {
         throw new Error("请输入新资料库名称");
@@ -270,20 +276,21 @@ export default function ResourcesContent() {
           setSelectedLibraryId(lib.id);
           setGenSource("library");
           setLibraries((prev) => [lib, ...prev.filter((x) => x.id !== lib.id)]);
-          return { resourceTypes: selectedGenTypes, libraryId: lib.id };
+          return { ...base, resourceTypes: selectedGenTypes, libraryId: lib.id };
         } finally {
           setPreparingLibrary(false);
         }
       }
       return {
+        ...base,
         resourceTypes: selectedGenTypes,
         newLibraryName: newLibraryName.trim(),
       };
     }
     if (genSource === "library" && selectedLibraryId) {
-      return { resourceTypes: selectedGenTypes, libraryId: selectedLibraryId };
+      return { ...base, resourceTypes: selectedGenTypes, libraryId: selectedLibraryId };
     }
-    return { resourceTypes: selectedGenTypes };
+    return { ...base, resourceTypes: selectedGenTypes };
   };
 
   const runStreamGenerate = async () => {

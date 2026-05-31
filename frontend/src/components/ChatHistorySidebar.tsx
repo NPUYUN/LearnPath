@@ -1,106 +1,115 @@
 "use client";
 
-import { Button, Empty, Typography } from "antd";
-import {
-  DeleteOutlined,
-  PlusOutlined,
-  UnorderedListOutlined,
-} from "@ant-design/icons";
+import { Button, Drawer, Empty, Typography } from "antd";
+import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ConversationDateGroup } from "@/lib/chatHistoryUtils";
 import { previewTurnText } from "@/lib/chatHistoryUtils";
 
 const { Text } = Typography;
 
 type ChatHistorySidebarProps = {
+  open: boolean;
+  onClose: () => void;
   groups: ConversationDateGroup[];
   activeConversationId: string | null;
-  collapsed: boolean;
-  onToggleCollapse: () => void;
   onSelectConversation: (conversationId: string) => void;
   onDeleteConversation: (conversationId: string) => void;
   onNewChat: () => void;
 };
 
 export default function ChatHistorySidebar({
+  open,
+  onClose,
   groups,
   activeConversationId,
-  collapsed,
-  onToggleCollapse,
   onSelectConversation,
   onDeleteConversation,
   onNewChat,
 }: ChatHistorySidebarProps) {
-  if (collapsed) {
-    return (
-      <div className="lp-chat-sidebar lp-chat-sidebar--collapsed">
-        <Button
-          type="text"
-          icon={<UnorderedListOutlined />}
-          onClick={onToggleCollapse}
-          title="展开对话目录"
-        />
-      </div>
-    );
-  }
-
   const total = groups.reduce((n, g) => n + g.conversations.length, 0);
 
-  return (
-    <aside className="lp-chat-sidebar">
-      <div className="lp-chat-sidebar-head">
-        <Text strong>对话目录</Text>
-        <div className="lp-chat-sidebar-head-actions">
-          <Button type="text" size="small" icon={<PlusOutlined />} onClick={onNewChat}>
-            新对话
-          </Button>
-          <Button
-            type="text"
-            size="small"
-            icon={<UnorderedListOutlined />}
-            onClick={onToggleCollapse}
-          />
-        </div>
-      </div>
+  const handleSelect = (conversationId: string) => {
+    onSelectConversation(conversationId);
+    onClose();
+  };
 
-      <div className="lp-chat-sidebar-body">
-        {total === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史对话" />
-        ) : (
-          groups.map((group) => (
-            <div key={group.dateKey} className="lp-chat-sidebar-group">
-              <div className="lp-chat-sidebar-date">{group.dateLabel}</div>
-              {group.conversations.map((conv) => {
-                const active = activeConversationId === conv.id;
-                return (
-                  <div
-                    key={conv.id}
-                    className={`lp-chat-sidebar-item${active ? " lp-chat-sidebar-item--active" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      className="lp-chat-sidebar-item-main"
-                      onClick={() => onSelectConversation(conv.id)}
+  const handleNew = () => {
+    onNewChat();
+    onClose();
+  };
+
+  return (
+    <Drawer
+      title="历史对话"
+      placement="right"
+      open={open}
+      onClose={onClose}
+      width={300}
+      destroyOnClose={false}
+      className="lp-chat-history-drawer"
+      styles={{
+        body: { padding: "12px 8px 16px" },
+        header: { padding: "12px 16px" },
+      }}
+      extra={
+        <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleNew}>
+          新对话
+        </Button>
+      }
+    >
+      {total === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史对话">
+          <Button type="primary" ghost size="small" icon={<PlusOutlined />} onClick={handleNew}>
+            开始新对话
+          </Button>
+        </Empty>
+      ) : (
+        <div className="lp-chat-history-list">
+          {groups.map((group) => (
+            <section key={group.dateKey} className="lp-chat-history-group">
+              <div className="lp-chat-history-date">{group.dateLabel}</div>
+              <ul className="lp-chat-history-items">
+                {group.conversations.map((conv) => {
+                  const active = activeConversationId === conv.id;
+                  return (
+                    <li
+                      key={conv.id}
+                      className={`lp-chat-history-item${active ? " lp-chat-history-item--active" : ""}`}
                     >
-                      {previewTurnText(conv.title)}
-                    </button>
-                    <Button
-                      type="text"
-                      size="small"
-                      danger
-                      className="lp-chat-sidebar-item-del"
-                      icon={<DeleteOutlined />}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteConversation(conv.id);
-                      }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          ))
-        )}
-      </div>
-    </aside>
+                      <button
+                        type="button"
+                        className="lp-chat-history-item-main"
+                        onClick={() => handleSelect(conv.id)}
+                      >
+                        <span className="lp-chat-history-item-title">
+                          {previewTurnText(conv.title)}
+                        </span>
+                      </button>
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        className="lp-chat-history-item-del"
+                        icon={<DeleteOutlined />}
+                        aria-label="删除对话"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteConversation(conv.id);
+                        }}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+      {total > 0 && (
+        <Text type="secondary" className="lp-chat-history-foot">
+          共 {total} 条对话
+        </Text>
+      )}
+    </Drawer>
   );
 }

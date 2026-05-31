@@ -27,7 +27,7 @@ async def profile_node(state: AgentState) -> dict:
         {"role": "system", "content": profile_system(deep)},
         {"role": "user", "content": user_text},
     ]
-    raw = await llm.chat(prompt, temperature=profile_temperature(deep), deep_thinking=deep)
+    raw = await llm.chat(prompt, temperature=profile_temperature(deep), deep_thinking=deep, task="profile")
     raw = filter_sensitive(raw)
 
     existing = dict(state.get("profile") or {})

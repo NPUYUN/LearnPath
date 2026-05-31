@@ -38,6 +38,7 @@ import AuthPageTheme from "@/components/AuthPageTheme";
 import InitLoadingScreen from "@/components/InitLoadingScreen";
 import RouteLoadingScreen from "@/components/RouteLoadingScreen";
 import PagePane from "@/components/PagePane";
+import { PageScope } from "@/contexts/PageScopeContext";
 import ThemeProvider from "@/components/ThemeProvider";
 import { preloadLoggedInExtras, preloadStandaloneRoute } from "@/lib/routePreload";
 
@@ -434,7 +435,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <main className="learnpath-main learnpath-panel learnpath-keepalive">
           <AppCanvas activeRoute={activeTab} />
           {showResourcesSubPage ? (
-            <div className="lp-resources-sub-route">{children}</div>
+            <div className="lp-resources-sub-route">
+              <PageScope route="/resources">{children}</PageScope>
+            </div>
           ) : (
             allModulesLoaded &&
             NAV_ROUTES.map((route) => {
@@ -442,7 +445,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               const isActive = activeTab === route;
               const isWarm = warmedRoutes.has(route) && activeTab !== route;
               return (
-                <PagePane key={route} active={isActive} preview={false} warm={isWarm}>
+                <PagePane key={route} route={route} active={isActive} preview={false} warm={isWarm}>
                   <Comp />
                 </PagePane>
               );

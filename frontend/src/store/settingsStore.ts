@@ -5,7 +5,7 @@ import { applyThemeToDocument, resolveTheme } from "@/lib/theme";
 export type ThemeMode = "light" | "dark" | "system";
 export type VoicePreset = "female" | "male" | "off";
 export type FontSizePreset = "normal" | "large";
-export type StreamSpeed = "normal" | "fast";
+export type StreamSpeed = "slow" | "fast" | "instant";
 
 export type AppSettings = {
   theme: ThemeMode;
@@ -23,7 +23,7 @@ const DEFAULTS: AppSettings = {
   voice: "female",
   ttsEnabled: false,
   fontSize: "normal",
-  streamSpeed: "normal",
+  streamSpeed: "fast",
   reduceMotion: false,
   deepThinking: false,
   webSearch: false,
@@ -67,6 +67,8 @@ export const useSettingsStore = create<SettingsState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
+          const legacy = state.streamSpeed as string;
+          if (legacy === "normal") state.streamSpeed = "fast";
           applyThemeToDocument(resolveTheme(state.theme), state.fontSize);
         }
       },

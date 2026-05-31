@@ -44,6 +44,7 @@ async def eval_node(state: AgentState) -> dict:
                 ],
                 temperature=0.45 if deep else 0.55,
                 deep_thinking=deep,
+                task="eval",
             )
             if advice.strip():
                 reply += f"\n\n{advice.strip()}"

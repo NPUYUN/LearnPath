@@ -1,10 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { usePathname } from "next/navigation";
 import { Typography } from "antd";
-import { isAppRoute } from "@/hooks/navRoutes";
-import { NAV_META } from "@/lib/navMeta";
+import { usePageScope } from "@/contexts/PageScopeContext";
 
 const { Title, Text } = Typography;
 
@@ -26,19 +24,11 @@ export default function PageHeader({
   status,
   variant = "default",
 }: PageHeaderProps) {
-  const pathname = usePathname();
-  const route = isAppRoute(pathname) ? pathname : "/chat";
-  const meta = NAV_META[route];
+  const { meta } = usePageScope();
 
   return (
     <header
       className={`lp-page-header${variant === "immersive" ? " lp-page-header--immersive" : ""}`}
-      style={
-        {
-          "--page-accent": meta.accent,
-          "--page-glow": meta.glow,
-        } as React.CSSProperties
-      }
     >
       <div className="lp-page-header-accent" aria-hidden />
       <div className="lp-page-header-main">

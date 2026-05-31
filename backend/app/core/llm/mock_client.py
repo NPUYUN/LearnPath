@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import AsyncIterator
 
 
@@ -16,15 +17,24 @@ def mock_chat_response(
     snippet = user_msg[:80] + ("…" if len(user_msg) > 80 else "")
 
     if "资源生成 Agent" in system_msg or "资源生成" in system_msg:
-        return (
+        body = (
             f"# {snippet}\n\n"
             "## 学习目标\n"
             "掌握主题核心概念（Mock 模式示例输出）。\n\n"
             "## 正文\n"
             "基于资料库/全网摘要生成的占位内容。配置星火 API 后将输出完整 LLM 生成结果。\n\n"
-            "## 小结\n"
-            "请完成配套练习巩固理解。"
         )
+        if deep:
+            body += (
+                "## 分析要点\n"
+                "- 对照资料库上下文核对术语。\n"
+                "- 补充例题与易错点。\n\n"
+                "## 小结\n"
+                "请完成配套练习巩固理解，并回顾知识库引用章节。"
+            )
+        else:
+            body += "## 小结\n请完成配套练习巩固理解。"
+        return body
 
     if quick:
         return f"[辅助模型 Mock] {snippet[:60]} — 已记录推荐上下文。"
@@ -35,7 +45,8 @@ def mock_chat_response(
             return (
                 "### 分析要点\n"
                 f"- 从对话「{snippet}」推断知识基础与学习偏好。\n"
-                "- 薄弱点需结合学科关键词更新 error_prone_topics。\n\n"
+                "- 薄弱点需结合学科关键词更新 error_prone_topics。\n"
+                "- 结合 weekly 时间投入校准 pace_and_time。\n\n"
                 "### 结论\n"
                 '{"knowledge_level":"入门偏上","learning_goal":"掌握机器学习导论核心概念",'
                 '"cognitive_style":"偏实践","error_prone_topics":["线性回归"],'
@@ -46,14 +57,19 @@ def mock_chat_response(
             "### 分析要点\n"
             f"- 问题聚焦：{snippet}\n"
             "- 知识库：机器学习导论相关章节（Mock 模式无真实检索）。\n"
-            "- 推理：先建立概念框架，再给出例题与易错点。\n\n"
+            "- 推理：先建立概念框架，再给出例题与易错点。\n"
+            "- 对比：与相邻概念区分，避免混淆。\n\n"
             "### 结论\n"
-            f"针对「{snippet}」：建议先回顾定义与直觉，再结合练习巩固。"
+            f"针对「{snippet}」：建议先回顾定义与直觉，再结合 2–3 道练习巩固；"
+            "若涉及公式，请写出关键假设与适用条件。"
         )
 
     return (
-        f"[Mock] 已收到：{snippet} "
-        "学径将基于机器学习导论知识库为你生成个性化学习内容。"
+        f"**结论**：关于「{snippet}」，核心是理解定义并能在简单例题中应用。\n\n"
+        "- 先记住 1 句直觉解释；\n"
+        "- 再看 1 个最小例子；\n"
+        "- 有疑问可在对话中继续追问。\n\n"
+        "（Mock 快速模式 · 配置 API Key 后可获得完整 LLM 回答）"
     )
 
 
@@ -77,7 +93,10 @@ class MockLLMClient:
         *,
         temperature: float = 0.7,
         deep_thinking: bool = False,
+        task: str = "chat",
     ) -> str:
+        if deep_thinking:
+            await asyncio.sleep(0.6)
         return mock_chat_response(messages, deep=deep_thinking, quick=self.quick)
 
     async def stream_chat(
@@ -86,10 +105,16 @@ class MockLLMClient:
         *,
         temperature: float = 0.7,
         deep_thinking: bool = False,
+        task: str = "chat",
     ) -> AsyncIterator[str]:
+        if deep_thinking:
+            await asyncio.sleep(0.5)
         content = await self.chat(
-            messages, temperature=temperature, deep_thinking=deep_thinking
+            messages, temperature=temperature, deep_thinking=deep_thinking, task=task
         )
-        step = 2 if self.quick else 1
+        step = 1 if deep_thinking else 5
+        delay = 0.012 if deep_thinking else 0.002
         for i in range(0, len(content), step):
             yield content[i : i + step]
+            if delay:
+                await asyncio.sleep(delay)

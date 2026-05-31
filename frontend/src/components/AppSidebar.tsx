@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo } from "react";
 import { Avatar, Button, Flex, Tag, Tooltip, Typography } from "antd";
-import { getRecommendations, type ResourceRecommendation } from "@/lib/api";
 import { NAV_META, pathProgress } from "@/lib/navMeta";
 import { useAppStore } from "@/store/appStore";
+import SidebarDailyPlan from "@/components/SidebarDailyPlan";
 import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import MenuFoldOutlined from "@ant-design/icons/MenuFoldOutlined";
 import MenuUnfoldOutlined from "@ant-design/icons/MenuUnfoldOutlined";
@@ -138,21 +137,12 @@ export default function AppSidebar({
   initDone,
 }: AppSidebarProps) {
   const initial = userName?.charAt(0) || "学";
-  const router = useRouter();
-  const userId = useAppStore((s) => s.userId);
   const learningPath = useAppStore((s) => s.learningPath);
-  const [recommendations, setRecommendations] = useState<ResourceRecommendation[]>([]);
 
   const progressPct = useMemo(
     () => pathProgress(learningPath?.steps),
     [learningPath?.steps]
   );
-
-  useEffect(() => {
-    void getRecommendations(userId, 3)
-      .then(setRecommendations)
-      .catch(() => setRecommendations([]));
-  }, [userId]);
 
   return (
     <aside className={`learnpath-sider${collapsed ? " learnpath-sider--collapsed" : ""}`}>
@@ -208,26 +198,7 @@ export default function AppSidebar({
           ))}
         </div>
 
-        {!collapsed && recommendations.length > 0 && (
-          <div className="learnpath-sider-recs">
-            <Text type="secondary" style={{ fontSize: 11, display: "block", marginBottom: 6 }}>
-              ✦ 今日推荐
-            </Text>
-            <Flex wrap gap={4}>
-              {recommendations.map((rec) => (
-                <Tag
-                  key={rec.id}
-                  className="learnpath-rec-chip"
-                  onClick={() => {
-                    router.push(`/resources/view/${encodeURIComponent(rec.id)}`);
-                  }}
-                >
-                  {rec.title.length > 12 ? `${rec.title.slice(0, 12)}…` : rec.title}
-                </Tag>
-              ))}
-            </Flex>
-          </div>
-        )}
+        <SidebarDailyPlan collapsed={collapsed} />
 
         <div className="lp-nav-secondary">
           {secondaryItems.map((item) => (

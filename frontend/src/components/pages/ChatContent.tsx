@@ -1,8 +1,9 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Input, Button, Avatar, Tag, Tooltip, Switch, Upload, message, Modal } from "antd";
+import { Input, Button, Avatar, Tag, Tooltip, Switch, Upload, message, Modal, Space } from "antd";
 import SendOutlined from "@ant-design/icons/SendOutlined";
 import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import GlobalOutlined from "@ant-design/icons/GlobalOutlined";
@@ -10,10 +11,13 @@ import PaperClipOutlined from "@ant-design/icons/PaperClipOutlined";
 import UserOutlined from "@ant-design/icons/UserOutlined";
 import RobotOutlined from "@ant-design/icons/RobotOutlined";
 import ReloadOutlined from "@ant-design/icons/ReloadOutlined";
+import HistoryOutlined from "@ant-design/icons/HistoryOutlined";
+import PlusOutlined from "@ant-design/icons/PlusOutlined";
 import DeleteOutlined from "@ant-design/icons/DeleteOutlined";
 import CopyOutlined from "@ant-design/icons/CopyOutlined";
 import PageHeader from "@/components/PageHeader";
 import MarkdownPreview from "@/components/MarkdownPreview";
+import StreamingPlainText from "@/components/StreamingPlainText";
 import ChatHistorySidebar from "@/components/ChatHistorySidebar";
 import {
   appendChatHistory,
@@ -47,6 +51,7 @@ import {
 import { copyTextToClipboard, isFailedAssistantReply } from "@/lib/chatMessageUtils";
 import { RESOURCE_CONFIG, mapApiType } from "@/lib/resourceConfig";
 import { playAssistantSpeech } from "@/lib/tts";
+import { getStreamSpeedConfig } from "@/lib/streamSpeed";
 import { isDemoUser, useAppStore } from "@/store/appStore";
 import { useSettingsStore } from "@/store/settingsStore";
 
@@ -59,6 +64,7 @@ interface Message {
   turnId?: string;
   timestamp: Date;
   isTyping?: boolean;
+  isStreaming?: boolean;
 }
 
 const DEMO_QUICK_ACTIONS = [
@@ -77,6 +83,7 @@ const REAL_QUICK_ACTIONS = [
 
 const MessageItem = memo(function MessageItem({
   msg,
+  liveStreamText,
   onResourceClick,
   onDeleteTurn,
   onCopy,
@@ -86,6 +93,8 @@ const MessageItem = memo(function MessageItem({
   registerRef,
 }: {
   msg: Message;
+  /** 流式进行中：与 msg.id 匹配时传入，用于纯文本展示（不触发 Markdown 重解析） */
+  liveStreamText?: string;
   onResourceClick?: (id: string) => void;
   onDeleteTurn?: (userMessageId: string) => void;
   onCopy?: (content: string) => void;
@@ -94,6 +103,10 @@ const MessageItem = memo(function MessageItem({
   regenerating?: boolean;
   registerRef?: (id: string, el: HTMLDivElement | null) => void;
 }) {
+  const displayCopyText =
+    msg.isStreaming && liveStreamText !== undefined
+      ? liveStreamText || msg.content
+      : msg.content;
   return (
     <div
       ref={(el) => registerRef?.(msg.id, el)}
@@ -140,7 +153,11 @@ const MessageItem = memo(function MessageItem({
                 </div>
               )}
               <div className={`md-content ${msg.role === "user" ? "md-user" : ""}`}>
-                <MarkdownPreview content={msg.content || "　"} />
+                {msg.isStreaming && liveStreamText !== undefined ? (
+                  <StreamingPlainText text={liveStreamText || msg.content} />
+                ) : (
+                  <MarkdownPreview content={msg.content || "　"} />
+                )}
               </div>
             </div>
 
@@ -196,7 +213,7 @@ const MessageItem = memo(function MessageItem({
                       size="small"
                       className="lp-chat-action-btn"
                       icon={<CopyOutlined />}
-                      onClick={() => onCopy(msg.content)}
+                      onClick={() => onCopy(displayCopyText)}
                     />
                   </Tooltip>
                 )}
@@ -243,6 +260,8 @@ const MessageItem = memo(function MessageItem({
 
 const STAGE_LABELS: Record<string, string> = {
   deep_thinking: "深度思考中",
+  fast_reply: "快速回答中",
+  fast_resource: "快速生成中",
   web_research: "联网检索中",
   profile: "同步画像",
   generate: "生成资源",
@@ -290,7 +309,11 @@ export default function ChatContent() {
   const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
   const voice = useSettingsStore((s) => s.voice);
   const setSettings = useSettingsStore((s) => s.setSettings);
-  const chunkSize = streamSpeed === "fast" ? 2 : 1;
+  const streamConfig = useMemo(
+    () => getStreamSpeedConfig(streamSpeed, deepThinking),
+    [streamSpeed, deepThinking]
+  );
+  const chunkSize = streamConfig.chunkSize;
 
   const [messages, setMessages] = useState<Message[]>([WELCOME_MSG]);
   const [historyRows, setHistoryRows] = useState<Awaited<ReturnType<typeof getChatHistory>>>([]);
@@ -304,12 +327,16 @@ export default function ChatContent() {
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const [llmRouting, setLlmRouting] = useState("");
   const [stageLabel, setStageLabel] = useState("");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [activeUserMessageId, setActiveUserMessageId] = useState<string | null>(null);
   const [regeneratingUserId, setRegeneratingUserId] = useState<string | null>(null);
+  const [liveStreamText, setLiveStreamText] = useState("");
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const streamAccRef = useRef("");
+  const streamIntervalRef = useRef(0);
 
   const conversationGroups = useMemo(
     () => groupConversationsByDate(conversations),
@@ -453,6 +480,7 @@ export default function ChatContent() {
   }, [userId]);
 
   useEffect(() => {
+    if (messages.some((m) => m.isStreaming)) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -607,26 +635,74 @@ export default function ChatContent() {
 
       const formatStage = (stage: string) => STAGE_LABELS[stage] || stage;
 
-      const ensureAssistantMessage = (replyContent: string) => {
-        if (!replyId) {
-          replyId = `local-a-${Date.now()}`;
+      const stopStreamFlush = () => {
+        if (streamIntervalRef.current) {
+          window.clearInterval(streamIntervalRef.current);
+          streamIntervalRef.current = 0;
+        }
+      };
+
+      const startStreamFlush = () => {
+        if (!streamConfig.plainStream || streamConfig.flushMs <= 0) return;
+        if (streamIntervalRef.current) return;
+        streamIntervalRef.current = window.setInterval(() => {
+          setLiveStreamText(streamAccRef.current);
+          bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+        }, streamConfig.flushMs);
+      };
+
+      const ensureStreamingMessage = () => {
+        if (!streamConfig.plainStream) return;
+        if (replyId) return;
+        replyId = `local-a-${Date.now()}`;
+        setStreamingMessageId(replyId);
+        setLiveStreamText(streamAccRef.current);
+        setMessages((prev) =>
+          prev
+            .filter((m) => m.id !== typingId)
+            .concat({
+              id: replyId!,
+              role: "assistant",
+              content: "",
+              turnId,
+              timestamp: new Date(),
+              isStreaming: true,
+            })
+        );
+        startStreamFlush();
+      };
+
+      const finalizeStreamingMessage = (finalContent: string) => {
+        stopStreamFlush();
+        flushSync(() => {
+          setLiveStreamText("");
+          setStreamingMessageId(null);
+          if (!replyId) {
+            replyId = `local-a-${Date.now()}`;
+            setMessages((prev) =>
+              prev
+                .filter((m) => m.id !== typingId)
+                .concat({
+                  id: replyId!,
+                  role: "assistant",
+                  content: finalContent,
+                  turnId,
+                  timestamp: new Date(),
+                })
+            );
+            return;
+          }
           setMessages((prev) =>
             prev
               .filter((m) => m.id !== typingId)
-              .concat({
-                id: replyId!,
-                role: "assistant",
-                content: replyContent,
-                turnId,
-                timestamp: new Date(),
-              })
+              .map((m) =>
+                m.id === replyId ? { ...m, content: finalContent, isStreaming: false } : m
+              )
           );
-          return;
-        }
-        setMessages((prev) =>
-          prev.map((m) => (m.id === replyId ? { ...m, content: replyContent } : m))
-        );
+        });
       };
+
+      streamAccRef.current = "";
 
       try {
         await streamChat(
@@ -635,20 +711,23 @@ export default function ChatContent() {
           {
             onToken: (token: string) => {
               acc += token;
-              ensureAssistantMessage(acc);
+              streamAccRef.current = acc;
+              ensureStreamingMessage();
             },
             onProgress: (stage: string) => setStageLabel(formatStage(stage)),
             onDone: (reply: string) => {
               finalReply = reply;
               if (reply && reply !== acc) {
                 acc = reply;
-                ensureAssistantMessage(acc);
+                streamAccRef.current = acc;
               }
             },
             onError: (err: string) => {
               const text = err.startsWith("⚠️") ? err : `⚠️ ${err}`;
               finalReply = text;
-              ensureAssistantMessage(text);
+              acc = text;
+              streamAccRef.current = text;
+              ensureStreamingMessage();
             },
             onIntent: (intent: string) => setStageLabel(formatStage(intent)),
             onProfile: (p) => setProfile(p),
@@ -675,6 +754,9 @@ export default function ChatContent() {
 
         const assistantText = (finalReply || acc).trim();
         if (!assistantText) {
+          stopStreamFlush();
+          setLiveStreamText("");
+          setStreamingMessageId(null);
           setMessages((prev) =>
             prev
               .filter((m) => m.id !== typingId)
@@ -687,7 +769,11 @@ export default function ChatContent() {
                 timestamp: new Date(),
               })
           );
-        } else if (msgResources?.length && replyId) {
+        } else {
+          finalizeStreamingMessage(assistantText);
+        }
+
+        if (assistantText && msgResources?.length && replyId) {
           setMessages((prev) =>
             prev.map((m) => (m.id === replyId ? { ...m, resources: msgResources } : m))
           );
@@ -723,28 +809,21 @@ export default function ChatContent() {
       } catch (err: unknown) {
         const msgText = err instanceof Error ? err.message : "未知错误";
         const errContent = `⚠️ ${msgText}\n\n若持续出现，请运行 **stop.bat** 再 **start.bat** 重启服务，或检查 .env 中 Kimi API 配置。`;
-        setMessages((prev) => {
-          const withoutTyping = prev.filter((m) => m.id !== typingId);
-          if (replyId) {
-            return withoutTyping.map((m) =>
-              m.id === replyId ? { ...m, content: errContent } : m
-            );
-          }
-          return withoutTyping.concat({
-            id: `local-a-err-${Date.now()}`,
-            role: "assistant",
-            content: errContent,
-            turnId,
-            timestamp: new Date(),
-          });
-        });
+        finalizeStreamingMessage(errContent);
         await appendChatHistory(userId, "assistant", errContent, [], {
           turnId,
           conversationId,
         }).catch(() => null);
       } finally {
+        stopStreamFlush();
+        setLiveStreamText("");
+        setStreamingMessageId(null);
         setLoading(false);
-        setMessages((prev) => prev.filter((m) => m.id !== typingId));
+        setMessages((prev) =>
+          prev
+            .filter((m) => m.id !== typingId)
+            .map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m))
+        );
         void reloadConversations();
       }
     },
@@ -754,6 +833,8 @@ export default function ChatContent() {
       chunkSize,
       deepThinking,
       webSearch,
+      streamConfig,
+      streamSpeed,
       addResources,
       syncAfterChat,
       ttsEnabled,
@@ -906,23 +987,39 @@ export default function ChatContent() {
         icon={<RobotOutlined />}
         status={<span className={`lp-status-dot ${statusClass}`}>{statusText}</span>}
         extra={
-          <Tooltip title="清空当前对话">
-            <Button icon={<ReloadOutlined />} size="small" onClick={handleClearChat} />
-          </Tooltip>
+          <Space size={4} className="lp-chat-header-actions">
+            <Tooltip title="历史对话">
+              <Button
+                icon={<HistoryOutlined />}
+                size="small"
+                onClick={() => setHistoryOpen(true)}
+              />
+            </Tooltip>
+            <Tooltip title="新对话">
+              <Button
+                icon={<PlusOutlined />}
+                size="small"
+                onClick={() => void handleNewConversation()}
+              />
+            </Tooltip>
+            <Tooltip title="清空当前对话">
+              <Button icon={<ReloadOutlined />} size="small" onClick={handleClearChat} />
+            </Tooltip>
+          </Space>
         }
       />
 
-      <div className="lp-chat-main">
-        <ChatHistorySidebar
-          groups={conversationGroups}
-          activeConversationId={activeConversationId}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
-          onSelectConversation={handleSelectConversation}
-          onDeleteConversation={handleDeleteConversation}
-          onNewChat={() => void handleNewConversation()}
-        />
+      <ChatHistorySidebar
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        groups={conversationGroups}
+        activeConversationId={activeConversationId}
+        onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
+        onNewChat={() => void handleNewConversation()}
+      />
 
+      <div className="lp-chat-main">
         <div className="lp-chat-column">
           {recommendations.length > 0 && (
             <div className="lp-chat-recommendations">
@@ -930,14 +1027,15 @@ export default function ChatContent() {
                 今日推荐
               </span>
               {recommendations.map((rec) => (
-                <Tag
-                  key={rec.id}
-                  className="lp-quick-tag"
-                  color="processing"
-                  onClick={() => handleResourceClick(rec.id)}
-                >
-                  {rec.title}
-                </Tag>
+                <Tooltip key={rec.id} title={rec.reason || rec.topic || undefined}>
+                  <Tag
+                    className="lp-quick-tag"
+                    color="processing"
+                    onClick={() => handleResourceClick(rec.id)}
+                  >
+                    {rec.title}
+                  </Tag>
+                </Tooltip>
               ))}
             </div>
           )}
@@ -947,6 +1045,7 @@ export default function ChatContent() {
               <MessageItem
                 key={msg.id}
                 msg={msg}
+                liveStreamText={msg.id === streamingMessageId ? liveStreamText : undefined}
                 onResourceClick={handleResourceClick}
                 onDeleteTurn={msg.role === "user" && msg.id !== "welcome" ? handleDeleteTurn : undefined}
                 onCopy={

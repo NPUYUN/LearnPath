@@ -140,10 +140,11 @@ export async function streamChat(
   deepThinking = false,
   webSearch = false,
   attachmentContext = "",
-  timeoutMs = 120000
+  timeoutMs?: number
 ) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const effectiveTimeout = timeoutMs ?? (deepThinking ? 180000 : 90000);
+  const timer = setTimeout(() => controller.abort(), effectiveTimeout);
   let res: Response;
   try {
     res = await handleResponse(
@@ -165,7 +166,7 @@ export async function streamChat(
   } catch (e: unknown) {
     clearTimeout(timer);
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error("请求超时（120s），Kimi/智能体可能未响应，请稍后重试");
+      throw new Error(`请求超时（${Math.round(effectiveTimeout / 1000)}s），请稍后重试或关闭深度思考`);
     }
     throw e;
   }
@@ -374,6 +375,7 @@ export type GenerateResourceOptions = {
   resourceTypes?: string[];
   libraryId?: string | null;
   newLibraryName?: string;
+  deepThinking?: boolean;
 };
 
 export async function listLibraries(userId: string) {
@@ -470,6 +472,7 @@ export async function generateResources(
         resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
         library_id: options?.libraryId || null,
         new_library_name: options?.newLibraryName || null,
+        deep_thinking: options?.deepThinking ?? false,
       }),
     })
   );
@@ -530,6 +533,7 @@ export async function streamGenerateResources(
         resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
         library_id: options?.libraryId || null,
         new_library_name: options?.newLibraryName || null,
+        deep_thinking: options?.deepThinking ?? false,
       }),
     })
   );
@@ -749,6 +753,7 @@ export type UserPreferences = {
   user_id: string;
   starred_resource_ids: string[];
   account_patch: Record<string, string>;
+  daily_plan?: import("@/lib/dailyPlan").DailyPlan;
 };
 
 export async function getPreferences(userId: string) {
@@ -759,12 +764,18 @@ export async function getPreferences(userId: string) {
   return res.json() as Promise<UserPreferences>;
 }
 
-export async function patchPreferences(userId: string, starred_resource_ids: string[]) {
+export async function patchPreferences(
+  userId: string,
+  patch: {
+    starred_resource_ids?: string[];
+    daily_plan?: import("@/lib/dailyPlan").DailyPlan;
+  }
+) {
   const res = await handleResponse(
     await fetch(apiUrl(`/api/preferences/${userId}`), {
       method: "PATCH",
       headers: authHeaders(),
-      body: JSON.stringify({ starred_resource_ids }),
+      body: JSON.stringify(patch),
     })
   );
   if (!res.ok) throw new Error(await res.text());

@@ -310,7 +310,7 @@ export default function ProfileContent() {
                   percent={d.score}
                   showInfo={false}
                   strokeColor={d.color}
-                  trailColor="rgba(0,0,0,0.06)"
+                  trailColor={isDarkTheme() ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)"}
                   size="small"
                 />
                 <p className="lp-profile-dim-detail">{d.detail}</p>

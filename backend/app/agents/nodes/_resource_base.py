@@ -4,7 +4,7 @@ from typing import Any
 from app.agents.state import AgentState
 from app.core.guardrails import attach_sources, filter_sensitive, review_consistency
 from app.core.llm.router import get_primary_llm
-from app.core.prompts import resource_generation_system, resource_generation_user
+from app.core.prompts import resource_generation_system, resource_generation_user, resource_temperature
 from app.rag.retriever import retrieve
 from app.services.resource_context_service import _profile_summary
 
@@ -18,10 +18,11 @@ async def _generate_with_llm(
 ) -> str:
     topic = state.get("topic") or "机器学习导论"
     profile = state.get("profile") or {}
+    deep = bool(state.get("deep_thinking"))
     llm = get_primary_llm()
     content = await llm.chat(
         [
-            {"role": "system", "content": resource_generation_system(resource_type)},
+            {"role": "system", "content": resource_generation_system(resource_type, deep)},
             {
                 "role": "user",
                 "content": resource_generation_user(
@@ -35,8 +36,9 @@ async def _generate_with_llm(
                 ),
             },
         ],
-        temperature=0.45,
-        deep_thinking=bool(state.get("deep_thinking")),
+        temperature=resource_temperature(deep),
+        deep_thinking=deep,
+        task="resource",
     )
     return content.strip()
 

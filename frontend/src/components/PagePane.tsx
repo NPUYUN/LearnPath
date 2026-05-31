@@ -2,8 +2,11 @@
 
 import type { ReactNode } from "react";
 import { PageVisibilityContext } from "@/contexts/PageVisibilityContext";
+import { PageScope } from "@/contexts/PageScopeContext";
+import type { NavRoute } from "@/hooks/navRoutes";
 
 type PagePaneProps = {
+  route: NavRoute;
   active: boolean;
   preview: boolean;
   /** 登录预热完成后保持挂载，避免图表销毁后再次进入卡顿 */
@@ -12,7 +15,7 @@ type PagePaneProps = {
 };
 
 /** Keep-alive 面板：始终占位，用 opacity 切换，避免 display:none 导致图表首帧卡顿 */
-export default function PagePane({ active, preview, warm, children }: PagePaneProps) {
+export default function PagePane({ route, active, preview, warm, children }: PagePaneProps) {
   const shown = active || preview || Boolean(warm);
   const className = [
     "learnpath-keepalive-pane",
@@ -26,7 +29,7 @@ export default function PagePane({ active, preview, warm, children }: PagePanePr
   return (
     <PageVisibilityContext.Provider value={shown}>
       <div className={className} aria-hidden={!active}>
-        {children}
+        <PageScope route={route}>{children}</PageScope>
       </div>
     </PageVisibilityContext.Provider>
   );

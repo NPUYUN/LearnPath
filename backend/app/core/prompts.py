@@ -10,11 +10,50 @@ DEEP_THINKING_APPEND = (
 
     "\n\n【深度思考模式】\n"
 
-    "请先给出简要的「分析要点」（分点列出推理依据与知识库引用），再给出「结论」。\n"
+    "1. 必须先写「## 分析要点」（3–5 条：依据、知识库引用、推理链）。\n"
 
-    "不确定之处须明确声明，禁止编造来源或数据。"
+    "2. 再写「## 结论」（完整解答，含定义/例题/对比/易错点）。\n"
+
+    "3. 总篇幅宜 800–1500 汉字（代码/分镜题可更长）；不确定处须明确标注。\n"
+
+    "禁止编造来源或数据。"
 
 )
+
+
+
+FAST_REPLY_APPEND = (
+
+    "\n\n【快速回答模式】\n"
+
+    "1. 开门见山：首句直接给出答案或结论。\n"
+
+    "2. 全文控制在约 250–450 汉字（代码/分镜类可至 700 字）。\n"
+
+    "3. 用 ## 小标题 + 要点列表；省略「分析要点」「推理过程」等章节。\n"
+
+    "4. 至多 1 个精简 mermaid 或代码块（仅当题型需要）。\n"
+
+    "禁止冗长铺垫与重复用户原话。"
+
+)
+
+
+
+FAST_PROFILE_APPEND = (
+
+    "\n\n【快速画像模式】仅输出 JSON 对象，不要 markdown、不要分析文字，字段值简洁。"
+
+)
+
+
+
+FAST_RESOURCE_APPEND = (
+
+    "\n\n【快速生成模式】内容精炼：讲解文档约 500–800 字；其他类型满足最低结构即可，避免重复上下文。"
+
+)
+
 
 
 
@@ -195,6 +234,30 @@ RECOMMENDATION_POLISH_SYSTEM = (
     "2. 仅输出 JSON 对象，键为资源 id，值为推荐语\n"
 
     "3. 禁止 markdown 与多余说明"
+
+)
+
+
+
+RECOMMENDATION_SELECT_SYSTEM = (
+
+    "你是「学径 LearnPath」今日学习推荐 Agent。\n"
+
+    "综合用户画像、学习路径、近期对话、学习行为与资源库，选出最适合「今天」学习的若干条资源。\n"
+
+    "原则：\n"
+
+    "1. 优先薄弱点、路径进行中步骤、与学习目标强相关的未完成资源\n"
+
+    "2. 避免推荐已完成或近期刚学完的资源\n"
+
+    "3. 兼顾模态偏好（文档/导图/练习/视频/代码等）与难度匹配\n"
+
+    "4. 每条理由 12 字以内，说明「为何现在学」\n"
+
+    "5. 仅输出 JSON：{\"items\":[{\"id\":\"资源id\",\"reason\":\"理由\"}]}\n"
+
+    "6. id 必须来自候选列表，禁止编造；禁止 markdown 与多余说明"
 
 )
 
@@ -382,6 +445,10 @@ def profile_system(deep: bool = False) -> str:
 
         text += DEEP_THINKING_APPEND
 
+    else:
+
+        text += FAST_PROFILE_APPEND
+
     return text
 
 
@@ -455,6 +522,14 @@ def reviewer_system() -> str:
 def recommendation_polish_system() -> str:
 
     return RECOMMENDATION_POLISH_SYSTEM
+
+
+
+
+
+def recommendation_select_system() -> str:
+
+    return RECOMMENDATION_SELECT_SYSTEM
 
 
 
@@ -547,7 +622,7 @@ def chat_reply_hint(intent: str, deep: bool = False) -> str:
 
 def profile_temperature(deep: bool = False) -> float:
 
-    return 0.35 if deep else 0.55
+    return 0.3 if deep else 0.58
 
 
 
@@ -555,7 +630,7 @@ def profile_temperature(deep: bool = False) -> float:
 
 def tutor_temperature(deep: bool = False) -> float:
 
-    return 0.4 if deep else 0.65
+    return 0.32 if deep else 0.66
 
 
 
@@ -641,11 +716,21 @@ def eval_advice_user_payload(*, profile: dict, last_quiz: dict | None) -> str:
 
 
 
-def resource_generation_system(resource_type: str) -> str:
+def resource_generation_system(resource_type: str, deep: bool = False) -> str:
 
     inst = RESOURCE_TYPE_INSTRUCTIONS.get(resource_type, RESOURCE_TYPE_INSTRUCTIONS["doc"])
 
-    return f"{RESOURCE_GENERATION_BASE}\n\n【本任务类型】{inst}"
+    text = f"{RESOURCE_GENERATION_BASE}\n\n【本任务类型】{inst}"
+
+    if deep:
+
+        text += DEEP_THINKING_APPEND + "\n生成内容须更完整、分节更细，并补充例题或检查清单。"
+
+    else:
+
+        text += FAST_RESOURCE_APPEND
+
+    return text
 
 
 
@@ -709,7 +794,9 @@ _CHAT_TYPE_HINTS = {
 
     "profile_info": "识别学习背景与偏好，回答中可简要确认已记录的信息。",
 
-    "general": "综合解答，结构清晰，适当配图示或例题。",
+    "chitchat": "用户仅在寒暄、致谢或询问助手身份；2–4 句友好回复即可，禁止展开任何学科讲解。",
+
+    "general": "综合解答，结构清晰；仅当用户明确问了学习问题时才配图示或例题。",
 
 }
 
@@ -721,7 +808,7 @@ def classify_question_type_prompt() -> str:
 
     return (
 
-        "判断用户提问类型，仅输出：concept | code | media | practice | profile_info | general"
+        "判断用户提问类型，仅输出：chitchat | concept | code | media | practice | profile_info | general"
 
     )
 
@@ -758,7 +845,26 @@ def chat_library_polish_system(question_type: str, deep: bool = False) -> str:
 
         text += DEEP_THINKING_APPEND
 
+    else:
+
+        text += FAST_REPLY_APPEND
+
     return text
+
+
+
+
+
+def chat_chitchat_system(deep: bool = False) -> str:
+    return (
+        "你是「学径 LearnPath」学习助手。\n"
+        "用户只是在寒暄、致谢、告别，或询问你是谁/能做什么，并未提出具体学习问题。\n"
+        "要求：\n"
+        "1. 用 2–4 句话友好回应；可简要说明你能帮用户做画像、生成资源、规划路径、答疑。\n"
+        "2. 禁止展开任何学科知识（如机器学习定义、算法、公式、课程章节等）。\n"
+        "3. 不要使用 ## 标题、mermaid、代码块或长列表。\n"
+        "4. 以邀请用户说出学习需求结尾。"
+    )
 
 
 
@@ -774,7 +880,8 @@ def chat_direct_system(question_type: str, deep: bool = False) -> str:
 
         f"本问类型侧重：{hint}\n"
 
-        "要求：结构清晰、标准 Markdown（标题/列表/加粗）；"
+        "要求：必须紧扣【用户问题】作答，不要擅自切换到用户未提及的学科主题；"
+        "结构清晰、标准 Markdown（标题/列表/加粗）；"
         "关系图仅用 ```mermaid 围栏代码块，勿输出裸 mermaid 文本；"
         "不确定处明确说明；禁止编造来源。"
 
@@ -783,6 +890,10 @@ def chat_direct_system(question_type: str, deep: bool = False) -> str:
     if deep:
 
         text += DEEP_THINKING_APPEND
+
+    else:
+
+        text += FAST_REPLY_APPEND
 
     return text
 
@@ -822,5 +933,13 @@ def chat_profile_patch_system() -> str:
 
 def chat_temperature(deep: bool = False) -> float:
 
-    return 0.4 if deep else 0.62
+    return 0.32 if deep else 0.66
+
+
+
+
+
+def resource_temperature(deep: bool = False) -> float:
+
+    return 0.3 if deep else 0.55
 

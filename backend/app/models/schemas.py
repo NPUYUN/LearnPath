@@ -109,6 +109,7 @@ class GenerateResourcesRequest(BaseModel):
     )
     library_id: str | None = None
     new_library_name: str | None = None
+    deep_thinking: bool = False
 
 
 class ResourceLibrarySummary(BaseModel):
@@ -250,15 +251,30 @@ class ResourceRecommendation(BaseModel):
     reason: str = ""
 
 
+class DailyTaskItem(BaseModel):
+    id: str
+    text: str
+    done: bool = False
+
+
+class DailyPlanState(BaseModel):
+    """用户当日学习计划（按本地日期归档）。"""
+
+    date: str = ""
+    tasks: list[DailyTaskItem] = Field(default_factory=list)
+
+
 class UserPreferences(BaseModel):
     user_id: str
     starred_resource_ids: list[str] = Field(default_factory=list)
     account_patch: dict = Field(default_factory=dict)
+    daily_plan: DailyPlanState = Field(default_factory=DailyPlanState)
 
 
 class UserPreferencesUpdate(BaseModel):
     starred_resource_ids: list[str] | None = None
     account_patch: dict | None = None
+    daily_plan: DailyPlanState | None = None
 
 
 class ChatAttachmentMeta(BaseModel):

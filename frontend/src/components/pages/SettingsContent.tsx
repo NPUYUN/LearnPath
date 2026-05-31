@@ -1,12 +1,13 @@
 "use client";
 
-import { Card, Col, Row, Select, Switch, Typography, Button, Divider, message } from "antd";
+import { Card, Col, Row, Select, Switch, Typography, Button, Divider, message, Segmented } from "antd";
 import SettingOutlined from "@ant-design/icons/SettingOutlined";
 import SoundOutlined from "@ant-design/icons/SoundOutlined";
 import BgColorsOutlined from "@ant-design/icons/BgColorsOutlined";
 import ThunderboltOutlined from "@ant-design/icons/ThunderboltOutlined";
 import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import PageHeader from "@/components/PageHeader";
+import { STREAM_SPEED_OPTIONS } from "@/lib/streamSpeed";
 import {
   useSettingsStore,
   type FontSizePreset,
@@ -136,16 +137,15 @@ export default function SettingsContent() {
             >
               <div className="lp-settings-row">
                 <Text>流式回复速度</Text>
-                <Select
-                  style={{ width: 200 }}
+                <Segmented
                   value={streamSpeed}
-                  onChange={(v: StreamSpeed) => setSettings({ streamSpeed: v })}
-                  options={[
-                    { value: "normal", label: "标准" },
-                    { value: "fast", label: "较快（演示）" },
-                  ]}
+                  onChange={(v) => setSettings({ streamSpeed: v as StreamSpeed })}
+                  options={STREAM_SPEED_OPTIONS}
                 />
               </div>
+              <Paragraph type="secondary" style={{ margin: "4px 0 12px", fontSize: 13 }}>
+                慢：逐段展示；快：流畅打字（默认）；立刻：完成后一次性排版渲染。
+              </Paragraph>
               <div className="lp-settings-row">
                 <span>
                   <BulbOutlined style={{ marginRight: 6, color: "#faad14" }} />
@@ -157,11 +157,11 @@ export default function SettingsContent() {
                 />
               </div>
               <Paragraph type="secondary" style={{ margin: "0 0 8px", fontSize: 13 }}>
-                开启后回复更慢、推理更完整（先分析要点再结论）；与对话页开关同步。
+                开启后：先「分析要点」再「结论」，篇幅更长、响应更慢。关闭时：直接给精简要点（约 300–500 字），响应更快。与对话页开关同步。
               </Paragraph>
               <Divider style={{ margin: "16px 0" }} />
               <Text type="secondary">
-                赛题核心能力（对话画像、资源生成、学习路径、评估）在侧栏主菜单中；本页为产品体验增强，非赛题硬性要求。
+                核心能力（对话画像、资源生成、学习路径、评估）在侧栏主菜单中；本页为体验与偏好设置。
               </Text>
             </Card>
           </Col>
