@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from app.core.config import get_settings
 from app.db.repository import create_otp, get_or_create_user, verify_otp_code
 from app.core.security import create_access_token
-from app.models.schemas import AuthUser, DemoTokenRequest, SendOtpRequest, VerifyOtpRequest
+from app.models.schemas import AdminTokenRequest, AuthUser, DemoTokenRequest, SendOtpRequest, VerifyOtpRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -50,6 +50,7 @@ async def verify_otp(req: VerifyOtpRequest) -> AuthUser:
         email=user["email"],
         display_name=user["display_name"],
         access_token=token,
+        role="user",
     )
 
 
@@ -65,6 +66,22 @@ async def demo_token(req: DemoTokenRequest) -> AuthUser:
         email="demo@learnpath.local",
         display_name=req.display_name.strip() or "演示学生",
         access_token=token,
+        role="user",
+    )
+
+
+@router.post("/admin-token", response_model=AuthUser)
+async def admin_token(req: AdminTokenRequest) -> AuthUser:
+    """测试阶段：管理员一键登录。"""
+    from app.core.admin_user import ADMIN_EMAIL, ADMIN_USER_ID
+
+    token = create_access_token(ADMIN_USER_ID, extra={"role": "admin"})
+    return AuthUser(
+        user_id=ADMIN_USER_ID,
+        email=ADMIN_EMAIL,
+        display_name=req.display_name.strip() or "系统管理员",
+        access_token=token,
+        role="admin",
     )
 
 

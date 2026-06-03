@@ -18,6 +18,7 @@ from app.core.prompts import (
 from app.db.repository import list_libraries, save_profile
 from app.rag.library_retriever import retrieve_from_library
 from app.services.user_defaults import profile_fallback_fields
+from app.services.multimodal_enrich_service import enrich_chat_media_answer_async
 
 # 资源库片段匹配度阈值（满分约 10+）
 MATCH_THRESHOLD = 2.8
@@ -42,7 +43,15 @@ _CHITCHAT_EXACT = {
 def is_chitchat_message(message: str) -> bool:
     """寒暄、致谢、告别等无具体学习诉求的短句。"""
     text = message.strip()
-    if not text or len(text) > 32:
+    if not text:
+        return False
+    if re.search(
+        r"(你是谁|你叫什么|你能做什么|你有什么功能|介绍一下你自己|学径是什么|learnpath)",
+        text,
+        re.I,
+    ):
+        return True
+    if len(text) > 48:
         return False
     lowered = text.lower()
     if lowered in _CHITCHAT_EXACT or text in _CHITCHAT_EXACT:
@@ -59,6 +68,26 @@ def is_chitchat_message(message: str) -> bool:
     return False
 
 
+def _profile_snapshot_md(profile: dict | None) -> str:
+    p = profile or {}
+    level = str(p.get("knowledge_level") or "待评估").strip()
+    goal = str(p.get("learning_goal") or "待设定").strip()
+    weak = p.get("error_prone_topics") or []
+    modality = str(p.get("preferred_modality") or "未设定").strip()
+    weak_s = "、".join(str(x) for x in weak[:3]) if weak else "暂无记录"
+    if len(goal) > 40:
+        goal = goal[:39] + "…"
+    return (
+        "\n\n---\n\n"
+        "#### 📊 你的学习画像\n\n"
+        "| 维度 | 当前状态 |\n|------|----------|\n"
+        f"| 知识基础 | {level} |\n"
+        f"| 学习目标 | {goal} |\n"
+        f"| 薄弱主题 | {weak_s} |\n"
+        f"| 偏好模态 | {modality} |\n"
+    )
+
+
 def build_chitchat_reply(question: str, profile: dict | None = None) -> str:
     """寒暄类短回复（不调用 LLM，避免答非所问）。"""
     q = question.strip()
@@ -73,23 +102,37 @@ def build_chitchat_reply(question: str, profile: dict | None = None) -> str:
         return "再见，祝你学习顺利！下次有问题再来找我 👋"
     if re.search(r"(你是谁|你叫什么|你能做什么|你有什么功能|介绍一下)", q):
         return (
-            "我是 **学径学习助手**，可以帮你：\n"
-            "- 通过对话了解并更新你的学习画像\n"
-            "- 生成文档、导图、练习等学习资源\n"
-            "- 规划学习路径、解答课程疑问\n\n"
-            "直接告诉我你想学什么，或哪里不太懂就好。"
+            "## 👋 你好，我是学径助手\n\n"
+            "**LearnPath 学径** 的智能学习伙伴，专注高校自学场景："
+            "理解你的背景、生成个性化资源，并陪伴你完成学习路径。\n\n"
+            "### ✨ 我能帮你\n\n"
+            "| 能力 | 说明 |\n|------|------|\n"
+            "| 学习画像 | 记录基础、目标、薄弱点与偏好 |\n"
+            "| 资源生成 | 文档、导图、测验、代码、多模态讲解 |\n"
+            "| 路径规划 | 按你的节奏安排下一步学什么 |\n"
+            "| 智能答疑 | 概念解释、练习思路、代码辅导 |\n"
+            f"{_profile_snapshot_md(profile)}"
+            "\n> 💡 直接告诉我：**想学什么**、**哪里不懂**，或让我帮你**生成资源**。"
         )
 
     return (
-        f"你好！{course_hint}我是 **学径学习助手**。\n\n"
-        "你可以告诉我：想学什么、哪里薄弱，或让我帮你生成资源、规划路径。"
-        "我会结合你的画像来回答 😊"
+        f"## 👋 你好！\n\n"
+        f"{course_hint}我是 **学径学习助手**，可以陪你规划学习、生成资源、解答疑问。\n\n"
+        "- 说说你的**学习目标**或**薄弱章节**\n"
+        "- 或输入：「帮我生成线性回归的思维导图」\n\n"
+        "> 我会结合你的画像给出更贴合的回答 😊"
     )
 
 
 def classify_question_type(message: str) -> str:
     """根据用户提问判断回答形态（关键词优先，轻量快速）。"""
     text = message.strip()
+    if re.search(
+        r"(你是谁|你叫什么|你能做什么|你有什么功能|介绍一下你自己|学径是什么|learnpath)",
+        text,
+        re.I,
+    ):
+        return "chitchat"
     if is_chitchat_message(text):
         return "chitchat"
     if any(k in text for k in ["代码", "编程", "python", "实现", "报错", "调试", "运行", "程序"]):
@@ -310,6 +353,13 @@ def build_intelligent_chat_messages(
     return [{"role": "system", "content": system}, {"role": "user", "content": user}], chunks, mode
 
 
+def _mermaid_label(text: str, limit: int = 16) -> str:
+    t = (text or "").strip()
+    if len(t) > limit:
+        t = t[: limit - 1] + "…"
+    return t.replace('"', "'")
+
+
 def _normalize_mermaid_arrows(code: str) -> str:
     code = code.replace("-->", "\0ARROW\0")
     code = code.replace("->", " --> ")
@@ -332,13 +382,19 @@ def _quote_mermaid_node_labels(code: str) -> str:
 
 
 def _build_fallback_flowchart(raw: str) -> str:
+    skip = {"LR", "RL", "TD", "TB", "BT", "flowchart"}
     edges = re.findall(
         r"([A-Za-z]\w*)\s*(?:\[[^\]]+\]|\([^)]+\)|\{[^}]+\})?\s*-->\s*([A-Za-z]\w*)",
         raw,
     )
-    if edges:
-        return "flowchart LR\n" + "\n".join(f"  {a} --> {b}" for a, b in edges)
-    return "flowchart TD\n  A[主题] --> B[说明]"
+    lines = [
+        f"  {a} --> {b}"
+        for a, b in edges
+        if a.upper() not in skip and b.upper() not in skip
+    ]
+    if lines:
+        return "flowchart LR\n" + "\n".join(lines)
+    return "flowchart TD\n  start[\"主题\"] --> core[\"核心概念\"]\n  core --> apply[\"应用练习\"]"
 
 
 def _repair_mermaid_code(raw: str) -> str:
@@ -353,6 +409,12 @@ def _repair_mermaid_code(raw: str) -> str:
         return code
 
     code = _normalize_mermaid_arrows(code)
+    code = re.sub(
+        r"^(flowchart\s+)(LR|RL|TD|TB|BT)([A-Za-z])",
+        r"\1\2\n  \3",
+        code,
+        flags=re.I | re.M,
+    )
     code = _quote_mermaid_node_labels(code)
     code = re.sub(
         r"^graph\s+(TD|TB|LR|RL|BT)",
@@ -495,16 +557,17 @@ def postprocess_multimodal_answer(
         answer += (
             "\n\n### 短视频分镜脚本\n"
             "| 镜头 | 画面 | 旁白 | 时长 |\n|------|------|------|------|\n"
-            f"| 1 | {topic} 概念引入 | 本讲学习目标… | 15s |\n"
-            "| 2 | 公式/图示演示 | 关键推导… | 25s |\n"
-            "| 3 | 例题 walkthrough | 一步骤一结论… | 20s |\n"
-            "| 4 | 小结与易错点 | 复习要点… | 10s |\n"
+            f"| 1 | {topic} 概念引入 · 渐变标题卡 | 本讲学习目标与直觉建立… | 15s |\n"
+            "| 2 | 公式/图示动画 · 概念关系网 | 关键推导与图示演示… | 25s |\n"
+            "| 3 | 例题 walkthrough · 对比演示 | 一步骤一结论，标注易错点… | 20s |\n"
+            "| 4 | 小结卡片 · 练习入口 | 复习要点与自测引导… | 10s |\n"
         )
-    if question_type in ("concept", "general", "practice") and "```mermaid" not in answer:
+    if question_type == "concept" and "```mermaid" not in answer:
+        safe_topic = _mermaid_label(topic or "学习主题", 16)
         answer += (
             "\n\n### 知识关系图解\n\n```mermaid\nflowchart LR\n"
-            f'  A["{topic}"] --> B["核心概念"]\n'
-            '  B --> C["应用练习"]\n```\n'
+            f'  n1["{safe_topic}"] --> n2["核心概念"]\n'
+            '  n2 --> n3["应用练习"]\n```\n'
         )
     if question_type == "practice" and "步骤" not in answer and "解题" not in answer:
         answer += "\n\n### 解题思路\n1. 明确已知与求解目标\n2. 选择公式或方法\n3. 分步推导并检验\n"
@@ -512,6 +575,24 @@ def postprocess_multimodal_answer(
     if mode == "library_polish" and chunks:
         answer = attach_sources(answer, chunks)
 
+    return answer
+
+
+async def finalize_multimodal_answer(
+    answer: str,
+    question_type: str,
+    chunks: list[dict[str, Any]],
+    topic: str,
+    *,
+    mode: str = "direct",
+) -> str:
+    """同步后处理 + 异步多模态配图（media 类）。"""
+    answer = postprocess_multimodal_answer(answer, question_type, chunks, topic, mode=mode)
+    if question_type == "media":
+        try:
+            answer = await enrich_chat_media_answer_async(answer, topic)
+        except Exception:
+            pass
     return answer
 
 
@@ -685,7 +766,7 @@ async def run_intelligent_chat(
             continue
     if not raw.strip():
         raise last_err or RuntimeError("LLM 未返回内容")
-    answer = postprocess_multimodal_answer(
+    answer = await finalize_multimodal_answer(
         raw, question_type, chunks, topic, mode=mode
     )
 
@@ -763,14 +844,25 @@ async def prepare_intelligent_chat(
     }
 
 
+def _pace_from_chunk_size(chunk_size: int) -> float:
+    """本地伪流式每行间隔（秒），与前端流速档位对应。"""
+    if chunk_size <= 2:
+        return 0.05
+    if chunk_size >= 24:
+        return 0.008
+    return 0.022
+
+
 async def _stream_local_text(
     text: str,
     chunk_size: int = 2,
 ) -> AsyncIterator[dict[str, Any]]:
-    """本地模板文本的伪流式输出（较大分段、无人工延迟，由前端控制刷新节奏）。"""
-    step = max(8, min(chunk_size, 32))
-    for i in range(0, len(text), step):
-        yield {"type": "token", "data": text[i : i + step]}
+    """本地模板文本的伪流式输出（按行 + 短间隔，便于寒暄等场景可见流式）。"""
+    from app.core.llm.resilience import yield_text_stream
+
+    delay = _pace_from_chunk_size(chunk_size)
+    async for piece in yield_text_stream(text, line_delay=delay, atomic_lines=True):
+        yield {"type": "token", "data": piece}
 
 
 async def stream_intelligent_chat(
@@ -795,6 +887,16 @@ async def stream_intelligent_chat(
     from app.core.llm import get_chat_llm_fallback_chain
     from app.core.llm.resilience import stream_with_client_fallback
 
+    question_type = classify_question_type(question)
+
+    # 寒暄：跳过检索/LLM，直接本地模板逐行流式
+    if question_type == "chitchat" and not deep_thinking and not attachment_context.strip():
+        reply = build_chitchat_reply(question, profile)
+        async for item in _stream_local_text(reply, chunk_size):
+            yield item
+        yield {"type": "done", "data": reply, "profile": None}
+        return
+
     try:
         ctx = await asyncio.wait_for(
             prepare_intelligent_chat(
@@ -816,14 +918,6 @@ async def stream_intelligent_chat(
     question_type = ctx["question_type"]
     chunks = ctx["chunks"]
     mode = ctx["mode"]
-
-    if question_type == "chitchat" and not deep_thinking and not attachment_context.strip():
-        reply = build_chitchat_reply(question, profile)
-        stream_step = max(8, min(chunk_size, 32))
-        async for item in _stream_local_text(reply, stream_step):
-            yield item
-        yield {"type": "done", "data": reply, "profile": None}
-        return
 
     acc = ""
     try:
@@ -855,7 +949,11 @@ async def stream_intelligent_chat(
         acc, question_type, chunks, topic, mode=mode
     )
     if len(final) > len(acc):
-        yield {"type": "token", "data": final[len(acc) :]}
+        from app.core.llm.resilience import yield_text_stream
+
+        delta = final[len(acc) :]
+        async for piece in yield_text_stream(delta):
+            yield {"type": "token", "data": piece}
 
     final = filter_sensitive(final)
     yield {"type": "done", "data": final, "profile": None}

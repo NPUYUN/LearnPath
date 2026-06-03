@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Input, Button, Avatar, Tag, Tooltip, Switch, Upload, message, Modal, Space } from "antd";
@@ -15,9 +15,10 @@ import HistoryOutlined from "@ant-design/icons/HistoryOutlined";
 import PlusOutlined from "@ant-design/icons/PlusOutlined";
 import DeleteOutlined from "@ant-design/icons/DeleteOutlined";
 import CopyOutlined from "@ant-design/icons/CopyOutlined";
+import { usePageActive } from "@/contexts/PageVisibilityContext";
 import PageHeader from "@/components/PageHeader";
 import MarkdownPreview from "@/components/MarkdownPreview";
-import StreamingPlainText from "@/components/StreamingPlainText";
+import StreamingMarkdown from "@/components/StreamingMarkdown";
 import ChatHistorySidebar from "@/components/ChatHistorySidebar";
 import {
   appendChatHistory,
@@ -45,7 +46,6 @@ import {
 } from "@/lib/api";
 import { apiUrl } from "@/lib/apiBase";
 import {
-  buildAttachmentContext,
   groupConversationsByDate,
 } from "@/lib/chatHistoryUtils";
 import { copyTextToClipboard, isFailedAssistantReply } from "@/lib/chatMessageUtils";
@@ -93,7 +93,7 @@ const MessageItem = memo(function MessageItem({
   registerRef,
 }: {
   msg: Message;
-  /** 流式进行中：与 msg.id 匹配时传入，用于纯文本展示（不触发 Markdown 重解析） */
+  /** 流式进行中：与 msg.id 匹配时传入实时文本 */
   liveStreamText?: string;
   onResourceClick?: (id: string) => void;
   onDeleteTurn?: (userMessageId: string) => void;
@@ -153,10 +153,13 @@ const MessageItem = memo(function MessageItem({
                 </div>
               )}
               <div className={`md-content ${msg.role === "user" ? "md-user" : ""}`}>
-                {msg.isStreaming && liveStreamText !== undefined ? (
-                  <StreamingPlainText text={liveStreamText || msg.content} />
+                {msg.isStreaming ? (
+                  <StreamingMarkdown
+                    text={liveStreamText ?? msg.content}
+                    finished={false}
+                  />
                 ) : (
-                  <MarkdownPreview content={msg.content || "　"} />
+                  <MarkdownPreview content={msg.content || "　"} variant="chat" />
                 )}
               </div>
             </div>
@@ -271,6 +274,7 @@ const STAGE_LABELS: Record<string, string> = {
   tutor: "智能回答",
   retrieval: "检索资源库",
   running: "处理中",
+  vision_analysis: "分析图片中",
 };
 
 const WELCOME_MSG: Message = {
@@ -294,6 +298,7 @@ function rowsToMessages(rows: Awaited<ReturnType<typeof getChatHistory>>): Messa
 
 export default function ChatContent() {
   const router = useRouter();
+  const pageActive = usePageActive();
   const userId = useAppStore((s) => s.userId);
   const quickActions = isDemoUser(userId) ? DEMO_QUICK_ACTIONS : REAL_QUICK_ACTIONS;
   const setProfile = useAppStore((s) => s.setProfile);
@@ -334,9 +339,14 @@ export default function ChatContent() {
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const scrollRafRef = useRef(0);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const streamAccRef = useRef("");
-  const streamIntervalRef = useRef(0);
+  const tokenQueueRef = useRef<string[]>([]);
+  const tokenDrainActiveRef = useRef(false);
+  const tokenDrainTimerRef = useRef(0);
 
   const conversationGroups = useMemo(
     () => groupConversationsByDate(conversations),
@@ -371,6 +381,52 @@ export default function ChatContent() {
     messageRefs.current[id] = el;
   }, []);
 
+  const isNearBottom = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+  }, []);
+
+  const scrollMessagesToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      const top = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (behavior === "smooth") {
+        el.scrollTo({ top, behavior: "smooth" });
+      } else {
+        el.scrollTop = top;
+      }
+    });
+  }, []);
+
+  /** 打开页面 / 加载历史 / 异步排版后多次补滚到底 */
+  const ensureScrollOnOpen = useCallback(() => {
+    stickToBottomRef.current = true;
+    scrollMessagesToBottom("auto");
+    requestAnimationFrame(() => scrollMessagesToBottom("auto"));
+    window.setTimeout(() => scrollMessagesToBottom("auto"), 50);
+    window.setTimeout(() => scrollMessagesToBottom("auto"), 200);
+    window.setTimeout(() => scrollMessagesToBottom("auto"), 600);
+    window.setTimeout(() => scrollMessagesToBottom("auto"), 1200);
+  }, [scrollMessagesToBottom]);
+
+  /** 流式结束 / 资源卡片挂载 / Mermaid 异步渲染后多次补滚到底 */
+  const ensureScrollAfterReply = useCallback(() => {
+    ensureScrollOnOpen();
+    window.setTimeout(() => scrollMessagesToBottom("smooth"), 120);
+    window.setTimeout(() => scrollMessagesToBottom("smooth"), 400);
+  }, [ensureScrollOnOpen, scrollMessagesToBottom]);
+
+  const scrollIfStickToBottom = useCallback(
+    (behavior: ScrollBehavior = "auto") => {
+      if (stickToBottomRef.current) scrollMessagesToBottom(behavior);
+    },
+    [scrollMessagesToBottom]
+  );
+
   const scrollToMessage = useCallback((userMessageId: string) => {
     setActiveUserMessageId(userMessageId);
     const el = messageRefs.current[userMessageId];
@@ -389,16 +445,22 @@ export default function ChatContent() {
     }
   }, [userId]);
 
-  const loadConversationMessages = useCallback(async (conversationId: string) => {
-    try {
-      const rows = await getChatHistory(userId, conversationId);
-      setHistoryRows(rows);
-      setMessages(rows.length ? [WELCOME_MSG, ...rowsToMessages(rows)] : [WELCOME_MSG]);
-    } catch {
-      setHistoryRows([]);
-      setMessages([WELCOME_MSG]);
-    }
-  }, [userId]);
+  const loadConversationMessages = useCallback(
+    async (conversationId: string, options?: { scroll?: boolean }) => {
+      try {
+        const rows = await getChatHistory(userId, conversationId);
+        setHistoryRows(rows);
+        setMessages(rows.length ? [WELCOME_MSG, ...rowsToMessages(rows)] : [WELCOME_MSG]);
+        if (options?.scroll !== false) {
+          ensureScrollOnOpen();
+        }
+      } catch {
+        setHistoryRows([]);
+        setMessages([WELCOME_MSG]);
+      }
+    },
+    [userId, ensureScrollOnOpen]
+  );
 
   const reloadHistory = useCallback(async () => {
     if (!activeConversationId) {
@@ -456,33 +518,57 @@ export default function ChatContent() {
   }, [probeBackend]);
 
   useEffect(() => {
-    setMessages([WELCOME_MSG]);
-    setHistoryRows([]);
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      stickToBottomRef.current = isNearBottom();
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [isNearBottom]);
+
+  useEffect(() => {
+    let cancelled = false;
+    stickToBottomRef.current = true;
     setConversations([]);
     setActiveConversationId(null);
     setActiveUserMessageId(null);
-    let cancelled = false;
-    void reloadConversations().then((list) => {
-      if (cancelled || !list.length) return;
+    setHistoryRows([]);
+    setMessages([WELCOME_MSG]);
+
+    void (async () => {
+      const list = await reloadConversations();
+      if (cancelled) return;
+      if (!list.length) {
+        ensureScrollOnOpen();
+        return;
+      }
       const first = list[0].id;
       setActiveConversationId(first);
-      void loadConversationMessages(first);
-    });
+      await loadConversationMessages(first, { scroll: true });
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, [userId, reloadConversations, loadConversationMessages]);
+  }, [userId, reloadConversations, loadConversationMessages, ensureScrollOnOpen]);
+
+  /** 切回智能对话 Tab 或消息列表更新后，贴底展示最新内容 */
+  useLayoutEffect(() => {
+    if (!pageActive || !stickToBottomRef.current) return;
+    scrollMessagesToBottom("auto");
+  }, [pageActive, messages, scrollMessagesToBottom]);
+
+  useEffect(() => {
+    if (!pageActive) return;
+    ensureScrollOnOpen();
+  }, [pageActive, ensureScrollOnOpen]);
 
   useEffect(() => {
     void getRecommendations(userId, 3)
       .then(setRecommendations)
       .catch(() => setRecommendations([]));
   }, [userId]);
-
-  useEffect(() => {
-    if (messages.some((m) => m.isStreaming)) return;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
 
   const removeTurnFromUi = useCallback((userMessageId: string) => {
     setMessages((prev) => {
@@ -531,15 +617,16 @@ export default function ChatContent() {
     setActiveUserMessageId(null);
     setHistoryRows([]);
     setMessages([WELCOME_MSG]);
-  }, []);
+    ensureScrollOnOpen();
+  }, [ensureScrollOnOpen]);
 
   const handleSelectConversation = useCallback(
     async (conversationId: string) => {
       if (conversationId === activeConversationId) return;
       setActiveConversationId(conversationId);
       setActiveUserMessageId(null);
-      await loadConversationMessages(conversationId);
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      stickToBottomRef.current = true;
+      await loadConversationMessages(conversationId, { scroll: true });
     },
     [activeConversationId, loadConversationMessages]
   );
@@ -618,9 +705,9 @@ export default function ChatContent() {
       displayContent: string;
       turnId: string;
       conversationId: string;
-      attachmentContext: string;
+      attachments?: ChatAttachment[];
     }) => {
-      const { displayContent, turnId, conversationId, attachmentContext } = params;
+      const { displayContent, turnId, conversationId, attachments = [] } = params;
       setLoading(true);
       const typingId = "typing";
       setMessages((prev) => [
@@ -635,28 +722,35 @@ export default function ChatContent() {
 
       const formatStage = (stage: string) => STAGE_LABELS[stage] || stage;
 
-      const stopStreamFlush = () => {
-        if (streamIntervalRef.current) {
-          window.clearInterval(streamIntervalRef.current);
-          streamIntervalRef.current = 0;
+      const stopTokenDrain = () => {
+        if (tokenDrainTimerRef.current) {
+          window.clearTimeout(tokenDrainTimerRef.current);
+          tokenDrainTimerRef.current = 0;
         }
+        tokenDrainActiveRef.current = false;
       };
 
-      const startStreamFlush = () => {
-        if (!streamConfig.plainStream || streamConfig.flushMs <= 0) return;
-        if (streamIntervalRef.current) return;
-        streamIntervalRef.current = window.setInterval(() => {
-          setLiveStreamText(streamAccRef.current);
-          bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-        }, streamConfig.flushMs);
+      const flushTokenQueueSync = () => {
+        stopTokenDrain();
+        while (tokenQueueRef.current.length > 0) {
+          streamAccRef.current += tokenQueueRef.current.shift()!;
+        }
+        acc = streamAccRef.current;
       };
 
       const ensureStreamingMessage = () => {
-        if (!streamConfig.plainStream) return;
-        if (replyId) return;
+        const pushLiveText = () => {
+          setLiveStreamText(streamAccRef.current);
+          scrollIfStickToBottom("auto");
+        };
+
+        if (replyId) {
+          pushLiveText();
+          return;
+        }
         replyId = `local-a-${Date.now()}`;
         setStreamingMessageId(replyId);
-        setLiveStreamText(streamAccRef.current);
+        pushLiveText();
         setMessages((prev) =>
           prev
             .filter((m) => m.id !== typingId)
@@ -669,11 +763,49 @@ export default function ChatContent() {
               isStreaming: true,
             })
         );
-        startStreamFlush();
       };
 
+      const scheduleTokenDrain = () => {
+        const step = () => {
+          if (tokenQueueRef.current.length === 0) {
+            tokenDrainActiveRef.current = false;
+            tokenDrainTimerRef.current = 0;
+            return;
+          }
+          const piece = tokenQueueRef.current.shift()!;
+          streamAccRef.current += piece;
+          acc = streamAccRef.current;
+          ensureStreamingMessage();
+
+          if (tokenQueueRef.current.length === 0) {
+            tokenDrainActiveRef.current = false;
+            tokenDrainTimerRef.current = 0;
+            return;
+          }
+          const gap =
+            streamConfig.flushMs <= 0 ? 12 : Math.max(streamConfig.flushMs, 12);
+          tokenDrainTimerRef.current = window.setTimeout(step, gap);
+        };
+
+        if (tokenDrainActiveRef.current) return;
+        tokenDrainActiveRef.current = true;
+        step();
+      };
+
+      const waitForTokenDrain = () =>
+        new Promise<void>((resolve) => {
+          const poll = () => {
+            if (tokenQueueRef.current.length === 0 && !tokenDrainActiveRef.current) {
+              resolve();
+              return;
+            }
+            window.requestAnimationFrame(poll);
+          };
+          poll();
+        });
+
       const finalizeStreamingMessage = (finalContent: string) => {
-        stopStreamFlush();
+        stopTokenDrain();
         flushSync(() => {
           setLiveStreamText("");
           setStreamingMessageId(null);
@@ -700,9 +832,12 @@ export default function ChatContent() {
               )
           );
         });
+        ensureScrollAfterReply();
       };
 
       streamAccRef.current = "";
+      tokenQueueRef.current = [];
+      stopTokenDrain();
 
       try {
         await streamChat(
@@ -710,24 +845,18 @@ export default function ChatContent() {
           displayContent,
           {
             onToken: (token: string) => {
-              acc += token;
-              streamAccRef.current = acc;
-              ensureStreamingMessage();
+              tokenQueueRef.current.push(token);
+              scheduleTokenDrain();
             },
             onProgress: (stage: string) => setStageLabel(formatStage(stage)),
             onDone: (reply: string) => {
               finalReply = reply;
-              if (reply && reply !== acc) {
-                acc = reply;
-                streamAccRef.current = acc;
-              }
             },
             onError: (err: string) => {
               const text = err.startsWith("⚠️") ? err : `⚠️ ${err}`;
               finalReply = text;
-              acc = text;
-              streamAccRef.current = text;
-              ensureStreamingMessage();
+              tokenQueueRef.current.push(text);
+              scheduleTokenDrain();
             },
             onIntent: (intent: string) => setStageLabel(formatStage(intent)),
             onProfile: (p) => setProfile(p),
@@ -749,12 +878,20 @@ export default function ChatContent() {
           chunkSize,
           deepThinking,
           webSearch,
-          attachmentContext
+          "",
+          attachments
         );
+
+        await waitForTokenDrain();
+        flushTokenQueueSync();
+        if (finalReply && finalReply !== streamAccRef.current) {
+          streamAccRef.current = finalReply;
+        }
+        acc = streamAccRef.current;
 
         const assistantText = (finalReply || acc).trim();
         if (!assistantText) {
-          stopStreamFlush();
+          stopTokenDrain();
           setLiveStreamText("");
           setStreamingMessageId(null);
           setMessages((prev) =>
@@ -769,6 +906,7 @@ export default function ChatContent() {
                 timestamp: new Date(),
               })
           );
+          ensureScrollAfterReply();
         } else {
           finalizeStreamingMessage(assistantText);
         }
@@ -777,6 +915,7 @@ export default function ChatContent() {
           setMessages((prev) =>
             prev.map((m) => (m.id === replyId ? { ...m, resources: msgResources } : m))
           );
+          ensureScrollAfterReply();
         }
 
         const textToSave = (finalReply || acc).trim() || "";
@@ -815,7 +954,8 @@ export default function ChatContent() {
           conversationId,
         }).catch(() => null);
       } finally {
-        stopStreamFlush();
+        stopTokenDrain();
+        tokenQueueRef.current = [];
         setLiveStreamText("");
         setStreamingMessageId(null);
         setLoading(false);
@@ -824,6 +964,7 @@ export default function ChatContent() {
             .filter((m) => m.id !== typingId)
             .map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m))
         );
+        ensureScrollAfterReply();
         void reloadConversations();
       }
     },
@@ -841,6 +982,8 @@ export default function ChatContent() {
       voice,
       reloadHistory,
       reloadConversations,
+      ensureScrollAfterReply,
+      scrollIfStickToBottom,
     ]
   );
 
@@ -873,7 +1016,7 @@ export default function ChatContent() {
           displayContent: userMsg.content,
           turnId,
           conversationId,
-          attachmentContext: buildAttachmentContext(userMsg.attachments || []),
+          attachments: userMsg.attachments || [],
         });
       } catch (e: unknown) {
         message.error(e instanceof Error ? e.message : "重新生成失败");
@@ -931,6 +1074,7 @@ export default function ChatContent() {
       };
       setMessages((prev) => [...prev, userMsg]);
       setActiveUserMessageId(localUserId);
+      ensureScrollOnOpen();
 
       const savedUser = await appendChatHistory(userId, "user", displayContent, [], {
         turnId,
@@ -949,7 +1093,7 @@ export default function ChatContent() {
         displayContent,
         turnId,
         conversationId: conversationId!,
-        attachmentContext: buildAttachmentContext(attachments),
+        attachments,
       });
     },
     [
@@ -960,6 +1104,7 @@ export default function ChatContent() {
       activeConversationId,
       reloadConversations,
       runAssistantReply,
+      ensureScrollOnOpen,
     ]
   );
 
@@ -1040,7 +1185,7 @@ export default function ChatContent() {
             </div>
           )}
 
-          <div className="lp-chat-messages">
+          <div className="lp-chat-messages" ref={messagesContainerRef}>
             {messages.map((msg) => (
               <MessageItem
                 key={msg.id}

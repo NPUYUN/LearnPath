@@ -24,6 +24,28 @@ class Settings(BaseSettings):
     spark_api_key: str = ""
     spark_base_url: str = "https://spark-api-open.xf-yun.com/v1"
     spark_model: str = "generalv3.5"
+    # 讯飞文生图 TTI（控制台 https://console.xfyun.cn/services/tti 获取三要素）
+    spark_app_id: str = ""
+    spark_api_secret: str = ""
+    spark_tti_api_key: str = ""  # 文生图 APIKey；留空则回退 SPARK_API_KEY（可能与 APIPassword 不同）
+    spark_tti_max_images: int = 4
+
+    # 阿里云百炼 · 千问 / 通义万相（文生图等多模态；配置后优先于星火 TTI）
+    # 控制台：https://bailian.console.aliyun.com/ → API Key（sk- 开头）
+    qwen_api_key: str = ""
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
+    qwen_image_model: str = "wan2.2-t2i-flash"
+    qwen_image_max_images: int = 4
+    # 通义万相 · 图生/文生视频（video-synthesis）
+    qwen_video_enabled: bool = True
+    qwen_video_model: str = "wan2.6-i2v-flash"
+    qwen_video_t2v_model: str = "wan2.6-t2v"
+    qwen_video_duration: int = 5
+    qwen_video_resolution: str = "720P"
+    qwen_video_t2v_size: str = "1280*720"
+    qwen_video_timeout_sec: int = 300
+    qwen_video_max_per_resource: int = 1
+    qwen_vl_model: str = "qwen-vl-plus"
 
     # 辅助云端 LLM（OpenAI 兼容：硅基流动 / DeepSeek / Groq / OpenRouter 等，无需本地权重）
     aux_llm_api_key: str = ""
@@ -66,6 +88,44 @@ class Settings(BaseSettings):
     @property
     def has_spark(self) -> bool:
         return bool(self.spark_api_key.strip())
+
+    @property
+    def spark_tti_key(self) -> str:
+        return (self.spark_tti_api_key or self.spark_api_key).strip()
+
+    @property
+    def has_spark_tti(self) -> bool:
+        return bool(
+            self.spark_app_id.strip()
+            and self.spark_tti_key
+            and self.spark_api_secret.strip()
+        )
+
+    @property
+    def has_qwen(self) -> bool:
+        return bool(self.qwen_api_key.strip())
+
+    @property
+    def has_qwen_image(self) -> bool:
+        return self.has_qwen
+
+    @property
+    def has_qwen_video(self) -> bool:
+        return self.has_qwen and self.qwen_video_enabled
+
+    @property
+    def has_qwen_vision(self) -> bool:
+        return self.has_qwen
+
+    @property
+    def has_ai_image(self) -> bool:
+        return self.has_qwen_image or self.has_spark_tti
+
+    @property
+    def ai_image_max_count(self) -> int:
+        if self.has_qwen_image:
+            return max(1, self.qwen_image_max_images)
+        return max(1, self.spark_tti_max_images)
 
     @property
     def has_aux(self) -> bool:

@@ -4,6 +4,17 @@
 
 import { fixMarkdownHeadings } from "@/lib/markdownNormalize";
 
+function isIncompleteBlockLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  if (/^#{1,6}(\s|$)/.test(t)) return true;
+  if (/^\|/.test(t)) return true;
+  if (/^>\s/.test(t)) return true;
+  if (/^[-*+]\s*$/.test(t)) return true;
+  if (/^\d+\.\s*$/.test(t)) return true;
+  return false;
+}
+
 function closeSegmentInline(segment: string): string {
   let out = segment;
 
@@ -97,11 +108,16 @@ export function prepareStreamingMarkdown(raw: string): string {
   const lastNewline = text.lastIndexOf("\n");
 
   if (lastNewline === -1) {
+    if (isIncompleteBlockLine(text)) return "";
     const line = fixStreamingTailLine(text);
     return finalizeStreamingSegment(line);
   }
 
   const stable = fixMarkdownHeadings(text.slice(0, lastNewline + 1));
-  const tail = fixStreamingTailLine(text.slice(lastNewline + 1));
-  return finalizeStreamingSegment(stable) + finalizeStreamingSegment(tail);
+  const tail = text.slice(lastNewline + 1);
+  if (isIncompleteBlockLine(tail)) {
+    return finalizeStreamingSegment(stable);
+  }
+  const tailFixed = fixStreamingTailLine(tail);
+  return finalizeStreamingSegment(stable) + finalizeStreamingSegment(tailFixed);
 }

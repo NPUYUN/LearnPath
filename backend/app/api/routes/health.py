@@ -7,4 +7,9 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health():
-    return {"status": "ok", "service": "learnpath-api", "llm": llm_runtime_status()}
+    return {
+        "status": "ok",
+        "service": "learnpath-api",
+        "llm": llm_runtime_status(),
+        "features": {"path_ai_v2": True},
+    }

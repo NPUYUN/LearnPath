@@ -1,5 +1,6 @@
-import { clearAccessToken, getAccessToken, setAccessToken } from "@/store/authStore";
+import { clearAccessToken, clearAuthSession, getAccessToken, setAccessToken } from "@/store/authStore";
 import { apiUrl } from "./apiBase";
+import { decodeStreamTextPayload, parseSseBlock } from "./sseParse";
 
 export { apiUrl };
 
@@ -15,6 +16,7 @@ export function authHeaders(extra?: HeadersInit, json = true): HeadersInit {
 async function handleResponse(res: Response): Promise<Response> {
   if (res.status === 401) {
     clearAccessToken();
+    clearAuthSession();
     throw new Error("登录已过期，请重新登录");
   }
   return res;
@@ -140,6 +142,7 @@ export async function streamChat(
   deepThinking = false,
   webSearch = false,
   attachmentContext = "",
+  attachments: ChatAttachment[] = [],
   timeoutMs?: number
 ) {
   const controller = new AbortController();
@@ -160,6 +163,7 @@ export async function streamChat(
           deep_thinking: deepThinking,
           web_search: webSearch,
           attachment_context: attachmentContext,
+          attachments,
         }),
       })
     );
@@ -187,13 +191,11 @@ export async function streamChat(
     const parts = normalized.split("\n\n");
     buffer = parts.pop() || "";
     for (const part of parts) {
-      const lines = part.split("\n");
-      let event = "message";
-      let data = "";
-      for (const line of lines) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        if (line.startsWith("data:")) data += line.slice(5).trim();
-      }
+      const { event, data: rawData } = parseSseBlock(part);
+      const data =
+        event === "token" || event === "done"
+          ? decodeStreamTextPayload(rawData)
+          : rawData;
       if (event === "token" && data) {
         gotToken = true;
         callbacks.onToken?.(data);
@@ -283,13 +285,11 @@ export async function streamTutor(
     const parts = normalized.split("\n\n");
     buffer = parts.pop() || "";
     for (const part of parts) {
-      const lines = part.split("\n");
-      let event = "message";
-      let data = "";
-      for (const line of lines) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        if (line.startsWith("data:")) data += line.slice(5).trim();
-      }
+      const { event, data: rawData } = parseSseBlock(part);
+      const data =
+        event === "token" || event === "done"
+          ? decodeStreamTextPayload(rawData)
+          : rawData;
       if (event === "token" && data) callbacks.onToken?.(data);
       if (event === "progress" && data) {
         try {
@@ -548,12 +548,11 @@ export async function streamGenerateResources(
     const parts = buffer.split("\n\n");
     buffer = parts.pop() || "";
     for (const part of parts) {
-      let event = "message";
-      let data = "";
-      for (const line of part.split("\n")) {
-        if (line.startsWith("event:")) event = line.slice(6).trim();
-        if (line.startsWith("data:")) data += line.slice(5).trim();
-      }
+      const { event, data: rawData } = parseSseBlock(part);
+      const data =
+        event === "token" || event === "done"
+          ? decodeStreamTextPayload(rawData)
+          : rawData;
       if (event === "progress" && data) {
         try {
           const p = JSON.parse(data) as { stage?: string };
@@ -852,6 +851,36 @@ export type AuthUser = {
   email: string;
   display_name: string;
   access_token: string;
+  role?: "user" | "admin";
+};
+
+export type AdminDashboard = {
+  overview: {
+    users_registered: number;
+    resources_total: number;
+    libraries_total: number;
+    conversations_total: number;
+    messages_total: number;
+    events_total: number;
+    quiz_attempts_total: number;
+    active_users_7d: number;
+    chat_active_users_7d: number;
+    resource_by_type: Record<string, number>;
+    events_by_type: Record<string, number>;
+  };
+  daily_activity: { date: string; events: number; messages: number; resources: number }[];
+  user_rankings: { user_id: string; label: string; events: number }[];
+};
+
+export type AdminUserRow = {
+  user_id: string;
+  email: string;
+  display_name: string;
+  course_name: string;
+  created_at: string;
+  kind: string;
+  resource_count: number;
+  message_count: number;
 };
 
 export async function fetchDemoToken(displayName: string): Promise<AuthUser> {
@@ -889,6 +918,87 @@ export async function verifyOtp(email: string, code: string): Promise<AuthUser> 
   const user = (await res.json()) as AuthUser;
   if (user.access_token) setAccessToken(user.access_token);
   return user;
+}
+
+export async function fetchAdminToken(displayName = "系统管理员"): Promise<AuthUser> {
+  const res = await fetch(apiUrl("/api/auth/admin-token"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const user = (await res.json()) as AuthUser;
+  if (user.access_token) setAccessToken(user.access_token);
+  return user;
+}
+
+export async function getAdminDashboard() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/admin/dashboard"), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<AdminDashboard>;
+}
+
+export async function getAdminUsers() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/admin/users"), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ users: AdminUserRow[] }>;
+}
+
+export async function deleteAdminUser(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/admin/users/${encodeURIComponent(userId)}`), {
+      method: "DELETE",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) {
+    try {
+      const body = (await res.json()) as { detail?: string };
+      throw new Error(body.detail || "删除失败");
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message !== "删除失败") throw err;
+      throw new Error(await res.text().catch(() => "删除失败"));
+    }
+  }
+  return res.json() as Promise<{ deleted: boolean; user_id: string }>;
+}
+
+export async function resetDemoUserData() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/admin/users/demo/reset"), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ reset: boolean; user_id: string }>;
+}
+
+export async function getAdminResources() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/admin/resources"), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{
+    overview: AdminDashboard["overview"];
+    resources: { id: string; user_id: string; type: string; title: string; created_at: string }[];
+  }>;
+}
+
+export async function getAdminActivity() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/admin/activity"), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{
+    daily_activity: AdminDashboard["daily_activity"];
+    recent_events: { id: string; user_id: string; event_type: string; resource_id: string; created_at: string }[];
+    user_rankings: AdminDashboard["user_rankings"];
+  }>;
 }
 
 // ── Eval ──────────────────────────────────────────────────────────────────────

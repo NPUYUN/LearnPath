@@ -153,15 +153,15 @@ PATH_PLANNING_SYSTEM = (
 
     "你是「学径 LearnPath」学习路径规划 Agent。\n"
 
-    "根据学生画像、薄弱点与已有资源列表，规划 3 个递进学习阶段。\n"
+    "根据 user_request（用户当前诉求）、topic、学生画像、薄弱点与已有资源列表，规划 3 个递进学习阶段。\n"
 
     "【输出格式】仅输出 JSON 数组，每项含：\n"
 
     '  "order": 1-3 的整数\n'
 
-    '  "title": 阶段标题（中文，8字以内）\n'
+    '  "title": 阶段标题（中文，12字以内，必须贴合 user_request/topic）\n'
 
-    '  "objective": 阶段目标（一句话）\n'
+    '  "objective": 阶段目标（1-2句，可执行）\n'
 
     '  "resource_ids": 从给定资源 id 中选取的字符串数组\n'
 
@@ -169,7 +169,57 @@ PATH_PLANNING_SYSTEM = (
 
     "规则：第 1 阶段偏基础，第 2 阶段针对薄弱点，第 3 阶段巩固与评估；"
 
-    "resource_ids 只能使用输入中存在的 id，每阶段至少 1 个（若有资源）。"
+    "resource_ids 只能使用输入中存在的 id，每阶段至少 1 个（若有资源）；"
+
+    "即使用户资源库主题与 user_request 不完全一致，阶段标题/objective 仍须围绕 user_request 展开，"
+
+    "resource_ids 选取语义最接近的资源。"
+
+)
+
+
+
+PATH_PLANNING_TOPIC_SYSTEM = (
+
+    "你是「学径 LearnPath」学习路径规划 Agent。\n"
+
+    "用户尚未在资源库准备配套资料，请根据用户诉求、学科/考试主题与学生画像，"
+
+    "规划 3 个递进学习或复习阶段（如备考冲刺、周计划、模块突破等）。\n"
+
+    "【输出格式】仅输出 JSON 数组，每项含：\n"
+
+    '  "order": 1-3 的整数\n'
+
+    '  "title": 阶段标题（中文，12字以内，必须贴合用户主题）\n'
+
+    '  "objective": 阶段目标与具体任务（1-2句，可执行）\n'
+
+    '  "resource_ids": [] （固定为空数组）\n'
+
+    '  "estimated_minutes": 预估分钟数\n'
+
+    "禁止编造资源 id；禁止输出与主题无关的默认课程名（如泛泛的机器学习导论）。"
+
+)
+
+
+
+PATH_NARRATIVE_SYSTEM = (
+
+    "你是学径 LearnPath 学习助手。根据已生成的学习路径阶段，用 Markdown 向用户说明计划。\n"
+
+    "要求：\n"
+
+    "1. 开头明确针对的主题/考试/场景\n"
+
+    "2. 用 ### 阶段标题 或有序列表展开每步：目标、建议复习内容、时间建议\n"
+
+    "3. 结合画像中的基础与薄弱点（若有）给出差异化建议\n"
+
+    "4. 若无资源库资料，简短提示可在「资源库」生成配套文档/题库后再关联\n"
+
+    "5. 300-600 字，专业鼓励，禁止输出 JSON 或代码块"
 
 )
 
@@ -371,7 +421,9 @@ RESOURCE_TYPE_INSTRUCTIONS: dict[str, str] = {
 
         "生成 Mermaid mindmap 代码块（```mermaid ... ```），根节点为学习主题，"
 
-        "至少 3 层分支，节点文字简洁。"
+        "至少 3 层分支、每支 2–4 个节点；节点文字简洁（≤8 字），"
+
+        "可在根节点使用双括号 ((主题)) 强调；分支按「概念—方法—应用—易错点」组织。"
 
     ),
 
@@ -395,9 +447,11 @@ RESOURCE_TYPE_INSTRUCTIONS: dict[str, str] = {
 
     "media": (
 
-        "生成「多模态讲解分镜脚本」Markdown：3-5 个镜头，每镜头含画面描述、旁白、"
+        "生成「多模态讲解分镜脚本」Markdown：含学习目标、3–5 个镜头的表格（镜号|画面|旁白|屏幕文字|时长），"
 
-        "屏幕文字/on-screen text、时长建议（秒）。"
+        "画面描述须具体（构图、色彩、动画元素、镜头运动如推近/平移）；旁白口语化、适合配音；"
+
+        "另附「视觉风格说明」（主色、字体气质、BGM 节奏）；文末用 flowchart LR 的 mermaid 串联讲解流程。"
 
     ),
 
@@ -490,6 +544,34 @@ def path_planning_system(deep: bool = False) -> str:
     if deep:
 
         text += "\n\n请更细致地分配资源，并在 objective 中体现推理依据。"
+
+    return text
+
+
+
+
+
+def path_planning_topic_system(deep: bool = False) -> str:
+
+    text = PATH_PLANNING_TOPIC_SYSTEM
+
+    if deep:
+
+        text += "\n\n请结合备考/学习周期，在 objective 中给出更细的时间分配与优先级。"
+
+    return text
+
+
+
+
+
+def path_narrative_system(deep: bool = False) -> str:
+
+    text = PATH_NARRATIVE_SYSTEM
+
+    if deep:
+
+        text += "\n\n可补充 1-2 条风险提醒（如易错点、时间不够时的取舍策略）。"
 
     return text
 
@@ -640,6 +722,10 @@ def path_planning_user_payload(
 
     *,
 
+    user_request: str,
+
+    topic: str,
+
     profile: dict,
 
     resources: list[dict],
@@ -676,6 +762,10 @@ def path_planning_user_payload(
 
         {
 
+            "user_request": user_request,
+
+            "topic": topic,
+
             "profile_summary": {
 
                 "knowledge_level": profile.get("knowledge_level"),
@@ -687,6 +777,126 @@ def path_planning_user_payload(
             },
 
             "resources": slim,
+
+        },
+
+        ensure_ascii=False,
+
+    )
+
+
+
+
+
+def path_planning_topic_user_payload(
+
+    *,
+
+    user_request: str,
+
+    topic: str,
+
+    profile: dict,
+
+    weak_topics: list[str],
+
+) -> str:
+
+    import json
+
+
+
+    return json.dumps(
+
+        {
+
+            "user_request": user_request,
+
+            "topic": topic,
+
+            "profile_summary": {
+
+                "knowledge_level": profile.get("knowledge_level"),
+
+                "learning_goal": profile.get("learning_goal"),
+
+                "cognitive_style": profile.get("cognitive_style"),
+
+                "pace_and_time": profile.get("pace_and_time"),
+
+                "error_prone_topics": weak_topics,
+
+            },
+
+        },
+
+        ensure_ascii=False,
+
+    )
+
+
+
+
+
+def path_narrative_user_payload(
+
+    *,
+
+    user_request: str,
+
+    topic: str,
+
+    steps: list[dict],
+
+    profile: dict,
+
+    has_resources: bool,
+
+) -> str:
+
+    import json
+
+
+
+    slim_steps = [
+
+        {
+
+            "order": s.get("order"),
+
+            "title": s.get("title"),
+
+            "objective": s.get("objective"),
+
+            "estimated_minutes": s.get("estimated_minutes"),
+
+        }
+
+        for s in steps
+
+    ]
+
+    return json.dumps(
+
+        {
+
+            "user_request": user_request,
+
+            "topic": topic,
+
+            "has_resources": has_resources,
+
+            "profile_summary": {
+
+                "knowledge_level": profile.get("knowledge_level"),
+
+                "learning_goal": profile.get("learning_goal"),
+
+                "error_prone_topics": profile.get("error_prone_topics") or [],
+
+            },
+
+            "steps": slim_steps,
 
         },
 

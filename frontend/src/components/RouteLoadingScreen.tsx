@@ -9,11 +9,16 @@ import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import CheckCircleOutlined from "@ant-design/icons/CheckCircleOutlined";
 import LoadingOutlined from "@ant-design/icons/LoadingOutlined";
 import MessageOutlined from "@ant-design/icons/MessageOutlined";
+import SafetyCertificateOutlined from "@ant-design/icons/SafetyCertificateOutlined";
 import SettingOutlined from "@ant-design/icons/SettingOutlined";
+import TeamOutlined from "@ant-design/icons/TeamOutlined";
 import TrophyOutlined from "@ant-design/icons/TrophyOutlined";
 import UserOutlined from "@ant-design/icons/UserOutlined";
+import DatabaseOutlined from "@ant-design/icons/DatabaseOutlined";
+import LineChartOutlined from "@ant-design/icons/LineChartOutlined";
+import DashboardOutlined from "@ant-design/icons/DashboardOutlined";
 
-export type RouteLoadingVariant = "init" | "insights" | "default";
+export type RouteLoadingVariant = "init" | "admin" | "insights" | "default";
 
 type StepItem = {
   key: string;
@@ -44,6 +49,23 @@ const VARIANTS: Record<
       "正在连接本地知识库与 SQLite…",
       "预热 ECharts 可视化引擎…",
       "即将进入你的专属学习空间",
+    ],
+  },
+  admin: {
+    title: "学径管理台",
+    subtitle: "Platform Console · 平台运营控制台",
+    logo: <SafetyCertificateOutlined />,
+    steps: [
+      { key: "dashboard", label: "数据总览", desc: "聚合平台核心运营指标", icon: <DashboardOutlined /> },
+      { key: "users", label: "用户管理", desc: "加载用户列表与管理模块", icon: <TeamOutlined /> },
+      { key: "resources", label: "资源汇总", desc: "索引全站学习资源分布", icon: <DatabaseOutlined /> },
+      { key: "activity", label: "行为分析", desc: "预热统计图表与事件流", icon: <LineChartOutlined /> },
+    ],
+    tips: [
+      "正在连接平台数据库…",
+      "同步用户与资源统计数据…",
+      "预热管理台可视化引擎…",
+      "即将进入平台管理控制台",
     ],
   },
   insights: {
@@ -80,6 +102,14 @@ export default function RouteLoadingScreen({
 }: RouteLoadingScreenProps) {
   const config = VARIANTS[variant];
   const [tipIndex, setTipIndex] = useState(0);
+  const progressStroke =
+    variant === "admin"
+      ? { "0%": "#7c3aed", "100%": "#6366f1" }
+      : variant === "insights"
+        ? { "0%": "#f59e0b", "100%": "#1677ff" }
+        : { "0%": "#1677ff", "100%": "#36cfc9" };
+  const progressTrail =
+    variant === "admin" ? "rgba(167,139,250,0.18)" : "rgba(22,119,255,0.12)";
   const activeStep = Math.min(
     config.steps.length - 1,
     Math.floor((progress / 100) * config.steps.length)
@@ -140,8 +170,8 @@ export default function RouteLoadingScreen({
         <div className="init-progress-wrap">
           <Progress
             percent={progress}
-            strokeColor={{ "0%": "#1677ff", "100%": "#36cfc9" }}
-            trailColor="rgba(22,119,255,0.12)"
+            strokeColor={progressStroke}
+            trailColor={progressTrail}
             showInfo={false}
             strokeWidth={8}
           />

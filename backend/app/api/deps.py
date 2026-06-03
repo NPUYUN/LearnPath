@@ -1,6 +1,7 @@
 from fastapi import Depends, Header, HTTPException
 
 from app.core.security import decode_token
+from app.core.admin_user import is_admin_token
 
 
 async def get_current_user_id(
@@ -30,3 +31,18 @@ def assert_user_access(
 ) -> str:
     ensure_same_user(user_id, current_user_id)
     return user_id
+
+
+async def get_current_admin(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> str:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="未登录")
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = decode_token(token)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    if not is_admin_token(payload):
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return str(payload.get("sub") or "")

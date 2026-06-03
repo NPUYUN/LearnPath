@@ -62,10 +62,12 @@ export function useEcharts(option: EChartsOption | null, deps: unknown[] = []) {
       if (visible) chartRef2.current?.resize();
     };
     window.addEventListener("learnpath-pane-show", onPaneShow);
+    window.addEventListener("learnpath-admin-pane-show", onPaneShow);
 
     return () => {
       disposed = true;
       window.removeEventListener("learnpath-pane-show", onPaneShow);
+      window.removeEventListener("learnpath-admin-pane-show", onPaneShow);
       ro?.disconnect();
       chartRef2.current?.dispose();
       chartRef2.current = undefined;

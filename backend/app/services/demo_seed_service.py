@@ -15,6 +15,7 @@ from app.db.repository import (
     save_quiz_attempt,
     save_resources,
 )
+from app.services.media_visual_service import enrich_media_content
 
 
 def _ts(days_ago: int = 0) -> str:
@@ -37,6 +38,18 @@ def _demo_profile() -> dict:
 
 def _demo_resources() -> list[dict]:
     topic = "线性回归"
+    media_script = (
+        "## 短视频分镜脚本：梯度下降\n\n"
+        "### 学习目标\n"
+        "- 建立损失曲面与下降方向的直觉\n"
+        "- 理解学习率对收敛的影响\n\n"
+        "| 镜号 | 画面 | 旁白 | 屏幕文字 | 时长 |\n"
+        "|------|------|------|----------|------|\n"
+        "| 1 | 3D 损失曲面 · 紫蓝渐变标题卡 | 想象在山谷中寻找最低点 | 梯度下降 | 15s |\n"
+        "| 2 | 学习率过大/过小对比动画 | 步长决定能否稳定收敛 | η 的选择 | 20s |\n"
+        "| 3 | 批量 vs 随机下降示意 | 权衡噪声与计算成本 | BGD / SGD | 15s |\n"
+        "| 4 | 小结卡片 + 练习入口 | 回顾要点并完成自测 | 今日要点 | 10s |"
+    )
     return [
         {
             "id": "demo-res-doc-01",
@@ -119,12 +132,7 @@ def _demo_resources() -> list[dict]:
             "type": "media",
             "title": "多模态讲解 · 梯度下降直觉",
             "topic": "梯度下降",
-            "content": (
-                "## 分镜脚本\n\n"
-                "1. **镜头 1（15s）**：损失曲面 3D 动画，旁白：「想象在山谷中寻找最低点」\n"
-                "2. **镜头 2（20s）**：学习率过大/过小对比\n"
-                "3. **镜头 3（15s）**：小结：批量 vs 随机梯度下降"
-            ),
+            "content": enrich_media_content(media_script, "梯度下降"),
             "sources": [],
             "created_at": _ts(7),
         },

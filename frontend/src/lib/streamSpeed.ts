@@ -14,7 +14,8 @@ export function getStreamSpeedConfig(
   deepThinking: boolean
 ): StreamSpeedConfig {
   if (speed === "instant") {
-    return { flushMs: 0, chunkSize: deepThinking ? 4 : 32, plainStream: false };
+    // 立刻：仍展示流式文字，但每 token 即时刷新、不做节流
+    return { flushMs: 0, chunkSize: deepThinking ? 4 : 32, plainStream: true };
   }
   if (deepThinking) {
     return {
@@ -24,9 +25,9 @@ export function getStreamSpeedConfig(
     };
   }
   if (speed === "slow") {
-    return { flushMs: 120, chunkSize: 2, plainStream: true };
+    return { flushMs: 80, chunkSize: 2, plainStream: true };
   }
-  return { flushMs: 32, chunkSize: 8, plainStream: true };
+  return { flushMs: 24, chunkSize: 6, plainStream: true };
 }
 
 export const STREAM_SPEED_OPTIONS: { value: StreamSpeed; label: string }[] = [

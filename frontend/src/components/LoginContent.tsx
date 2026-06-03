@@ -18,7 +18,8 @@ import SafetyOutlined from "@ant-design/icons/SafetyOutlined";
 import QqOutlined from "@ant-design/icons/QqOutlined";
 import WechatOutlined from "@ant-design/icons/WechatOutlined";
 import ThunderboltOutlined from "@ant-design/icons/ThunderboltOutlined";
-import { fetchDemoToken, sendOtp, verifyOtp } from "@/lib/api";
+import SafetyCertificateOutlined from "@ant-design/icons/SafetyCertificateOutlined";
+import { fetchAdminToken, fetchDemoToken, sendOtp, verifyOtp } from "@/lib/api";
 import { preloadEcharts } from "@/lib/useEcharts";
 import { useAppStore } from "@/store/appStore";
 
@@ -35,6 +36,13 @@ const PAGE_CHUNKS = [
   () => import("@/components/pages/SettingsContent"),
 ];
 
+const ADMIN_PAGE_CHUNKS = [
+  () => import("@/components/pages/admin/AdminDashboardContent"),
+  () => import("@/components/pages/admin/AdminUsersContent"),
+  () => import("@/components/pages/admin/AdminResourcesContent"),
+  () => import("@/components/pages/admin/AdminActivityContent"),
+];
+
 const OTP_COOLDOWN = 60;
 
 /** 演示账号示例数据中的默认课程（登录后可在个人主页修改） */
@@ -45,7 +53,7 @@ export default function LoginContent() {
   const setShowLanding = useAppStore((s) => s.setShowLanding);
   const [demoForm] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState<"demo" | "real">("demo");
+  const [activeTab, setActiveTab] = useState<"demo" | "real" | "admin">("demo");
 
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
@@ -60,6 +68,11 @@ export default function LoginContent() {
     void preloadEcharts().catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (activeTab !== "admin") return;
+    ADMIN_PAGE_CHUNKS.forEach((fn) => void fn().catch(() => {}));
+  }, [activeTab]);
+
   useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current); }, []);
 
   const handleDemoLogin = async () => {
@@ -71,7 +84,8 @@ export default function LoginContent() {
         values.name || user.display_name || "演示学生",
         DEMO_COURSE,
         user.user_id,
-        user.email
+        user.email,
+        "user"
       );
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : "登录失败");
@@ -123,12 +137,25 @@ export default function LoginContent() {
         user.display_name || user.email.split("@")[0],
         "",
         user.user_id,
-        user.email
+        user.email,
+        "user"
       );
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : "验证失败");
     } finally {
       setVerifying(false);
+    }
+  };
+
+  const handleAdminLogin = async () => {
+    setSubmitting(true);
+    try {
+      const user = await fetchAdminToken("系统管理员");
+      login(user.display_name || "系统管理员", "平台管理", user.user_id, user.email, "admin");
+    } catch (err: unknown) {
+      message.error(err instanceof Error ? err.message : "管理员登录失败");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -172,9 +199,43 @@ export default function LoginContent() {
           >
             <MailOutlined /> 登录 / 注册
           </button>
+          <button
+            type="button"
+            className={`login-tab login-tab--admin${activeTab === "admin" ? " login-tab--active" : ""}`}
+            onClick={() => setActiveTab("admin")}
+          >
+            <SafetyCertificateOutlined /> 管理员
+          </button>
         </div>
 
-        {activeTab === "demo" ? (
+        {activeTab === "admin" ? (
+          <div>
+            <div className="login-admin-intro">
+              <SafetyCertificateOutlined className="login-admin-icon" />
+              <div>
+                <div className="login-admin-title">平台管理控制台</div>
+                <Text type="secondary" style={{ fontSize: 13 }}>
+                  测试阶段一键进入，查看全站用户、资源与学习行为数据
+                </Text>
+              </div>
+            </div>
+            <Button
+              type="primary"
+              size="large"
+              icon={<ArrowRightOutlined />}
+              iconPosition="end"
+              loading={submitting}
+              block
+              className="login-submit-btn login-submit-btn--admin"
+              onClick={() => void handleAdminLogin()}
+            >
+              进入管理后台
+            </Button>
+            <div className="login-hint login-hint--blue">
+              🔒 管理员界面与普通学习者界面分离，不包含聊天/资源库等学习功能入口。
+            </div>
+          </div>
+        ) : activeTab === "demo" ? (
           <div>
             <Form
               form={demoForm}

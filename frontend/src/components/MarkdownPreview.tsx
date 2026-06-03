@@ -17,18 +17,45 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import { normalizeMarkdownForDisplay, repairMermaidCode, isMermaidLikelyComplete, purgeMermaidOrphans, buildFallbackFlowchart } from "@/lib/markdownNormalize";
+import { apiUrl } from "@/lib/apiBase";
 
-function MermaidBlock({ code, streaming }: { code: string; streaming?: boolean }) {
+function SvgBlock({ code }: { code: string }) {
+  const safe = useMemo(() => {
+    const trimmed = code.trim();
+    if (!/^<svg[\s>]/i.test(trimmed)) return "";
+    if (/<script|on\w+\s*=|javascript:/i.test(trimmed)) return "";
+    return trimmed;
+  }, [code]);
+
+  if (!safe) {
+    return (
+      <pre className="lp-md-pre">
+        <code className="lp-md-code-block language-svg">{code}</code>
+      </pre>
+    );
+  }
+
+  return (
+    <div
+      className="lp-svg-illustration"
+      dangerouslySetInnerHTML={{ __html: safe }}
+      aria-hidden={false}
+    />
+  );
+}
+
+function mermaidTheme(): "dark" | "neutral" {
+  if (typeof document === "undefined") return "neutral";
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "neutral";
+}
+
+function MermaidBlock({ code, streaming, inChat }: { code: string; streaming?: boolean; inChat?: boolean }) {
   const id = useId().replace(/:/g, "");
   const ref = useRef<HTMLDivElement>(null);
   const repaired = useMemo(() => repairMermaidCode(code), [code]);
   const [debounced, setDebounced] = useState("");
 
   useEffect(() => {
-    if (streaming) {
-      setDebounced("");
-      return;
-    }
     if (!isMermaidLikelyComplete(repaired)) {
       setDebounced("");
       return;
@@ -37,27 +64,38 @@ function MermaidBlock({ code, streaming }: { code: string; streaming?: boolean }
   }, [repaired, streaming]);
 
   useEffect(() => {
-    if (streaming || !debounced || !isMermaidLikelyComplete(debounced)) return;
+    if (!debounced || !isMermaidLikelyComplete(debounced)) return;
 
     let cancelled = false;
     void (async () => {
       try {
         const mermaid = (await import("mermaid")).default;
+        const theme = mermaidTheme();
         mermaid.initialize({
           startOnLoad: false,
-          theme: "neutral",
+          theme,
           securityLevel: "loose",
           flowchart: {
             htmlLabels: true,
             curve: "basis",
-            padding: 12,
-            nodeSpacing: 50,
-            rankSpacing: 50,
+            padding: 16,
+            nodeSpacing: 56,
+            rankSpacing: 56,
           },
           themeVariables: {
             fontSize: "14px",
             fontFamily:
               '"Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+            ...(theme === "dark"
+              ? {
+                  primaryColor: "#312e81",
+                  primaryTextColor: "#e2e8f0",
+                  primaryBorderColor: "#6366f1",
+                  lineColor: "#818cf8",
+                  secondaryColor: "#1e293b",
+                  tertiaryColor: "#0f172a",
+                }
+              : {}),
           },
         });
         if (cancelled || !ref.current) return;
@@ -94,7 +132,7 @@ function MermaidBlock({ code, streaming }: { code: string; streaming?: boolean }
     };
   }, [debounced, id]);
 
-  return <div ref={ref} className="lp-mermaid" aria-label="关系图解" />;
+  return <div ref={ref} className={`lp-mermaid${inChat ? " lp-mermaid--chat" : ""}`} aria-label="关系图解" />;
 }
 
 function childText(children: ReactNode): string {
@@ -109,7 +147,7 @@ function childText(children: ReactNode): string {
     .join("");
 }
 
-function buildMarkdownComponents(streaming: boolean): Components {
+function buildMarkdownComponents(streaming: boolean, inChat?: boolean): Components {
   return {
     h1: ({ children }) => <h1 className="lp-md-h1">{children}</h1>,
     h2: ({ children }) => <h2 className="lp-md-h2">{children}</h2>,
@@ -119,7 +157,12 @@ function buildMarkdownComponents(streaming: boolean): Components {
     ul: ({ children }) => <ul className="lp-md-ul">{children}</ul>,
     ol: ({ children }) => <ol className="lp-md-ol">{children}</ol>,
     li: ({ children }) => <li className="lp-md-li">{children}</li>,
-    blockquote: ({ children }) => <blockquote className="lp-md-blockquote">{children}</blockquote>,
+    blockquote: ({ children }) => (
+      <blockquote className={`lp-md-blockquote${inChat ? " lp-md-blockquote--chat" : ""}`}>
+        {children}
+      </blockquote>
+    ),
+    hr: () => <hr className="lp-md-hr" />,
     table: ({ children }) => (
       <div className="lp-md-table-wrap">
         <table className="lp-md-table">{children}</table>
@@ -130,6 +173,10 @@ function buildMarkdownComponents(streaming: boolean): Components {
         {children}
       </a>
     ),
+    img: ({ src, alt }) => (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={src} alt={alt || ""} className="lp-md-image" loading="lazy" />
+    ),
     pre: ({ children }) => {
       const child = Children.only(children) as ReactElement<{
         className?: string;
@@ -137,10 +184,26 @@ function buildMarkdownComponents(streaming: boolean): Components {
       }>;
       const cls = child?.props?.className || "";
       if (cls.includes("language-mermaid")) {
-        return <MermaidBlock code={childText(child.props.children)} streaming={streaming} />;
+        return <MermaidBlock code={childText(child.props.children)} streaming={streaming} inChat={inChat} />;
+      }
+      if (cls.includes("language-svg")) {
+        return <SvgBlock code={childText(child.props.children)} />;
+      }
+      if (cls.includes("language-video")) {
+        const raw = childText(child.props.children).trim();
+        const src = raw.startsWith("/") ? apiUrl(raw) : raw;
+        return (
+          <video
+            className="lp-md-video"
+            src={src}
+            controls
+            playsInline
+            preload="metadata"
+          />
+        );
       }
       if (/language-mermaid/.test(childText(children))) {
-        return <MermaidBlock code={childText(children)} streaming={streaming} />;
+        return <MermaidBlock code={childText(children)} streaming={streaming} inChat={inChat} />;
       }
       return <pre className="lp-md-pre">{children}</pre>;
     },
@@ -150,6 +213,10 @@ function buildMarkdownComponents(streaming: boolean): Components {
 
       if (lang === "mermaid") {
         return <code className="lp-md-mermaid-src" {...props}>{children}</code>;
+      }
+
+      if (lang === "svg") {
+        return <code className="lp-md-svg-src" {...props}>{children}</code>;
       }
 
       if (isBlock) {
@@ -171,12 +238,26 @@ function buildMarkdownComponents(streaming: boolean): Components {
 
 const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
-function MarkdownPreviewInner({ content }: { content: string }) {
+function MarkdownPreviewInner({
+  content,
+  variant = "default",
+  streaming = false,
+}: {
+  content: string;
+  variant?: "chat" | "default";
+  streaming?: boolean;
+}) {
   const normalized = useMemo(() => normalizeMarkdownForDisplay(content), [content]);
-  const components = useMemo(() => buildMarkdownComponents(false), []);
+  const inChat = variant === "chat";
+  const components = useMemo(
+    () => buildMarkdownComponents(streaming, inChat),
+    [streaming, inChat]
+  );
 
   return (
-    <div className="lp-markdown-preview">
+    <div
+      className={`lp-markdown-preview${inChat ? " lp-markdown-preview--chat" : ""}${streaming ? " lp-markdown-preview--streaming" : ""}`}
+    >
       <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
         {normalized}
       </ReactMarkdown>

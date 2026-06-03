@@ -6,12 +6,19 @@ import type {
   StudentProfile,
   UserAccount,
 } from "@/lib/api";
-import { clearAccessToken } from "@/store/authStore";
+import { clearAccessToken, clearAuthSession, saveAuthSession } from "@/store/authStore";
 
 export const DEMO_USER_ID = "demo";
+export const ADMIN_USER_ID = "admin";
+
+export type UserRole = "user" | "admin";
 
 export function isDemoUser(userId: string) {
   return userId === DEMO_USER_ID;
+}
+
+export function isAdminUser(userId: string, role?: UserRole) {
+  return role === "admin" || userId === ADMIN_USER_ID;
 }
 
 /** 侧栏/页面展示用课程名 */
@@ -28,9 +35,16 @@ interface AppState {
   userEmail: string;
   /** 真实登录后为后端返回的 UUID；演示模式固定为 "demo" */
   userId: string;
+  role: UserRole;
   /** true = 显示产品落地页；false = 显示登录表单 */
   showLanding: boolean;
-  login: (userName: string, courseName: string, userId?: string, email?: string) => void;
+  login: (
+    userName: string,
+    courseName: string,
+    userId?: string,
+    email?: string,
+    role?: UserRole
+  ) => void;
   setUserMeta: (meta: { userName?: string; courseName?: string; userEmail?: string }) => void;
   logout: () => void;
   setShowLanding: (v: boolean) => void;
@@ -61,19 +75,38 @@ export const useAppStore = create<AppState>((set) => ({
   courseName: "机器学习导论",
   userEmail: "demo@learnpath.local",
   userId: DEMO_USER_ID,
+  role: "user" as UserRole,
   showLanding: true,
-  login: (userName, courseName, userId, email) =>
+  login: (userName, courseName, userId, email, role = "user") => {
+    const resolvedUserId = userId || DEMO_USER_ID;
+    const resolvedCourseName =
+      role === "admin"
+        ? "平台管理"
+        : userId && !isDemoUser(userId)
+          ? courseName || ""
+          : courseName || "机器学习导论";
+    const resolvedEmail =
+      email ||
+      (role === "admin"
+        ? "admin@learnpath.local"
+        : userId && userId !== DEMO_USER_ID
+          ? ""
+          : "demo@learnpath.local");
+    saveAuthSession({
+      userId: resolvedUserId,
+      userName,
+      courseName: resolvedCourseName,
+      userEmail: resolvedEmail,
+      role,
+    });
     set({
       isLoggedIn: true,
       userName,
-      courseName:
-        userId && !isDemoUser(userId)
-          ? courseName || ""
-          : courseName || "机器学习导论",
-      userId: userId || DEMO_USER_ID,
-      userEmail:
-        email ||
-        (userId && userId !== DEMO_USER_ID ? "" : "demo@learnpath.local"),
+      courseName: resolvedCourseName,
+      userId: resolvedUserId,
+      role,
+      userEmail: resolvedEmail,
+      showLanding: false,
       profile: null,
       resources: [],
       learningPath: null,
@@ -82,7 +115,8 @@ export const useAppStore = create<AppState>((set) => ({
       account: null,
       insightsChat: null,
       pendingResourcePreviewId: null,
-    }),
+    });
+  },
   setUserMeta: (meta) =>
     set((s) => ({
       userName: meta.userName ?? s.userName,
@@ -91,10 +125,12 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   logout: () => {
     clearAccessToken();
+    clearAuthSession();
     set({
       isLoggedIn: false,
       showLanding: true,
       userId: DEMO_USER_ID,
+      role: "user",
       profile: null,
       resources: [],
       learningPath: null,

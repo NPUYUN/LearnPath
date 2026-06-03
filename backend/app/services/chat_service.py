@@ -18,7 +18,11 @@ async def run_chat(
     deep_thinking: bool = False,
     web_search: bool = False,
     attachment_context: str = "",
+    attachments: list[dict] | None = None,
 ) -> ChatResponse:
+    attachment_context = await _resolve_attachment_context(
+        user_id, message, attachment_context, attachments
+    )
     intent = classify_intent(message)
     base = await build_graph_state(
         user_id,
@@ -73,10 +77,28 @@ async def run_chat(
 
 
 async def _yield_text_tokens(text: str, chunk_size: int = 1) -> AsyncIterator[dict]:
-    """将完整文本按较大分段推送，由前端控制展示节奏。"""
-    step = max(8, min(chunk_size, 32))
-    for i in range(0, len(text), step):
-        yield {"event": "token", "data": text[i : i + step]}
+    """将完整文本按行伪流式推送（智能体非 chat 意图回退路径）。"""
+    from app.core.llm.resilience import yield_text_stream
+
+    async for piece in yield_text_stream(text, atomic_lines=True):
+        yield {"event": "token", "data": piece}
+
+
+async def _resolve_attachment_context(
+    user_id: str,
+    message: str,
+    attachment_context: str,
+    attachments: list[dict] | None,
+) -> str:
+    if attachments:
+        from app.services.chat_attachment_text import build_attachment_context_async
+
+        return await build_attachment_context_async(
+            attachments,
+            user_id,
+            user_question=message,
+        )
+    return (attachment_context or "").strip()
 
 
 async def stream_chat(
@@ -87,8 +109,20 @@ async def stream_chat(
     deep_thinking: bool = False,
     web_search: bool = False,
     attachment_context: str = "",
+    attachments: list[dict] | None = None,
 ) -> AsyncIterator[dict]:
     """SSE：intent / progress / token（LLM 真流式或逐字输出）/ profile / resources / path / done"""
+    has_images = bool(
+        attachments and any((a.get("kind") or "file") == "image" for a in attachments)
+    )
+    if has_images:
+        yield {
+            "event": "progress",
+            "data": json.dumps({"stage": "vision_analysis"}, ensure_ascii=False),
+        }
+    attachment_context = await _resolve_attachment_context(
+        user_id, message, attachment_context, attachments
+    )
     intent = classify_intent(message)
     topic = _extract_topic(message)
     yield {"event": "intent", "data": intent}
@@ -171,6 +205,39 @@ async def stream_chat(
                     "data": json.dumps(profile_data, ensure_ascii=False, default=str),
                 }
             yield {"event": "done", "data": final_reply}
+            return
+
+        if intent == "path":
+            from app.agents.nodes.path_agent import path_node
+
+            base = await build_graph_state(
+                user_id,
+                {
+                    "messages": [{"role": "user", "content": message}],
+                    "intent": intent,
+                    "topic": topic,
+                    "deep_thinking": deep_thinking,
+                },
+            )
+            yield {"event": "progress", "data": json.dumps({"stage": "path"}, ensure_ascii=False)}
+            result = await path_node({**base, "deep_thinking": deep_thinking})
+            path_data = result.get("path")
+            if path_data:
+                await save_path(path_data)
+                yield {
+                    "event": "path",
+                    "data": json.dumps(
+                        {"steps": len(path_data.get("steps", [])), "version": path_data.get("version", 1)},
+                        ensure_ascii=False,
+                    ),
+                }
+            reply = (result.get("reply") or "").strip()
+            stream_step = graph_stream_chunk_size(deep_thinking=deep_thinking, chunk_size=chunk_size)
+            if not reply:
+                reply = "⚠️ 路径规划未返回内容，请稍后重试。"
+            async for tok in _yield_text_tokens(reply, stream_step):
+                yield tok
+            yield {"event": "done", "data": reply}
             return
 
         base = await build_graph_state(
@@ -264,7 +331,33 @@ def _resource_summaries(resources: list[dict]) -> list[dict]:
 
 
 def _extract_topic(message: str) -> str:
-    for kw in ["线性回归", "逻辑回归", "梯度下降", "过拟合", "机器学习", "深度学习"]:
+    text = message.strip()
+    for noise in (
+        "请帮我",
+        "帮我",
+        "请",
+        "规划",
+        "复习计划",
+        "学习计划",
+        "学习路径",
+        "路径",
+        "计划",
+    ):
+        text = text.replace(noise, "")
+    text = text.strip("，。！？,.!? \t\n")
+    if len(text) >= 2:
+        return text[:48]
+    for kw in [
+        "计算机网络",
+        "操作系统",
+        "数据结构",
+        "线性回归",
+        "逻辑回归",
+        "梯度下降",
+        "过拟合",
+        "机器学习",
+        "深度学习",
+    ]:
         if kw in message:
             return kw
     return "综合学习"

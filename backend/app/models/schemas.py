@@ -83,6 +83,16 @@ class LearningResource(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ChatAttachmentMeta(BaseModel):
+    id: str
+    name: str
+    kind: Literal["image", "file"] = "file"
+    mime_type: str = ""
+    url: str = ""
+    size: int = 0
+    text_preview: str = ""
+
+
 class ChatRequest(BaseModel):
     user_id: str = "demo"
     message: str
@@ -91,6 +101,13 @@ class ChatRequest(BaseModel):
     deep_thinking: bool = False
     web_search: bool = False
     attachment_context: str = ""
+    attachments: list[ChatAttachmentMeta] = Field(default_factory=list)
+
+
+class AttachmentContextRequest(BaseModel):
+    user_id: str = "demo"
+    question: str = ""
+    attachments: list[ChatAttachmentMeta] = Field(default_factory=list)
 
 
 class ChatResponse(BaseModel):
@@ -188,10 +205,15 @@ class AuthUser(BaseModel):
     email: str
     display_name: str
     access_token: str = ""
+    role: str = "user"
 
 
 class DemoTokenRequest(BaseModel):
     display_name: str = "演示学生"
+
+
+class AdminTokenRequest(BaseModel):
+    display_name: str = "系统管理员"
 
 
 class UserAccount(BaseModel):
@@ -275,16 +297,6 @@ class UserPreferencesUpdate(BaseModel):
     starred_resource_ids: list[str] | None = None
     account_patch: dict | None = None
     daily_plan: DailyPlanState | None = None
-
-
-class ChatAttachmentMeta(BaseModel):
-    id: str
-    name: str
-    kind: Literal["image", "file"] = "file"
-    mime_type: str = ""
-    url: str = ""
-    size: int = 0
-    text_preview: str = ""
 
 
 class ChatConversationSummary(BaseModel):

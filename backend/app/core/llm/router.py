@@ -79,6 +79,16 @@ def llm_runtime_status() -> dict:
         "aux_mock": aux.use_mock,
         "kimi_model": settings.kimi_model if settings.has_kimi else None,
         "routing": routing,
+        "spark_tti_available": settings.has_spark_tti,
+        "qwen_image_available": settings.has_qwen_image,
+        "qwen_video_available": settings.has_qwen_video,
+        "ai_image_available": settings.has_ai_image,
+        "multimodal_image": (
+            "qwen_wanx"
+            if settings.has_qwen_image
+            else ("spark_tti" if settings.has_spark_tti else "svg_fallback")
+        ),
+        "multimodal_video": "qwen_wanx_i2v" if settings.has_qwen_video else "slideshow_only",
     }
 
 

@@ -51,7 +51,7 @@ try {
     Write-Host "[3/5] Backend http://127.0.0.1:8000 ..."
     $uvicornArgs = @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000")
     $envText = Get-Content (Join-Path $Root ".env") -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
-    if ($ShowWindows -and $envText -match '(?m)^\s*DEV_RELOAD\s*=\s*true\s*$') {
+    if ($envText -match '(?m)^\s*DEV_RELOAD\s*=\s*true\s*$') {
         $uvicornArgs += "--reload"
         Write-Step "DEV_RELOAD=true, hot reload enabled"
     }

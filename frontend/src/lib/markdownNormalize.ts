@@ -33,15 +33,17 @@ function quoteMermaidNodeLabels(input: string): string {
 
 /** 解析失败时提取边并重建成最简合法 flowchart */
 export function buildFallbackFlowchart(raw: string): string {
+  const skip = new Set(["LR", "RL", "TD", "TB", "BT", "flowchart"]);
   const code = raw.trim();
   const edges: string[] = [];
   const re = /([A-Za-z]\w*)\s*(?:\[[^\]]+\]|\([^)]+\)|\{[^}]+\})?\s*-->\s*([A-Za-z]\w*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code)) !== null) {
+    if (skip.has(m[1].toUpperCase()) || skip.has(m[2].toUpperCase())) continue;
     edges.push(`  ${m[1]} --> ${m[2]}`);
   }
   if (edges.length) return `flowchart LR\n${edges.join("\n")}`;
-  return "flowchart TD\n  A[主题] --> B[说明]";
+  return 'flowchart TD\n  start["主题"] --> core["核心概念"]\n  core --> apply["应用练习"]';
 }
 
 /** 修复粘连、缺换行的 Mermaid 源码，保证节点与边标签可渲染 */
@@ -60,6 +62,7 @@ export function repairMermaidCode(raw: string): string {
   }
 
   code = normalizeMermaidArrows(code);
+  code = code.replace(/^(flowchart\s+)(LR|RL|TD|TB|BT)([A-Za-z])/im, "$1$2\n  $3");
   code = quoteMermaidNodeLabels(code);
 
   // graph TD → flowchart TD（Mermaid 11 推荐）

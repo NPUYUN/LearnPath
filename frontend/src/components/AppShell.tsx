@@ -18,10 +18,14 @@ import {
   type NavRoute,
   type StandaloneRoute,
 } from "@/hooks/navRoutes";
+import { ADMIN_ROUTES, isAdminRoute, type AdminRoute } from "@/hooks/adminRoutes";
+import { ADMIN_PAGE_MODULES } from "@/lib/adminPageModules";
 import { PAGE_MODULES } from "@/lib/pageModules";
 import { prewarmEchartsEngine, preloadEcharts } from "@/lib/useEcharts";
 import { registerClientNav } from "@/lib/clientNav";
-import { useAppStore, displayCourseName } from "@/store/appStore";
+import { useAppStore, displayCourseName, isAdminUser } from "@/store/appStore";
+import { canRestoreAuthSession } from "@/store/authStore";
+import AdminShell from "@/components/AdminShell";
 import type { ComponentType } from "react";
 import MessageOutlined from "@ant-design/icons/MessageOutlined";
 import UserOutlined from "@ant-design/icons/UserOutlined";
@@ -40,7 +44,7 @@ import RouteLoadingScreen from "@/components/RouteLoadingScreen";
 import PagePane from "@/components/PagePane";
 import { PageScope } from "@/contexts/PageScopeContext";
 import ThemeProvider from "@/components/ThemeProvider";
-import { preloadLoggedInExtras, preloadStandaloneRoute } from "@/lib/routePreload";
+import { preloadAdminConsole, preloadLoggedInExtras, preloadStandaloneRoute } from "@/lib/routePreload";
 
 const LoginContent = dynamic(() => import("@/components/LoginContent"), { ssr: false });
 const LandingContent = dynamic(() => import("@/components/LandingContent"), { ssr: false });
@@ -68,6 +72,13 @@ const PREVIEW_MS_BY_ROUTE: Partial<Record<NavRoute, number>> = {
   "/settings": 240,
 };
 
+const ADMIN_PREVIEW_MS_BY_ROUTE: Partial<Record<AdminRoute, number>> = {
+  "/admin": 320,
+  "/admin/users": 280,
+  "/admin/resources": 300,
+  "/admin/activity": 360,
+};
+
 type StandaloneTransition = {
   target: StandaloneRoute;
   progress: number;
@@ -81,7 +92,25 @@ function waitPreviewFrames(): Promise<void> {
   });
 }
 
+let authSessionRestored = false;
+
+function restoreAuthSessionOnce() {
+  if (authSessionRestored || typeof window === "undefined") return;
+  authSessionRestored = true;
+  const session = canRestoreAuthSession();
+  if (!session || useAppStore.getState().isLoggedIn) return;
+  useAppStore.getState().login(
+    session.userName,
+    session.courseName,
+    session.userId,
+    session.userEmail,
+    session.role
+  );
+}
+
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  restoreAuthSessionOnce();
+
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
@@ -93,20 +122,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       : "/chat";
   const showResourcesSubPage = isResourcesSubPath(pathname);
   const [activeTab, setActiveTab] = useState<NavRoute>(routeFromPath);
+  const adminRouteFromPath: AdminRoute = isAdminRoute(pathname) ? pathname : "/admin";
+  const [adminActiveTab, setAdminActiveTab] = useState<AdminRoute>(adminRouteFromPath);
 
   const isLoggedIn = useAppStore((s) => s.isLoggedIn);
   const userId = useAppStore((s) => s.userId);
+  const userRole = useAppStore((s) => s.role);
   const showLanding = useAppStore((s) => s.showLanding);
   const userName = useAppStore((s) => s.userName);
   const courseName = useAppStore((s) => s.courseName);
   const logout = useAppStore((s) => s.logout);
+  const isAdminMode = isLoggedIn && isAdminUser(userId, userRole);
 
   const [pageComponents, setPageComponents] = useState<Partial<Record<NavRoute, ComponentType>>>({});
+  const [adminPageComponents, setAdminPageComponents] = useState<
+    Partial<Record<AdminRoute, ComponentType>>
+  >({});
   const [dataReady, setDataReady] = useState(false);
-  const [warmedRoutes, setWarmedRoutes] = useState<Set<NavRoute>>(() => new Set());
+  const [warmedRoutes, setWarmedRoutes] = useState<Set<string>>(() => new Set());
   const [initProgress, setInitProgress] = useState(0);
   const [initDone, setInitDone] = useState(false);
   const [initFading, setInitFading] = useState(false);
+  const [adminWarmPreview, setAdminWarmPreview] = useState<AdminRoute | null>(null);
   const finishCalled = useRef(false);
   const cycleStarted = useRef(false);
 
@@ -115,6 +152,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isNavRoute(pathname)) setActiveTab(pathname);
   }, [pathname]);
+
+  useEffect(() => {
+    if (isAdminRoute(pathname)) setAdminActiveTab(pathname);
+  }, [pathname]);
+
+  const goToAdmin = useCallback(
+    (key: AdminRoute) => {
+      setAdminActiveTab(key);
+      window.dispatchEvent(new CustomEvent("learnpath-admin-pane-show", { detail: key }));
+      if (pathname !== key) {
+        startTransition(() => {
+          router.push(key);
+        });
+      }
+    },
+    [pathname, router]
+  );
 
   const goTo = useCallback(
     (key: AppRoute) => {
@@ -142,13 +196,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isLoggedIn) return;
+    if (isAdminMode) {
+      ADMIN_ROUTES.forEach((r) => router.prefetch(r));
+      return;
+    }
     NAV_ROUTES.forEach((r) => router.prefetch(r));
     router.prefetch("/insights");
-  }, [isLoggedIn, router]);
+  }, [isLoggedIn, isAdminMode, router]);
 
   useEffect(() => {
+    if (!isLoggedIn) return;
+    if (isAdminUser(userId, userRole)) {
+      if (!pathname.startsWith("/admin")) {
+        router.replace("/admin");
+      }
+      return;
+    }
+    if (pathname.startsWith("/admin")) {
+      router.replace("/chat");
+      setActiveTab("/chat");
+      return;
+    }
     if (
-      isLoggedIn &&
       !isNavRoute(pathname) &&
       !isStandaloneRoute(pathname) &&
       !isResourcesSubPath(pathname)
@@ -156,7 +225,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       router.replace("/chat");
       setActiveTab("/chat");
     }
-  }, [isLoggedIn, pathname, router]);
+  }, [isLoggedIn, userId, userRole, pathname, router]);
 
   const finishInit = useCallback(() => {
     if (finishCalled.current) return;
@@ -171,11 +240,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       finishCalled.current = false;
       cycleStarted.current = false;
       setPageComponents({});
+      setAdminPageComponents({});
       setWarmedRoutes(new Set());
       setDataReady(false);
       setInitProgress(0);
       setInitDone(false);
       setInitFading(false);
+      setAdminWarmPreview(null);
       setActiveTab("/chat");
       return;
     }
@@ -188,92 +259,115 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     setInitFading(false);
     setInitProgress(0);
 
-    const {
-      profile,
-      resources,
-      learningPath,
-      evalStats,
-      setProfile,
-      setResources,
-      setLearningPath,
-      setResourceTitles,
-      setEvalStats,
-    } = useAppStore.getState();
-
     let cancelled = false;
-    const activeUserId = userId;
 
-    void (async () => {
-      const entries = await Promise.all(
-        PAGE_MODULES.map(async (m) => {
-          const mod = await m.load();
-          return [m.route, mod.default] as const;
-        })
-      );
-      if (cancelled) return;
-      const map: Partial<Record<NavRoute, ComponentType>> = {};
-      entries.forEach(([route, Comp]) => {
-        map[route] = Comp;
-      });
-      setPageComponents(map);
-    })();
+    if (isAdminMode) {
+      setPageComponents({});
+      setAdminPageComponents({});
 
-    void (async () => {
-      const tasks: Promise<void>[] = [];
-      tasks.push(
-        getProfile(activeUserId)
-          .then((p) => {
-            if (!cancelled) setProfile(p);
+      void (async () => {
+        const entries = await Promise.all(
+          ADMIN_PAGE_MODULES.map(async (m) => {
+            const mod = await m.load();
+            return [m.route, mod.default] as const;
           })
-          .catch(() => {})
-      );
-      tasks.push(
-        listResources(activeUserId)
-          .then((list) => {
-            if (cancelled) return;
-            setResources(list);
-            const titles: Record<string, string> = {};
-            list.forEach((r) => {
-              titles[r.id] = r.title;
-            });
-            setResourceTitles(titles);
-          })
-          .catch(() => {})
-      );
-      tasks.push(
-        getPath(activeUserId)
-          .then((p) => {
-            if (!cancelled) setLearningPath(p);
-          })
-          .catch(() => {})
-      );
-      tasks.push(
-        getEvalStats(activeUserId)
-          .then((s) => {
-            if (!cancelled) setEvalStats(s);
-          })
-          .catch(() => {})
-      );
-      tasks.push(
-        import("@/components/MarkdownPreview").then(() => {}).catch(() => {}),
-        preloadEcharts().then(() => prewarmEchartsEngine()).catch(() => {}),
-        preloadLoggedInExtras().catch(() => {})
-      );
-      await Promise.all(tasks);
-      if (!cancelled) setDataReady(true);
-    })();
+        );
+        if (cancelled) return;
+        const map: Partial<Record<AdminRoute, ComponentType>> = {};
+        entries.forEach(([route, Comp]) => {
+          map[route] = Comp;
+        });
+        setAdminPageComponents(map);
+      })();
 
-    const fallback = setTimeout(() => {
-      if (!cancelled) finishInit();
-    }, 20000);
+      void (async () => {
+        await preloadAdminConsole();
+        if (!cancelled) setDataReady(true);
+      })();
+    } else {
+      setAdminPageComponents({});
+      setPageComponents({});
+
+      const {
+        setProfile,
+        setResources,
+        setLearningPath,
+        setResourceTitles,
+        setEvalStats,
+      } = useAppStore.getState();
+
+      const activeUserId = userId;
+
+      void (async () => {
+        const entries = await Promise.all(
+          PAGE_MODULES.map(async (m) => {
+            const mod = await m.load();
+            return [m.route, mod.default] as const;
+          })
+        );
+        if (cancelled) return;
+        const map: Partial<Record<NavRoute, ComponentType>> = {};
+        entries.forEach(([route, Comp]) => {
+          map[route] = Comp;
+        });
+        setPageComponents(map);
+      })();
+
+      void (async () => {
+        const tasks: Promise<void>[] = [];
+        tasks.push(
+          getProfile(activeUserId)
+            .then((p) => {
+              if (!cancelled) setProfile(p);
+            })
+            .catch(() => {})
+        );
+        tasks.push(
+          listResources(activeUserId)
+            .then((list) => {
+              if (cancelled) return;
+              setResources(list);
+              const titles: Record<string, string> = {};
+              list.forEach((r) => {
+                titles[r.id] = r.title;
+              });
+              setResourceTitles(titles);
+            })
+            .catch(() => {})
+        );
+        tasks.push(
+          getPath(activeUserId)
+            .then((p) => {
+              if (!cancelled) setLearningPath(p);
+            })
+            .catch(() => {})
+        );
+        tasks.push(
+          getEvalStats(activeUserId)
+            .then((s) => {
+              if (!cancelled) setEvalStats(s);
+            })
+            .catch(() => {})
+        );
+        tasks.push(
+          import("@/components/MarkdownPreview").then(() => {}).catch(() => {}),
+          preloadEcharts().then(() => prewarmEchartsEngine()).catch(() => {}),
+          preloadLoggedInExtras().catch(() => {})
+        );
+        await Promise.all(tasks);
+        if (!cancelled) setDataReady(true);
+      })();
+    }
 
     return () => {
       cancelled = true;
-      clearTimeout(fallback);
     };
-  }, [isLoggedIn, userId, finishInit]);
+  }, [isLoggedIn, isAdminMode, userId, finishInit]);
 
-  const allModulesLoaded = NAV_ROUTES.every((r) => pageComponents[r]);
+  const allModulesLoaded = isAdminMode
+    ? ADMIN_ROUTES.every((r) => adminPageComponents[r])
+    : NAV_ROUTES.every((r) => pageComponents[r]);
+  const warmRouteList = isAdminMode ? ADMIN_ROUTES : NAV_ROUTES;
 
   // 登录后后台静默预热各页（不切换可见内容，避免从对话页「闪跳」到画像等页面）
   useEffect(() => {
@@ -283,19 +377,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     void (async () => {
-      for (let i = 0; i < NAV_ROUTES.length; i++) {
+      for (let i = 0; i < warmRouteList.length; i++) {
         if (cancelled) return;
-        const route = NAV_ROUTES[i];
-        window.dispatchEvent(new CustomEvent("learnpath-pane-show", { detail: route }));
+        const route = warmRouteList[i];
+        if (isAdminMode) {
+          setAdminWarmPreview(route as AdminRoute);
+          window.dispatchEvent(new CustomEvent("learnpath-admin-pane-show", { detail: route }));
+        } else {
+          window.dispatchEvent(new CustomEvent("learnpath-pane-show", { detail: route }));
+        }
         await waitPreviewFrames();
-        const dwellMs = PREVIEW_MS_BY_ROUTE[route] ?? PREVIEW_MS_DEFAULT;
+        const dwellMs = isAdminMode
+          ? ADMIN_PREVIEW_MS_BY_ROUTE[route as AdminRoute] ?? PREVIEW_MS_DEFAULT
+          : PREVIEW_MS_BY_ROUTE[route as NavRoute] ?? PREVIEW_MS_DEFAULT;
         await new Promise((r) => setTimeout(r, dwellMs));
+        if (isAdminMode) setAdminWarmPreview(null);
         setWarmedRoutes((prev) => {
           const next = new Set(prev);
           next.add(route);
           return next;
         });
-        setInitProgress(Math.min(95, 55 + Math.round(((i + 1) / NAV_ROUTES.length) * 40)));
+        setInitProgress(Math.min(95, 55 + Math.round(((i + 1) / warmRouteList.length) * 40)));
       }
       if (!cancelled) finishInit();
     })();
@@ -303,15 +405,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoggedIn, allModulesLoaded, dataReady, finishInit]);
+  }, [isLoggedIn, isAdminMode, allModulesLoaded, dataReady, finishInit, router]);
+
+  // 模块与数据就绪但预热未结束时兜底进入（避免无限加载）
+  useEffect(() => {
+    if (!isLoggedIn || initDone || !allModulesLoaded || !dataReady) return;
+    const t = window.setTimeout(() => finishInit(), 22000);
+    return () => window.clearTimeout(t);
+  }, [isLoggedIn, initDone, allModulesLoaded, dataReady, finishInit]);
 
   useEffect(() => {
     if (!isLoggedIn || initDone) return;
     const modulePct = allModulesLoaded ? 35 : 0;
     const dataPct = dataReady ? 20 : 0;
-    const warmPct = Math.round((warmedRoutes.size / NAV_ROUTES.length) * 40);
+    const warmPct = Math.round((warmedRoutes.size / warmRouteList.length) * 40);
     setInitProgress(Math.min(99, modulePct + dataPct + warmPct));
-  }, [isLoggedIn, initDone, allModulesLoaded, dataReady, warmedRoutes]);
+  }, [isLoggedIn, initDone, allModulesLoaded, dataReady, warmedRoutes, warmRouteList.length]);
+
+  useEffect(() => {
+    if (!isAdminMode || !initDone) return;
+    window.dispatchEvent(new CustomEvent("learnpath-admin-pane-show", { detail: adminActiveTab }));
+  }, [isAdminMode, initDone, adminActiveTab]);
 
   // 独立页（成就馆等）：点击即显示加载屏，预加载完成后再展示内容
   useEffect(() => {
@@ -379,6 +493,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <AuthPageTheme />
         {showLanding ? <LandingContent /> : <LoginContent />}
       </AuthLightProvider>
+    );
+  }
+
+  if (isAdminUser(userId, userRole)) {
+    return (
+      <ThemeProvider>
+        {!initDone && (
+          <InitLoadingScreen progress={initProgress} fading={initFading} variant="admin" />
+        )}
+        <div className={`lp-admin-mount${initDone ? " lp-admin-mount--ready" : ""}`}>
+          <AdminShell
+            activeRoute={adminActiveTab}
+            pageComponents={adminPageComponents}
+            warmedRoutes={warmedRoutes}
+            warmPreviewRoute={adminWarmPreview}
+            allModulesLoaded={allModulesLoaded}
+            initDone={initDone}
+            onNavigate={goToAdmin}
+            onLogout={() => {
+              logout();
+              router.replace("/");
+            }}
+          />
+        </div>
+      </ThemeProvider>
     );
   }
 

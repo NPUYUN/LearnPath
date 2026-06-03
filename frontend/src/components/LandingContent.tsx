@@ -603,7 +603,7 @@ function AgentHub() {
 
 export default function LandingContent() {
   const setShowLanding = useAppStore((s) => s.setShowLanding);
-  const typed = useTypewriter("对话 · 画像 · 资源 · 路径 —— 一条完整的 AI 学习链路");
+  const typed = useTypewriter("对话 · 画像 · 资源 · 路径\n一条完整的 AI 学习链路");
 
   const goLogin = () => setShowLanding(false);
 

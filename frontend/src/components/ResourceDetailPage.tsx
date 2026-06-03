@@ -34,6 +34,11 @@ const MarkdownPreview = dynamic(() => import("@/components/MarkdownPreview"), {
   ssr: false,
 });
 
+const MediaResourceView = dynamic(() => import("@/components/MediaResourceView"), {
+  loading: () => <Spin />,
+  ssr: false,
+});
+
 const { Text, Title, Paragraph } = Typography;
 
 function downloadMarkdown(r: LearningResource) {
@@ -179,6 +184,12 @@ export default function ResourceDetailPage({ resourceId }: ResourceDetailPagePro
                 setSubmittingQuiz(false);
               }
             }}
+          />
+        ) : uiType === "video" ? (
+          <MediaResourceView
+            content={resource.content}
+            title={resource.title}
+            topic={resource.topic}
           />
         ) : (
           <MarkdownPreview content={resource.content} />

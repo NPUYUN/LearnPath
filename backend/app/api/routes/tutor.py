@@ -54,6 +54,13 @@ async def ask_stream(
     qtype = classify_question_type(req.question)
 
     async def event_generator():
+        def encode(event: str, data: object) -> str:
+            if event in ("token", "done") and isinstance(data, str):
+                return json.dumps(data, ensure_ascii=False)
+            if isinstance(data, str):
+                return data
+            return json.dumps(data, ensure_ascii=False, default=str)
+
         yield {"event": "intent", "data": "chat"}
         if req.deep_thinking:
             yield {
@@ -91,8 +98,9 @@ async def ask_stream(
                 )
                 chunk_size = max(1, min(req.chunk_size, 64))
                 for i in range(0, len(reply), chunk_size):
-                    yield {"event": "token", "data": reply[i : i + chunk_size]}
-                yield {"event": "done", "data": reply}
+                    piece = reply[i : i + chunk_size]
+                    yield {"event": "token", "data": encode("token", piece)}
+                yield {"event": "done", "data": encode("done", reply)}
                 return
 
             async for token in llm.stream_chat(
@@ -101,11 +109,11 @@ async def ask_stream(
                 deep_thinking=req.deep_thinking,
             ):
                 acc += token
-                yield {"event": "token", "data": token}
+                yield {"event": "token", "data": encode("token", token)}
             reply = postprocess_tutor_answer(
                 acc, chunks, topic, question_type=qtype, mode=mode
             )
-            yield {"event": "done", "data": reply}
+            yield {"event": "done", "data": encode("done", reply)}
         except Exception as exc:
             yield {"event": "error", "data": str(exc)}
 

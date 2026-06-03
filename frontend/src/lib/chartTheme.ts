@@ -8,9 +8,14 @@ export function isDarkTheme(): boolean {
 export function getChartPalette(isDark = isDarkTheme()) {
   return {
     text: isDark ? "#94a3b8" : "#64748b",
+    textMuted: isDark ? "#64748b" : "#94a3b8",
+    axis: isDark ? "#334155" : "#e2e8f0",
+    split: isDark ? "#1e293b" : "#f1f5f9",
     axisLine: isDark ? "#334155" : "#e0e0e0",
     splitArea: isDark ? ["#1e293b", "#253347"] : ["#fafafa", "#f0f7ff"],
     primary: isDark ? "#4096ff" : "#1677ff",
+    secondary: isDark ? "#a78bfa" : "#722ed1",
+    accent: isDark ? "#2dd4bf" : "#13c2c2",
     beforeLine: isDark ? "#64748b" : "#aaaaaa",
     legendText: isDark ? "#cbd5e1" : "#475569",
   };

@@ -10,6 +10,30 @@ import httpx
 _TRANSIENT_STATUS = {408, 429, 500, 502, 503, 504}
 
 
+async def yield_text_stream(
+    text: str,
+    *,
+    line_delay: float = 0,
+    atomic_lines: bool = False,
+) -> AsyncIterator[str]:
+    """将完整文本按行（或短段）伪流式输出，避免一次性推送。"""
+    if not text:
+        return
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        chunk = line + ("\n" if i < len(lines) - 1 else "")
+        if atomic_lines or len(chunk) <= 48:
+            yield chunk
+        else:
+            step = 24
+            for j in range(0, len(chunk), step):
+                yield chunk[j : j + step]
+        if line_delay > 0 and chunk.endswith("\n"):
+            await asyncio.sleep(line_delay)
+        else:
+            await asyncio.sleep(0)
+
+
 def _is_transient(exc: BaseException) -> bool:
     if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError)):
         return True
@@ -108,7 +132,8 @@ async def stream_chat_with_retry(
             max_attempts=2,
         )
         if text.strip():
-            yield text
+            async for piece in yield_text_stream(text):
+                yield piece
             return
     except Exception as exc:
         last = exc

@@ -9,9 +9,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.api.deps import ensure_same_user, get_current_user_id
-from app.core.config import ROOT_DIR
-from app.models.schemas import ChatAttachmentMeta
+from app.core.config import ROOT_DIR, get_settings
+from app.models.schemas import AttachmentContextRequest, ChatAttachmentMeta
+from app.services.chat_attachment_text import build_attachment_context_async
 from app.services.file_extract_service import extract_text_from_bytes, supported_extensions
+from app.services.qwen_vision_service import describe_image
 
 router = APIRouter(prefix="/chat", tags=["chat-attachments"])
 
@@ -40,6 +42,7 @@ async def upload_chat_attachments(
     if len(files) > _MAX_FILES:
         raise HTTPException(400, f"最多上传 {_MAX_FILES} 个文件")
 
+    settings = get_settings()
     allowed = {e.lower() for e in supported_extensions()} | _IMAGE_EXT
     out: list[ChatAttachmentMeta] = []
     user_path = _user_dir(user_id)
@@ -69,6 +72,15 @@ async def upload_chat_attachments(
                 extracted = extract_text_from_bytes(name, data)[:8000]
             except Exception:
                 extracted = ""
+        elif kind == "image" and settings.has_qwen_vision:
+            try:
+                extracted = await describe_image(
+                    image_path=dest,
+                    image_ext=ext,
+                    user_question="",
+                )
+            except Exception:
+                extracted = ""
 
         out.append(
             ChatAttachmentMeta(
@@ -85,6 +97,21 @@ async def upload_chat_attachments(
     if not out:
         raise HTTPException(400, "没有可用的文件")
     return out
+
+
+@router.post("/attachments/context")
+async def build_attachments_context(
+    body: AttachmentContextRequest,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ensure_same_user(body.user_id, current_user_id)
+    attachments = [a.model_dump() for a in body.attachments]
+    context = await build_attachment_context_async(
+        attachments,
+        body.user_id,
+        user_question=body.question,
+    )
+    return {"context": context}
 
 
 @router.get("/attachments/{user_id}/{filename}")

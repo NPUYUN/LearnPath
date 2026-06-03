@@ -31,6 +31,7 @@ from app.api.routes import (
     chat_history,
     chat_conversations,
     chat_attachments,
+    admin,
     health,
     libraries,
     path,
@@ -42,6 +43,7 @@ from app.api.routes import (
     eval as eval_route,
     account,
     tts,
+    media,
 )
 from app.core.config import ROOT_DIR, get_settings
 from app.db.session import init_db
@@ -58,6 +60,9 @@ async def lifespan(app: FastAPI):
     from app.services.demo_seed_service import ensure_demo_sample_data
 
     await ensure_demo_sample_data()
+    from app.agents.graph import build_graph
+
+    build_graph.cache_clear()
     yield
 
 
@@ -91,4 +96,6 @@ app.include_router(preferences.router, prefix="/api")
 app.include_router(chat_history.router, prefix="/api")
 app.include_router(chat_conversations.router, prefix="/api")
 app.include_router(chat_attachments.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
+app.include_router(media.router, prefix="/api")

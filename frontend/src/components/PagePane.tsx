@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { PageVisibilityContext } from "@/contexts/PageVisibilityContext";
+import { PageActiveContext, PageVisibilityContext } from "@/contexts/PageVisibilityContext";
 import { PageScope } from "@/contexts/PageScopeContext";
 import type { NavRoute } from "@/hooks/navRoutes";
 
@@ -27,10 +27,12 @@ export default function PagePane({ route, active, preview, warm, children }: Pag
     .join(" ");
 
   return (
-    <PageVisibilityContext.Provider value={shown}>
-      <div className={className} aria-hidden={!active}>
-        <PageScope route={route}>{children}</PageScope>
-      </div>
-    </PageVisibilityContext.Provider>
+    <PageActiveContext.Provider value={active}>
+      <PageVisibilityContext.Provider value={shown}>
+        <div className={className} aria-hidden={!active}>
+          <PageScope route={route}>{children}</PageScope>
+        </div>
+      </PageVisibilityContext.Provider>
+    </PageActiveContext.Provider>
   );
 }

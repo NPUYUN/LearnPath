@@ -1,4 +1,4 @@
-import { getAccount, getChatHistory, getEvalStats } from "@/lib/api";
+import { getAccount, getAdminActivity, getAdminDashboard, getAdminResources, getAdminUsers, getChatHistory, getEvalStats } from "@/lib/api";
 import { prewarmEchartsEngine, preloadEcharts } from "@/lib/useEcharts";
 import type { StandaloneRoute } from "@/hooks/navRoutes";
 import { useAppStore } from "@/store/appStore";
@@ -80,4 +80,15 @@ async function preloadAccountIfNeeded(): Promise<void> {
   } catch {
     /* 个人主页内会重试 */
   }
+}
+
+/** 管理员登录后预热：统计接口 + 图表引擎（页面模块由 AppShell 单独加载） */
+export async function preloadAdminConsole(): Promise<void> {
+  await Promise.all([
+    preloadEcharts().then(() => prewarmEchartsEngine()),
+    getAdminDashboard().catch(() => {}),
+    getAdminUsers().catch(() => {}),
+    getAdminResources().catch(() => {}),
+    getAdminActivity().catch(() => {}),
+  ]);
 }
