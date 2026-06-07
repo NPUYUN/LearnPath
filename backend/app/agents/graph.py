@@ -14,9 +14,7 @@ from app.agents.nodes.eval_agent import eval_node
 
 def _route_after_supervisor(state: AgentState) -> str:
     intent = state.get("intent", "chat")
-    if intent == "tutor":
-        return "chat"
-    allowed = {"profile", "generate", "path", "eval", "chat"}
+    allowed = {"profile", "generate", "path", "tutor", "eval", "chat"}
     return intent if intent in allowed else "chat"
 
 
@@ -41,7 +39,7 @@ def build_graph():
             "generate": "generate",
             "path": "path",
             "chat": "chat",
-            "tutor": "chat",
+            "tutor": "tutor",
             "eval": "eval",
         },
     )

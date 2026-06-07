@@ -61,7 +61,7 @@ async def ask_stream(
                 return data
             return json.dumps(data, ensure_ascii=False, default=str)
 
-        yield {"event": "intent", "data": "chat"}
+        yield {"event": "intent", "data": "tutor"}
         if req.deep_thinking:
             yield {
                 "event": "progress",

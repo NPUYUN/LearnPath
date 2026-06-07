@@ -227,6 +227,8 @@ A3/
 
 ## 后端 API
 
+除 `/api/health`、`/api/auth/*` 外，业务 API 默认需要 `Authorization: Bearer <token>`。前端登录后会自动携带；若用 Swagger/curl 手动测试，可先调用 `POST /api/auth/demo-token` 获取演示令牌。
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/health` | 健康检查 |
@@ -327,5 +329,6 @@ cd frontend && npm run dev
 - 赛题编号：**A3** — 基于大模型的个性化资源生成与学习多智能体系统开发
 - 出题企业：科大讯飞股份有限公司 · 答疑 QQ 群：1072584310
 - 开源组件与讯飞服务使用须遵守 [docs/03-开源参考与协议.md](./docs/03-开源参考与协议.md)
+- 提交作品前请使用 `.env.example` / `frontend/.env.local.example` 作为配置模板，不要打包真实 `.env`、本地 API Key、`storage/` 运行数据或个人上传资料。
 - 参赛作品著作权归参赛团队所有
 

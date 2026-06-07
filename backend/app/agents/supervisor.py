@@ -40,8 +40,10 @@ def classify_intent(message: str) -> str:
     # 仅「更新/同步画像」走专用节点；其余问答（含构建画像、自我介绍）统一走 chat
     if any(k in text for k in PROFILE_KEYWORDS):
         return "profile"
-    # 概念答疑、代码、视频、练习等均走智能对话
-    if any(k in text for k in TUTOR_KEYWORDS + CODE_KEYWORDS + MEDIA_KEYWORDS):
+    if any(k in text for k in TUTOR_KEYWORDS):
+        return "tutor"
+    # 代码、视频、练习等保留在智能对话管线，便于多模态/附件上下文处理
+    if any(k in text for k in CODE_KEYWORDS + MEDIA_KEYWORDS):
         return "chat"
     if any(k in text for k in ["练习", "做题", "计算", "求解"]):
         return "chat"
@@ -56,6 +58,4 @@ async def supervisor_node(state: AgentState) -> dict:
             last_user = m.get("content", "")
             break
     intent = state.get("intent") or classify_intent(last_user)
-    if intent == "tutor":
-        intent = "chat"
     return {"intent": intent}
