@@ -24,11 +24,11 @@ import {
   listLibraries,
   createLibrary,
   uploadLibraryFiles,
-  getSupportedUploadFormats,
   type LearningResource,
   type ResourceLibrary,
 } from "@/lib/api";
 import {
+  EXTENDED_RESOURCE_TYPES,
   GENERATABLE_RESOURCE_TYPES,
   RESOURCE_CONFIG,
   STANDARD_RESOURCE_TYPES,
@@ -42,6 +42,12 @@ import PageHeader from "@/components/PageHeader";
 import ResourceLibraryPanel from "@/components/ResourceLibraryPanel";
 import { ResourceJourneyView } from "@/components/ResourceJourneyView";
 import { useAppStore } from "@/store/appStore";
+import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
+import {
+  buildUploadAccept,
+  formatExtensionsHint,
+  isAllowedUploadFile,
+} from "@/lib/uploadFormats";
 import { useSettingsStore } from "@/store/settingsStore";
 import PlusOutlined from "@ant-design/icons/PlusOutlined";
 import SearchOutlined from "@ant-design/icons/SearchOutlined";
@@ -126,7 +132,7 @@ export default function ResourcesContent() {
   const [newLibraryName, setNewLibraryName] = useState("");
   const [selectedGenTypes, setSelectedGenTypes] = useState<string[]>([]);
   const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
-  const [uploadExtensions, setUploadExtensions] = useState<string[]>([]);
+  const uploadExtensions = useSupportedUploadFormats(genModalOpen);
   const [preparingLibrary, setPreparingLibrary] = useState(false);
 
   const load = async (background = false) => {
@@ -240,13 +246,6 @@ export default function ResourcesContent() {
       .then(setLibraries)
       .catch(() => {});
   }, [userId, pageTab, genModalOpen]);
-
-  useEffect(() => {
-    if (!genModalOpen) return;
-    void getSupportedUploadFormats()
-      .then((r) => setUploadExtensions(r.extensions))
-      .catch(() => {});
-  }, [genModalOpen]);
 
   const toggleGenType = (apiType: string) => {
     setSelectedGenTypes((prev) =>
@@ -476,12 +475,28 @@ export default function ResourcesContent() {
                   multiple
                   fileList={pendingFiles}
                   beforeUpload={() => false}
-                  onChange={({ fileList }) => setPendingFiles(fileList)}
-                  accept={
-                    uploadExtensions.length
-                      ? uploadExtensions.map((e) => `.${e}`).join(",")
-                      : undefined
-                  }
+                  onChange={({ fileList }) => {
+                    const rejected = fileList.filter(
+                      (f) =>
+                        f.name &&
+                        uploadExtensions.length > 0 &&
+                        !isAllowedUploadFile(f.name, uploadExtensions)
+                    );
+                    if (rejected.length) {
+                      message.warning(
+                        `不支持 ${rejected.map((f) => f.name).join("、")}，请选择 PDF、PPT、Word 等格式`
+                      );
+                    }
+                    setPendingFiles(
+                      fileList.filter(
+                        (f) =>
+                          !f.name ||
+                          !uploadExtensions.length ||
+                          isAllowedUploadFile(f.name, uploadExtensions)
+                      )
+                    );
+                  }}
+                  accept={buildUploadAccept(uploadExtensions)}
                   className="lp-resource-gen-upload"
                 >
                   <Button icon={<CloudUploadOutlined />} disabled={generating || preparingLibrary}>
@@ -491,9 +506,7 @@ export default function ResourcesContent() {
                 <Text type="secondary" className="lp-resource-gen-upload-hint">
                   {pendingFiles.length > 0
                     ? `已选择 ${pendingFiles.length} 个文件，生成前将自动创建资料库并入库分析`
-                    : uploadExtensions.length > 0
-                      ? `支持 ${uploadExtensions.slice(0, 10).join("、")}${uploadExtensions.length > 10 ? " 等" : ""}；也可不上传，生成时再补充`
-                      : "支持 PDF、Word、Markdown、代码等常见格式；也可不上传"}
+                    : `支持 ${formatExtensionsHint(uploadExtensions)}；也可不上传，生成时再补充`}
                 </Text>
               </div>
             </>
@@ -508,6 +521,13 @@ export default function ResourcesContent() {
                   onClick={() => setSelectedGenTypes([...STANDARD_RESOURCE_TYPES])}
                 >
                   标准套件
+                </button>
+                <button
+                  type="button"
+                  className="lp-resource-gen-preset"
+                  onClick={() => setSelectedGenTypes([...EXTENDED_RESOURCE_TYPES])}
+                >
+                  全选
                 </button>
                 <button
                   type="button"

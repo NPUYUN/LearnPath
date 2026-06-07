@@ -26,12 +26,17 @@ import type { UploadFile } from "antd/es/upload/interface";
 import {
   createLibrary,
   deleteLibrary,
-  getSupportedUploadFormats,
   listLibraries,
   uploadLibraryFiles,
   type ResourceLibrary,
 } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
+import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
+import {
+  buildUploadAccept,
+  formatExtensionsHint,
+  isAllowedUploadFile,
+} from "@/lib/uploadFormats";
 
 const { Text, Paragraph } = Typography;
 
@@ -59,7 +64,7 @@ export default function ResourceLibraryPanel({
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
-  const [extensions, setExtensions] = useState<string[]>([]);
+  const extensions = useSupportedUploadFormats(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,9 +80,6 @@ export default function ResourceLibraryPanel({
 
   useEffect(() => {
     void load();
-    void getSupportedUploadFormats()
-      .then((r) => setExtensions(r.extensions))
-      .catch(() => {});
   }, [load]);
 
   const openLibrary = (lib: ResourceLibrary) => {
@@ -107,7 +109,16 @@ export default function ResourceLibraryPanel({
   };
 
   const handleUpload = async (libraryId: string, fileList: UploadFile[]) => {
-    const files = fileList.map((f) => f.originFileObj).filter(Boolean) as File[];
+    const files: File[] = [];
+    for (const item of fileList) {
+      const file = item.originFileObj;
+      if (!file) continue;
+      if (extensions.length && !isAllowedUploadFile(file.name, extensions)) {
+        message.warning(`不支持 ${file.name}，请选择 PDF、PPT、Word 等格式`);
+        continue;
+      }
+      files.push(file);
+    }
     if (!files.length) return;
     setUploading(true);
     const msgKey = "lib-upload";
@@ -161,12 +172,11 @@ export default function ResourceLibraryPanel({
             课程资料库
           </Text>
           <Paragraph type="secondary" className="lp-library-panel-desc">
-            点击资料库卡片进入详情页，按 Markdown、Word、PDF 等类型浏览全部文件；上传后可作为 RAG 生成依据。
+            点击资料库卡片进入详情页，按 PDF、PPT、Word、Markdown 等类型浏览全部文件；上传后可作为 RAG 生成依据。
           </Paragraph>
           {extensions.length > 0 && (
             <Text type="secondary" style={{ fontSize: 12 }}>
-              支持：{extensions.slice(0, 12).join(" ")}
-              {extensions.length > 12 ? " …" : ""}
+              支持：{formatExtensionsHint(extensions, 12)}
             </Text>
           )}
         </div>
@@ -224,6 +234,7 @@ export default function ResourceLibraryPanel({
                       multiple
                       showUploadList={false}
                       beforeUpload={() => false}
+                      accept={buildUploadAccept(extensions)}
                       onChange={(info) => {
                         if (info.fileList.length && !uploading) {
                           void handleUpload(lib.id, info.fileList);

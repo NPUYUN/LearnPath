@@ -79,14 +79,22 @@ function topicMatchesStep(topic: string, step: PathStep): boolean {
 }
 
 function buildStageGroup(step: PathStep, resources: LearningResource[]): ResourceStageGroup {
-  const idSet = new Set(step.resource_ids.filter(Boolean));
+  const idSet = new Set(
+    [
+      ...(step.resource_ids ?? []),
+      ...(step.substeps ?? []).flatMap((s) => [
+        ...(s.resource_ids ?? []),
+        ...(s.substeps ?? []).flatMap((x) => x.resource_ids ?? []),
+      ]),
+    ].filter(Boolean)
+  );
   const matched = resources.filter(
     (r) => idSet.has(r.id) || topicMatchesStep(r.topic, step)
   );
   const unique = Array.from(new Map(matched.map((r) => [r.id, r])).values());
 
   return {
-    id: `step-${step.order}`,
+    id: `step-${step.id ?? step.order}`,
     order: step.order,
     title: step.title,
     objective: step.objective,

@@ -1,13 +1,22 @@
 "use client";
 
-import { Card, Col, Row, Select, Switch, Typography, Button, Divider, message, Segmented } from "antd";
+import { Card, Col, Row, Select, Switch, Typography, Button, Divider, message, Segmented, Modal, Space } from "antd";
 import SettingOutlined from "@ant-design/icons/SettingOutlined";
 import SoundOutlined from "@ant-design/icons/SoundOutlined";
 import BgColorsOutlined from "@ant-design/icons/BgColorsOutlined";
 import ThunderboltOutlined from "@ant-design/icons/ThunderboltOutlined";
 import BulbOutlined from "@ant-design/icons/BulbOutlined";
+import DeleteOutlined from "@ant-design/icons/DeleteOutlined";
+import ReloadOutlined from "@ant-design/icons/ReloadOutlined";
 import PageHeader from "@/components/PageHeader";
 import { STREAM_SPEED_OPTIONS } from "@/lib/streamSpeed";
+import { clearDemoUserDataSelf, resetDemoUserDataSelf } from "@/lib/api";
+import {
+  applyDemoClearToStore,
+  notifyDemoDataChanged,
+  reloadDemoDataToStore,
+} from "@/lib/demoDataSync";
+import { isDemoUser, useAppStore } from "@/store/appStore";
 import {
   useSettingsStore,
   type FontSizePreset,
@@ -19,6 +28,8 @@ import {
 const { Text, Paragraph } = Typography;
 
 export default function SettingsContent() {
+  const userId = useAppStore((s) => s.userId);
+  const demoMode = isDemoUser(userId);
   const theme = useSettingsStore((s) => s.theme);
   const voice = useSettingsStore((s) => s.voice);
   const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
@@ -32,6 +43,47 @@ export default function SettingsContent() {
   const handleReset = () => {
     resetSettings();
     message.success("已恢复默认设置");
+  };
+
+  const handleDemoClear = () => {
+    Modal.confirm({
+      title: "清空全部演示数据？",
+      content:
+        "将删除学习画像、资源、路径、对话、资料库与测验记录等全部数据，不会自动填入示例内容。界面设置将恢复默认。",
+      okText: "清空",
+      okType: "danger",
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          await clearDemoUserDataSelf();
+          applyDemoClearToStore();
+          notifyDemoDataChanged("clear");
+          message.success("已清空全部数据，设置已恢复默认");
+        } catch (e: unknown) {
+          message.error(e instanceof Error ? e.message : "清空失败");
+        }
+      },
+    });
+  };
+
+  const handleDemoReset = () => {
+    Modal.confirm({
+      title: "重置为默认演示数据？",
+      content:
+        "将用系统预设的示例画像、资源、路径与对话覆盖当前全部数据，并恢复默认界面设置。",
+      okText: "重置",
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          await resetDemoUserDataSelf();
+          await reloadDemoDataToStore(userId);
+          notifyDemoDataChanged("reset");
+          message.success("已恢复默认演示数据与设置");
+        } catch (e: unknown) {
+          message.error(e instanceof Error ? e.message : "重置失败");
+        }
+      },
+    });
   };
 
   return (
@@ -165,6 +217,31 @@ export default function SettingsContent() {
               </Text>
             </Card>
           </Col>
+
+          {demoMode && (
+            <Col xs={24}>
+              <Card
+                title={
+                  <span>
+                    <DeleteOutlined style={{ marginRight: 8 }} />
+                    演示数据管理
+                  </span>
+                }
+              >
+                <Paragraph type="secondary" style={{ marginBottom: 16 }}>
+                  便于答辩与测试：「清空」后从零体验完整流程；「重置」一键恢复预设示例内容。两项操作均会将下方界面设置恢复为默认。
+                </Paragraph>
+                <Space wrap>
+                  <Button danger icon={<DeleteOutlined />} onClick={handleDemoClear}>
+                    清空全部数据
+                  </Button>
+                  <Button type="primary" icon={<ReloadOutlined />} onClick={handleDemoReset}>
+                    重置为默认数据
+                  </Button>
+                </Space>
+              </Card>
+            </Col>
+          )}
         </Row>
       </div>
     </div>

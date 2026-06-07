@@ -115,13 +115,9 @@ async def delete_resource(user_id: str, resource_id: str) -> bool:
 
     path = await get_path(user_id)
     if path:
-        changed = False
-        for step in path.get("steps") or []:
-            ids = step.get("resource_ids") or []
-            if resource_id in ids:
-                step["resource_ids"] = [rid for rid in ids if rid != resource_id]
-                changed = True
-        if changed:
+        from app.services.path_utils import remove_resource_from_steps
+
+        if remove_resource_from_steps(path.get("steps") or [], resource_id):
             await save_path(path)
 
     prefs = await get_preferences(user_id)

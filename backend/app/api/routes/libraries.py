@@ -24,7 +24,11 @@ router = APIRouter(prefix="/libraries", tags=["libraries"])
 
 @router.get("/supported-formats")
 async def supported_formats():
-    return {"extensions": supported_extensions()}
+    exts = supported_extensions()
+    return {
+        "extensions": exts,
+        "hint": "支持 PDF、PPT/PPTX、Word、Excel、Markdown 及常见代码/文本格式",
+    }
 
 
 @router.get("", response_model=list[ResourceLibrarySummary])

@@ -33,6 +33,12 @@ import {
   type LibraryFileItem,
 } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
+import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
+import {
+  buildUploadAccept,
+  formatExtensionsHint,
+  isAllowedUploadFile,
+} from "@/lib/uploadFormats";
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -119,6 +125,7 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [activeCategory, setActiveCategory] = useState<FileCategoryKey>("all");
+  const uploadExtensions = useSupportedUploadFormats(true);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -175,7 +182,16 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
   };
 
   const handleUpload = async (fileList: UploadFile[]) => {
-    const files = fileList.map((f) => f.originFileObj).filter(Boolean) as File[];
+    const files: File[] = [];
+    for (const item of fileList) {
+      const file = item.originFileObj;
+      if (!file) continue;
+      if (uploadExtensions.length && !isAllowedUploadFile(file.name, uploadExtensions)) {
+        message.warning(`不支持 ${file.name}，请选择 PDF、PPT、Word 等格式`);
+        continue;
+      }
+      files.push(file);
+    }
     if (!files.length) return;
     setUploading(true);
     const msgKey = "lib-detail-upload";
@@ -299,6 +315,7 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
               multiple
               showUploadList={false}
               beforeUpload={() => false}
+              accept={buildUploadAccept(uploadExtensions)}
               onChange={(info) => {
                 if (info.fileList.length && !uploading) {
                   void handleUpload(info.fileList);
@@ -348,7 +365,7 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
             description={
               activeCategory === "all"
                 ? detail.source_type === "upload"
-                  ? "暂无文件，请上传 PDF、Word、Markdown 等课件"
+                  ? `暂无文件，请上传 ${formatExtensionsHint(uploadExtensions)}`
                   : "该类型下暂无文件"
                 : `暂无 ${activeCatLabel} 文件，可切换其他类型或上传资料`
             }

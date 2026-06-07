@@ -189,13 +189,14 @@ def _purge_user_data(db, user_id: str) -> None:
         UserPreferencesRecord,
     )
 
-    library_ids = [
-        r.id for r in db.query(ResourceLibraryRecord).filter(ResourceLibraryRecord.user_id == user_id).all()
-    ]
+    libraries = db.query(ResourceLibraryRecord).filter(ResourceLibraryRecord.user_id == user_id).all()
+    library_ids = [r.id for r in libraries]
     if library_ids:
         db.query(LibraryFileRecord).filter(LibraryFileRecord.library_id.in_(library_ids)).delete(
             synchronize_session=False
         )
+    for lib in libraries:
+        _delete_chroma_collection(lib.collection_name or f"lib_{lib.id}")
     db.query(ResourceLibraryRecord).filter(ResourceLibraryRecord.user_id == user_id).delete(
         synchronize_session=False
     )
@@ -213,6 +214,29 @@ def _purge_user_data(db, user_id: str) -> None:
     db.query(UserPreferencesRecord).filter(UserPreferencesRecord.user_id == user_id).delete(
         synchronize_session=False
     )
+    _purge_chat_uploads(user_id)
+
+
+def _delete_chroma_collection(collection_name: str) -> None:
+    if not collection_name:
+        return
+    try:
+        from app.rag.library_retriever import _get_client
+
+        _get_client().delete_collection(collection_name)
+    except Exception:
+        pass
+
+
+def _purge_chat_uploads(user_id: str) -> None:
+    import shutil
+
+    from app.core.config import ROOT_DIR
+
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in user_id)[:64]
+    path = ROOT_DIR / "storage" / "chat_uploads" / safe
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def purge_demo_user_data() -> None:

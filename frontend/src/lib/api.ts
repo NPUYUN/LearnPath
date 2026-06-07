@@ -46,12 +46,14 @@ export type LearningResource = {
 };
 
 export type PathStep = {
+  id?: string;
   order: number;
   title: string;
   objective: string;
   resource_ids: string[];
   estimated_minutes: number;
   status: string;
+  substeps?: PathStep[];
 };
 
 export type LearningPath = {
@@ -576,11 +578,11 @@ export async function streamGenerateResources(
 
 export async function updatePathStep(
   userId: string,
-  order: number,
+  stepKey: string,
   status: "pending" | "in_progress" | "done"
 ) {
   const res = await handleResponse(
-    await fetch(apiUrl(`/api/path/${userId}/steps/${order}`), {
+    await fetch(apiUrl(`/api/path/${userId}/steps/${encodeURIComponent(stepKey)}`), {
       method: "PATCH",
       headers: authHeaders(),
       body: JSON.stringify({ status }),
@@ -970,6 +972,28 @@ export async function deleteAdminUser(userId: string) {
 export async function resetDemoUserData() {
   const res = await handleResponse(
     await fetch(apiUrl("/api/admin/users/demo/reset"), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ reset: boolean; user_id: string }>;
+}
+
+export async function clearDemoUserDataSelf() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/demo/clear"), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ cleared: boolean; user_id: string }>;
+}
+
+export async function resetDemoUserDataSelf() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/demo/reset"), {
       method: "POST",
       headers: authHeaders(),
     })

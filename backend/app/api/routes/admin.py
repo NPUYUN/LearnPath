@@ -11,9 +11,8 @@ from app.db.admin_repository import (
     list_all_resources,
     list_platform_users,
     list_recent_events,
-    purge_demo_user_data,
 )
-from app.services.demo_seed_service import ensure_demo_sample_data
+from app.services.demo_seed_service import clear_demo_user_data, reset_demo_user_data
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -46,8 +45,7 @@ async def admin_delete_user(user_id: str, _admin: str = Depends(get_current_admi
 
 @router.post("/users/demo/reset")
 async def admin_reset_demo(_admin: str = Depends(get_current_admin)):
-    purge_demo_user_data()
-    await ensure_demo_sample_data(force=True)
+    await reset_demo_user_data()
     return {"reset": True, "user_id": "demo"}
 
 

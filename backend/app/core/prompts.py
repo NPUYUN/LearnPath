@@ -150,77 +150,50 @@ _TUTOR_BASE = (
 
 
 PATH_PLANNING_SYSTEM = (
-
     "你是「学径 LearnPath」学习路径规划 Agent。\n"
-
-    "根据 user_request（用户当前诉求）、topic、学生画像、薄弱点与已有资源列表，规划 3 个递进学习阶段。\n"
-
+    "根据 user_request、topic、学生画像、薄弱点与已有资源，**自行决定**主阶段数量与结构，"
+    "可按教材章节、知识模块、学习规律（先概念后练习、先易后难、螺旋上升等）划分，"
+    "不要机械固定为 3 个阶段。\n"
+    "【层级】每个主阶段可包含 substeps（子路径）；子路径内还可继续嵌套 substeps（最多 4 层）。"
+    "复杂章节建议拆成 2–5 个子步骤；简单阶段可 substeps 为空数组。\n"
+    "【数量建议】主阶段通常 2–8 个；资源/章节多时可 9–12 个；简单诉求可 1–2 个。"
+    "全路径节点（含子路径）建议不超过 40 个。\n"
     "【输出格式】仅输出 JSON 数组，每项含：\n"
-
-    '  "order": 1-3 的整数\n'
-
-    '  "title": 阶段标题（中文，12字以内，必须贴合 user_request/topic）\n'
-
+    '  "order": 同级从 1 开始连续递增\n'
+    '  "title": 阶段/章节标题（中文，16字以内，贴合 user_request/topic）\n'
     '  "objective": 阶段目标（1-2句，可执行）\n'
-
-    '  "resource_ids": 从给定资源 id 中选取的字符串数组\n'
-
-    '  "estimated_minutes": 预估分钟数\n'
-
-    "规则：第 1 阶段偏基础，第 2 阶段针对薄弱点，第 3 阶段巩固与评估；"
-
-    "resource_ids 只能使用输入中存在的 id，每阶段至少 1 个（若有资源）；"
-
-    "即使用户资源库主题与 user_request 不完全一致，阶段标题/objective 仍须围绕 user_request 展开，"
-
-    "resource_ids 选取语义最接近的资源。"
-
+    '  "resource_ids": 从给定资源 id 中选取的字符串数组（可只分配给叶子子步骤）\n'
+    '  "estimated_minutes": 预估分钟数（含子步骤时可为该阶段合计）\n'
+    '  "substeps": 子路径数组，结构与主阶段相同（无子路径则 []）\n'
+    "规则：整体须递进；resource_ids 只能使用输入中存在的 id；"
+    "各 resource_id 尽量只分配到一个节点；标题/objective 须围绕 user_request，"
+    "勿套用与诉求无关的默认课程模板。"
 )
-
-
 
 PATH_PLANNING_TOPIC_SYSTEM = (
-
     "你是「学径 LearnPath」学习路径规划 Agent。\n"
-
-    "用户尚未在资源库准备配套资料，请根据用户诉求、学科/考试主题与学生画像，"
-
-    "规划 3 个递进学习或复习阶段（如备考冲刺、周计划、模块突破等）。\n"
-
+    "用户尚未准备配套资料，请根据诉求、学科/考试主题与画像，"
+    "按章节、模块或备考节奏**自行决定**主阶段数量（通常 2–8，复杂备考可达 12），"
+    "并为需要细化的阶段设计 substeps 子路径（可多层嵌套，最多 4 层）。\n"
     "【输出格式】仅输出 JSON 数组，每项含：\n"
-
-    '  "order": 1-3 的整数\n'
-
-    '  "title": 阶段标题（中文，12字以内，必须贴合用户主题）\n'
-
-    '  "objective": 阶段目标与具体任务（1-2句，可执行）\n'
-
-    '  "resource_ids": [] （固定为空数组）\n'
-
+    '  "order": 同级从 1 开始\n'
+    '  "title": 章节/模块标题（16字以内）\n'
+    '  "objective": 可执行任务（1-2句）\n'
+    '  "resource_ids": [] （固定为空）\n'
     '  "estimated_minutes": 预估分钟数\n'
-
-    "禁止编造资源 id；禁止输出与主题无关的默认课程名（如泛泛的机器学习导论）。"
-
+    '  "substeps": 子路径数组（结构相同，无则 []）\n'
+    "禁止编造资源 id；禁止输出与主题无关的默认课程名。"
 )
 
-
-
 PATH_NARRATIVE_SYSTEM = (
-
-    "你是学径 LearnPath 学习助手。根据已生成的学习路径阶段，用 Markdown 向用户说明计划。\n"
-
+    "你是学径 LearnPath 学习助手。根据已生成的分层学习路径，用 Markdown 向用户说明计划。\n"
     "要求：\n"
-
     "1. 开头明确针对的主题/考试/场景\n"
-
-    "2. 用 ### 阶段标题 或有序列表展开每步：目标、建议复习内容、时间建议\n"
-
-    "3. 结合画像中的基础与薄弱点（若有）给出差异化建议\n"
-
-    "4. 若无资源库资料，简短提示可在「资源库」生成配套文档/题库后再关联\n"
-
-    "5. 300-600 字，专业鼓励，禁止输出 JSON 或代码块"
-
+    "2. 用 ### 主阶段标题 展开；若有 substeps，用缩进列表或 #### 子步骤说明\n"
+    "3. 结合画像中的基础与薄弱点给出差异化建议\n"
+    "4. 若无资源库资料，提示可在「资源库」生成配套内容后再关联\n"
+    "5. 说明阶段数量是依据章节/学习规律动态划分的，而非固定模板\n"
+    "6. 300–600 字，专业鼓励，禁止输出 JSON 或代码块"
 )
 
 
@@ -839,69 +812,30 @@ def path_planning_topic_user_payload(
 
 
 def path_narrative_user_payload(
-
     *,
-
     user_request: str,
-
     topic: str,
-
     steps: list[dict],
-
     profile: dict,
-
     has_resources: bool,
-
 ) -> str:
-
     import json
 
-
-
-    slim_steps = [
-
-        {
-
-            "order": s.get("order"),
-
-            "title": s.get("title"),
-
-            "objective": s.get("objective"),
-
-            "estimated_minutes": s.get("estimated_minutes"),
-
-        }
-
-        for s in steps
-
-    ]
+    from app.services.path_utils import slim_steps_for_prompt
 
     return json.dumps(
-
         {
-
             "user_request": user_request,
-
             "topic": topic,
-
             "has_resources": has_resources,
-
             "profile_summary": {
-
                 "knowledge_level": profile.get("knowledge_level"),
-
                 "learning_goal": profile.get("learning_goal"),
-
                 "error_prone_topics": profile.get("error_prone_topics") or [],
-
             },
-
-            "steps": slim_steps,
-
+            "steps": slim_steps_for_prompt(steps),
         },
-
         ensure_ascii=False,
-
     )
 
 

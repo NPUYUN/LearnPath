@@ -73,8 +73,16 @@ export const NAV_META: Record<AppRoute, NavMeta> = {
   },
 };
 
-export function pathProgress(steps: { status: string }[] | undefined): number {
+export function pathProgress(steps: { status: string; substeps?: { status: string; substeps?: unknown[] }[] }[] | undefined): number {
   if (!steps?.length) return 0;
-  const done = steps.filter((s) => s.status === "done" || s.status === "completed").length;
-  return Math.round((done / steps.length) * 100);
+  const flat: { status: string }[] = [];
+  const walk = (nodes: typeof steps) => {
+    for (const node of nodes) {
+      flat.push(node);
+      if (node.substeps?.length) walk(node.substeps as typeof steps);
+    }
+  };
+  walk(steps);
+  const done = flat.filter((s) => s.status === "done" || s.status === "completed").length;
+  return Math.round((done / flat.length) * 100);
 }

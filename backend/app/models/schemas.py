@@ -56,12 +56,17 @@ class ProfileRefreshResponse(BaseModel):
 
 
 class PathStep(BaseModel):
+    id: str = ""
     order: int
     title: str
     objective: str
     resource_ids: list[str] = Field(default_factory=list)
     estimated_minutes: int = 30
     status: Literal["pending", "in_progress", "done"] = "pending"
+    substeps: list["PathStep"] = Field(default_factory=list)
+
+
+PathStep.model_rebuild()
 
 
 class LearningPath(BaseModel):

@@ -32,6 +32,7 @@ from app.api.routes import (
     chat_conversations,
     chat_attachments,
     admin,
+    demo,
     health,
     libraries,
     path,
@@ -97,5 +98,6 @@ app.include_router(chat_history.router, prefix="/api")
 app.include_router(chat_conversations.router, prefix="/api")
 app.include_router(chat_attachments.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(demo.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(media.router, prefix="/api")

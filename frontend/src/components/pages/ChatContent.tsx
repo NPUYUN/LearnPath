@@ -48,12 +48,18 @@ import { apiUrl } from "@/lib/apiBase";
 import {
   groupConversationsByDate,
 } from "@/lib/chatHistoryUtils";
+import { DEMO_DATA_CHANGED_EVENT } from "@/lib/demoDataSync";
 import { copyTextToClipboard, isFailedAssistantReply } from "@/lib/chatMessageUtils";
 import { RESOURCE_CONFIG, mapApiType } from "@/lib/resourceConfig";
 import { playAssistantSpeech } from "@/lib/tts";
 import { getStreamSpeedConfig } from "@/lib/streamSpeed";
 import { isDemoUser, useAppStore } from "@/store/appStore";
 import { useSettingsStore } from "@/store/settingsStore";
+import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
+import {
+  buildUploadAccept,
+  isAllowedUploadFile,
+} from "@/lib/uploadFormats";
 
 interface Message {
   id: string;
@@ -328,6 +334,7 @@ export default function ChatContent() {
   const [input, setInput] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const uploadExtensions = useSupportedUploadFormats(true);
   const [loading, setLoading] = useState(false);
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const [llmRouting, setLlmRouting] = useState("");
@@ -553,6 +560,28 @@ export default function ChatContent() {
     };
   }, [userId, reloadConversations, loadConversationMessages, ensureScrollOnOpen]);
 
+  useEffect(() => {
+    const onDemoData = (e: Event) => {
+      const action = (e as CustomEvent<{ action: "clear" | "reset" }>).detail?.action;
+      setPendingAttachments([]);
+      setActiveConversationId(null);
+      setActiveUserMessageId(null);
+      setConversations([]);
+      setHistoryRows([]);
+      setMessages([WELCOME_MSG]);
+      if (action === "reset") {
+        void reloadConversations().then((list) => {
+          if (!list.length) return;
+          const first = list[0].id;
+          setActiveConversationId(first);
+          void loadConversationMessages(first);
+        });
+      }
+    };
+    window.addEventListener(DEMO_DATA_CHANGED_EVENT, onDemoData);
+    return () => window.removeEventListener(DEMO_DATA_CHANGED_EVENT, onDemoData);
+  }, [reloadConversations, loadConversationMessages]);
+
   /** 切回智能对话 Tab 或消息列表更新后，贴底展示最新内容 */
   useLayoutEffect(() => {
     if (!pageActive || !stickToBottomRef.current) return;
@@ -688,6 +717,13 @@ export default function ChatContent() {
   }, [userId, activeConversationId, reloadConversations]);
 
   const handleUpload = async (file: File) => {
+    if (
+      uploadExtensions.length &&
+      !isAllowedUploadFile(file.name, uploadExtensions, { includeImages: true })
+    ) {
+      message.warning(`不支持 ${file.name}，请上传 PDF、PPT、Word、图片等格式`);
+      return false;
+    }
     setUploading(true);
     try {
       const list = await uploadChatAttachments(userId, [file]);
@@ -1271,7 +1307,7 @@ export default function ChatContent() {
                 multiple
                 showUploadList={false}
                 beforeUpload={handleUpload}
-                accept="image/*,.pdf,.doc,.docx,.md,.txt,.ppt,.pptx"
+                accept={buildUploadAccept(uploadExtensions, { includeImages: true })}
               >
                 <Button
                   type="text"

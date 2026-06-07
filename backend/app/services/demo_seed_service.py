@@ -15,7 +15,9 @@ from app.db.repository import (
     save_quiz_attempt,
     save_resources,
 )
+from app.services.demo_state_service import get_demo_state, set_demo_state
 from app.services.media_visual_service import enrich_media_content
+from app.services.path_utils import finalize_path_steps
 
 
 def _ts(days_ago: int = 0) -> str:
@@ -150,35 +152,86 @@ def _demo_resources() -> list[dict]:
 
 def _demo_path(resource_ids: list[str]) -> dict:
     ids = resource_ids
+    steps = [
+        {
+            "order": 1,
+            "title": "导论与数学基础",
+            "objective": "理解 ML 问题定义与线性模型基础",
+            "resource_ids": [ids[6]] if len(ids) > 6 else ids[:1],
+            "estimated_minutes": 45,
+            "status": "done",
+            "substeps": [
+                {
+                    "order": 1,
+                    "title": "机器学习导论开篇",
+                    "objective": "建立学科整体框架",
+                    "resource_ids": [ids[6]] if len(ids) > 6 else [],
+                    "estimated_minutes": 20,
+                    "status": "done",
+                    "substeps": [],
+                },
+                {
+                    "order": 2,
+                    "title": "线性回归讲解",
+                    "objective": "掌握假设函数与损失函数",
+                    "resource_ids": [ids[0]] if ids else [],
+                    "estimated_minutes": 25,
+                    "status": "done",
+                    "substeps": [],
+                },
+            ],
+        },
+        {
+            "order": 2,
+            "title": "薄弱点强化：线性回归、梯度下降",
+            "objective": "针对薄弱点完成文档、导图与测验",
+            "resource_ids": [],
+            "estimated_minutes": 60,
+            "status": "in_progress",
+            "substeps": [
+                {
+                    "order": 1,
+                    "title": "思维导图梳理",
+                    "objective": "建立线性回归知识网络",
+                    "resource_ids": [ids[1]] if len(ids) > 1 else [],
+                    "estimated_minutes": 15,
+                    "status": "in_progress",
+                    "substeps": [],
+                },
+                {
+                    "order": 2,
+                    "title": "梯度下降多模态讲解",
+                    "objective": "理解优化过程与学习率",
+                    "resource_ids": [ids[5]] if len(ids) > 5 else [],
+                    "estimated_minutes": 20,
+                    "status": "pending",
+                    "substeps": [],
+                },
+                {
+                    "order": 3,
+                    "title": "线性回归测验",
+                    "objective": "完成 5 题自测并复盘",
+                    "resource_ids": [ids[2]] if len(ids) > 2 else [],
+                    "estimated_minutes": 25,
+                    "status": "pending",
+                    "substeps": [],
+                },
+            ],
+        },
+        {
+            "order": 3,
+            "title": "拓展实践与巩固",
+            "objective": "阅读拓展材料并完成代码实践",
+            "resource_ids": ids[3:5] if len(ids) > 3 else [],
+            "estimated_minutes": 40,
+            "status": "pending",
+            "substeps": [],
+        },
+    ]
     return {
         "user_id": DEMO_USER_ID,
         "version": 2,
-        "steps": [
-            {
-                "order": 1,
-                "title": "导论与数学基础",
-                "objective": "理解 ML 问题定义与线性模型基础",
-                "resource_ids": [ids[6], ids[0]] if len(ids) > 6 else ids[:2],
-                "estimated_minutes": 45,
-                "status": "done",
-            },
-            {
-                "order": 2,
-                "title": "薄弱点强化：线性回归、梯度下降",
-                "objective": "针对薄弱点完成文档、导图与测验",
-                "resource_ids": ids[:5],
-                "estimated_minutes": 60,
-                "status": "in_progress",
-            },
-            {
-                "order": 3,
-                "title": "模型评估与巩固",
-                "objective": "复盘测验并完成拓展阅读与代码实践",
-                "resource_ids": ids[3:6],
-                "estimated_minutes": 40,
-                "status": "pending",
-            },
-        ],
+        "steps": finalize_path_steps(steps),
     }
 
 
@@ -218,8 +271,12 @@ async def _seed_demo_chat() -> None:
 async def ensure_demo_sample_data(*, force: bool = False) -> bool:
     """
     为演示账号写入示例数据（幂等）。
+    用户执行「清空」后不会自动回填，除非 force=True（重置）。
     返回 True 表示本次执行了写入。
     """
+    if not force and get_demo_state() == "cleared":
+        return False
+
     existing_profile = await get_profile(DEMO_USER_ID)
     existing_resources = await list_resources(DEMO_USER_ID)
     if not force and existing_profile and len(existing_resources) >= 5:
@@ -234,4 +291,21 @@ async def ensure_demo_sample_data(*, force: bool = False) -> bool:
     await save_path(path)
     await _seed_demo_events(resources)
     await _seed_demo_chat()
+    set_demo_state("sample")
     return True
+
+
+async def clear_demo_user_data() -> None:
+    """清空演示账号全部学习数据，不写入示例内容。"""
+    from app.db.admin_repository import purge_demo_user_data
+
+    purge_demo_user_data()
+    set_demo_state("cleared")
+
+
+async def reset_demo_user_data() -> None:
+    """用默认示例数据覆盖演示账号当前全部数据。"""
+    from app.db.admin_repository import purge_demo_user_data
+
+    purge_demo_user_data()
+    await ensure_demo_sample_data(force=True)
