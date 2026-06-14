@@ -6,6 +6,7 @@ class AgentState(TypedDict, total=False):
     messages: list[dict[str, str]]
     intent: str
     profile: dict[str, Any]
+    learner_analysis: dict[str, Any]
     resources: list[dict[str, Any]]
     new_resources: list[dict[str, Any]]
     path: dict[str, Any]
@@ -14,5 +15,8 @@ class AgentState(TypedDict, total=False):
     resource_types: list[str]
     reply: str
     deep_thinking: bool
+    fresh_path: bool
+    quality_replan: bool
+    skip_narrative: bool
     library_id: str
     generation_context: dict[str, Any]

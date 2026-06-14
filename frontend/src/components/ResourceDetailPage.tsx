@@ -28,6 +28,8 @@ import {
 import { RESOURCE_CONFIG, mapApiType } from "@/lib/resourceConfig";
 import { generationSourceMeta } from "@/lib/resourceSource";
 import { useAppStore } from "@/store/appStore";
+import MathText from "@/components/MathText";
+import { downloadResourceMarkdown } from "@/lib/downloadResource";
 
 const MarkdownPreview = dynamic(() => import("@/components/MarkdownPreview"), {
   loading: () => <Spin />,
@@ -40,17 +42,6 @@ const MediaResourceView = dynamic(() => import("@/components/MediaResourceView")
 });
 
 const { Text, Title, Paragraph } = Typography;
-
-function downloadMarkdown(r: LearningResource) {
-  const body = `# ${r.title}\n\n> 主题：${r.topic || "—"}\n\n${r.content}`;
-  const blob = new Blob([body], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${r.title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 type ResourceDetailPageProps = {
   resourceId: string;
@@ -67,19 +58,33 @@ export default function ResourceDetailPage({ resourceId }: ResourceDetailPagePro
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const cached = useAppStore
+      .getState()
+      .resources.find((r) => r.id === resourceId);
+    if (cached?.content?.trim()) {
+      setResource(cached);
+      setLoading(false);
+      void recordResourceView(userId, resourceId).catch(() => {});
+    } else {
+      setLoading(true);
+    }
+
     try {
       const data = await getResource(userId, resourceId);
       if (!data) {
-        message.error("资源不存在");
-        router.push("/resources");
+        if (!cached) {
+          message.error("资源不存在");
+          router.push("/resources");
+        }
         return;
       }
       setResource(data);
       void recordResourceView(userId, resourceId).catch(() => {});
     } catch (e: unknown) {
-      message.error(e instanceof Error ? e.message : "加载失败");
-      setResource(null);
+      if (!cached) {
+        message.error(e instanceof Error ? e.message : "加载失败");
+        setResource(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -152,9 +157,19 @@ export default function ResourceDetailPage({ resourceId }: ResourceDetailPagePro
           <Button
             type="primary"
             icon={<DownloadOutlined />}
-            onClick={() => downloadMarkdown(resource)}
+            onClick={() => {
+              void (async () => {
+                const hide = message.loading("正在准备另存为…", 0);
+                const result = await downloadResourceMarkdown(userId, resource);
+                hide();
+                if (result.cancelled) return;
+                if (result.ok) {
+                  message.success(`「${resource.title}」${result.saveHint || "已保存到所选位置"}`);
+                } else message.warning(result.error || "另存为失败");
+              })();
+            }}
           >
-            下载 Markdown
+            另存为 Markdown
           </Button>
         </div>
       </div>
@@ -239,7 +254,7 @@ function QuizPanel({
       {questions.map((q, i) => (
         <div key={q.id || i} style={{ marginBottom: 16 }}>
           <Text strong>
-            {i + 1}. {q.stem}
+            {i + 1}. <MathText text={q.stem} />
           </Text>
           <Radio.Group
             style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}
@@ -249,8 +264,13 @@ function QuizPanel({
               next[i] = e.target.value;
               onAnswersChange(next);
             }}
-            options={q.options.map((opt, idx) => ({ label: opt, value: idx }))}
-          />
+          >
+            {q.options.map((opt, idx) => (
+              <Radio key={idx} value={idx}>
+                <MathText text={opt} />
+              </Radio>
+            ))}
+          </Radio.Group>
         </div>
       ))}
       <Divider />

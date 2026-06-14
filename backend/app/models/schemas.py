@@ -49,10 +49,100 @@ class StudentProfile(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class RealtimeLearningState(BaseModel):
+    """短期学习状态：描述学生当下情绪、投入度、卡点与好奇点。"""
+
+    user_id: str
+    emotion: Literal["neutral", "confused", "frustrated", "excited", "tired", "anxious"] = "neutral"
+    implicit_emotion: str = "平稳专注"
+    engagement: Literal["low", "medium", "high"] = "medium"
+    confusion_level: float = 0.0
+    curiosity_level: float = 0.0
+    cognitive_load_level: float = 0.5
+    frustration_level: float = 0.0
+    confidence_level: float = 0.6
+    initiative_level: float = 0.5
+    curiosity_topics: list[str] = Field(default_factory=list)
+    stuck_topics: list[str] = Field(default_factory=list)
+    language_style: str = "自然口语"
+    preferred_reply_style: str = "结构化说明，配合例子"
+    cognitive_load: Literal["low", "medium", "high"] = "medium"
+    next_best_action: str = "正常回答并给出下一步建议"
+    confidence: float = 0.6
+    evidence: list[str] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class PersonalizationStrategy(BaseModel):
+    """内部个性化教学策略：由长期画像与实时画像生成，只喂给 AI，不直接展示给学生。"""
+
+    teaching_mode: Literal["routine", "unblock", "simplify", "explore", "challenge", "focus", "stabilize"] = "routine"
+    tone: str = "温和、清晰、鼓励"
+    difficulty: Literal["lower", "maintain", "raise"] = "maintain"
+    pacing: Literal["slow", "normal", "fast"] = "normal"
+    explanation_depth: Literal["brief", "standard", "deep"] = "standard"
+    response_plan: list[str] = Field(default_factory=list)
+    must_do: list[str] = Field(default_factory=list)
+    avoid: list[str] = Field(default_factory=list)
+    preferred_resource_types: list[ResourceType] = Field(default_factory=list)
+    avoid_resource_types: list[ResourceType] = Field(default_factory=list)
+    assessment_style: str = "结尾给一个小检查问题，确认是否理解"
+    focus_topics: list[str] = Field(default_factory=list)
+
+
 class ProfileRefreshResponse(BaseModel):
     profile: StudentProfile
     message: str = ""
     sources: dict = Field(default_factory=dict)
+
+
+class LearnerLongTermInsights(BaseModel):
+    knowledge_assessment: str = ""
+    goal_clarity: str = ""
+    cognitive_style_notes: str = ""
+    error_prone_analysis: str = ""
+    progress_narrative: str = ""
+
+
+class LearnerRealtimeInsights(BaseModel):
+    emotional_state: str = ""
+    engagement_notes: str = ""
+    confusion_and_stuck: str = ""
+    curiosity_notes: str = ""
+    cognitive_load_notes: str = ""
+    confidence_notes: str = ""
+
+
+class LearnerBehavioralInsights(BaseModel):
+    chat_patterns: str = ""
+    resource_usage: str = ""
+    quiz_performance: str = ""
+    modality_preference: str = ""
+
+
+class LearnerProfileAnalysis(BaseModel):
+    """长期 + 实时画像与行为信号的综合分析，专供后续 AI 任务消费。"""
+
+    user_id: str
+    summary: str = ""
+    long_term: LearnerLongTermInsights = Field(default_factory=LearnerLongTermInsights)
+    realtime: LearnerRealtimeInsights = Field(default_factory=LearnerRealtimeInsights)
+    behavioral: LearnerBehavioralInsights = Field(default_factory=LearnerBehavioralInsights)
+    strengths: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    recommended_focus: list[str] = Field(default_factory=list)
+    planning_hints: list[str] = Field(default_factory=list)
+    personalization_strategy: PersonalizationStrategy = Field(default_factory=PersonalizationStrategy)
+    ai_context_brief: str = ""
+    sources: dict = Field(default_factory=dict)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ProfileAnalysisResponse(BaseModel):
+    analysis: LearnerProfileAnalysis
+    profile: StudentProfile
+    message: str = ""
 
 
 class PathStep(BaseModel):
@@ -75,6 +165,19 @@ class LearningPath(BaseModel):
     version: int = 1
 
 
+class PathReplanMeta(BaseModel):
+    stage_count: int = 0
+    node_count: int = 0
+    quality_checked: bool = True
+    remaining_issues: list[str] = Field(default_factory=list)
+    version: int = 1
+
+
+class PathReplanResponse(BaseModel):
+    path: LearningPath
+    meta: PathReplanMeta
+
+
 class LearningResource(BaseModel):
     id: str
     type: ResourceType
@@ -86,6 +189,292 @@ class LearningResource(BaseModel):
     library_id: str = ""
     library_name: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ResourceRegenerateRequest(BaseModel):
+    user_id: str = "demo"
+    requirements: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class PathResourceRegenRequest(BaseModel):
+    user_id: str = "demo"
+    library_id: str | None = None
+
+
+class PathResourceRegenStageMeta(BaseModel):
+    step_id: str = ""
+    title: str = ""
+    generated_count: int = 0
+    types: list[str] = Field(default_factory=list)
+    resource_ids: list[str] = Field(default_factory=list)
+    titles: list[str] = Field(default_factory=list)
+
+
+class PathResourceRegenMeta(BaseModel):
+    generated_count: int = 0
+    stages_processed: int = 0
+    type_breakdown: dict[str, int] = Field(default_factory=dict)
+    stages: list[PathResourceRegenStageMeta] = Field(default_factory=list)
+    quality_checked: bool = True
+    generation_mode: str = "web"
+    library_name: str = ""
+    library_id: str = ""
+    fallback_count: int = 0
+    fallback_warnings: list[str] = Field(default_factory=list)
+    forced_regen: bool = True
+
+
+class PathResourceRegenResponse(BaseModel):
+    path: LearningPath
+    resources: list[LearningResource] = Field(default_factory=list)
+    meta: PathResourceRegenMeta
+
+
+class PathConfirmMeta(BaseModel):
+    ok: bool = True
+    issues: list[str] = Field(default_factory=list)
+    fixes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    stage_count: int = 0
+    node_count: int = 0
+    resource_count: int = 0
+    linked_resource_count: int = 0
+    starred_count: int = 0
+    analysis_present: bool = False
+    profile_present: bool = False
+    confirmed_at: str = ""
+
+
+class PathConfirmResponse(BaseModel):
+    path: LearningPath
+    resources: list[LearningResource] = Field(default_factory=list)
+    meta: PathConfirmMeta
+
+
+class PathReplanSubPhase(BaseModel):
+    label: str
+    status: Literal["pending", "active", "done"] = "pending"
+
+
+class PathReplanJobResult(BaseModel):
+    stage_count: int = 0
+    node_count: int = 0
+    linked_resource_count: int = 0
+    generated_count: int = 0
+    deleted_resource_count: int = 0
+    kept_resource_count: int = 0
+    starred_count: int = 0
+    fallback_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+    library_name: str = ""
+    planning_sources: dict = Field(default_factory=dict)
+
+
+class PathReplanJobCreateRequest(BaseModel):
+    library_id: str | None = None
+    conversation_id: str | None = None
+    learning_goal: str | None = None
+
+
+class ReplanContextResponse(BaseModel):
+    learning_goal: str = ""
+    goal_source: str = "none"
+    conversation_id: str = ""
+    chat_basis: str = ""
+    intent_turn_count: int = 0
+    intent_summary: str = ""
+    intent_topics: list[str] = Field(default_factory=list)
+    starred_count: int = 0
+    starred_titles: list[str] = Field(default_factory=list)
+    resource_view_count: int = 0
+    resource_complete_count: int = 0
+    quiz_summary: str = ""
+    library_id: str = ""
+    library_name: str = ""
+    can_start: bool = False
+    block_reason: str = ""
+
+
+class PathReplanJob(BaseModel):
+    id: str
+    user_id: str
+    status: Literal["queued", "running", "done", "error"] = "queued"
+    step_index: int = 0
+    step_label: str = ""
+    stage: str = ""
+    progress: int = 0
+    sub_phases: list[PathReplanSubPhase] = Field(default_factory=list)
+    elapsed_sec: int = 0
+    started_at: datetime | None = None
+    result_summary: str = ""
+    error: str = ""
+    library_id: str = ""
+    result: PathReplanJobResult | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ClassroomGenerateRequest(BaseModel):
+    user_id: str = "demo"
+    step_key: str = ""
+    title: str = ""
+    objective: str = ""
+    resource_ids: list[str] = Field(default_factory=list)
+    selected_resource_ids: list[str] = Field(default_factory=list)
+    estimated_minutes: int = 20
+    course_name: str = ""
+    teaching_mode: str = ""
+    depth_level: str = "标准掌握"
+    classroom_keywords: list[str] = Field(default_factory=list)
+    local_materials: list[dict[str, str]] = Field(default_factory=list)
+    ai_material_requests: list[str] = Field(default_factory=list)
+
+
+class ClassroomParsedMaterial(BaseModel):
+    id: str
+    title: str
+    size: int = 0
+    mime_type: str = ""
+    content_excerpt: str = ""
+    status: Literal["parsed", "recorded", "error"] = "recorded"
+    error: str = ""
+
+
+class ClassroomParseMaterialsResponse(BaseModel):
+    materials: list[ClassroomParsedMaterial] = Field(default_factory=list)
+
+
+class ClassroomSlide(BaseModel):
+    kicker: str = ""
+    title: str
+    body: str
+    board: list[str] = Field(default_factory=list)
+    teacher_note: str = ""
+    layout: str = "concept"
+    visual_theme: str = ""
+    accent_color: str = "teal"
+    visual_prompt: str = ""
+    visual_blocks: list[dict[str, Any]] = Field(default_factory=list)
+    image_url: str = ""
+
+
+class ClassroomTeacherScripts(BaseModel):
+    normal: str = ""
+    confused: str = ""
+    slow: str = ""
+    example: str = ""
+    practice: str = ""
+
+
+class ClassroomCheckQuestion(BaseModel):
+    question: str
+    expected_answer: str = ""
+    hint: str = ""
+
+
+class ClassroomQuizOption(BaseModel):
+    id: str
+    text: str
+
+
+class ClassroomQuizRequest(BaseModel):
+    user_id: str = "demo"
+    course_title: str = ""
+    course_objective: str = ""
+    slide_title: str = ""
+    slide_body: str = ""
+    slide_board: list[str] = Field(default_factory=list)
+    teacher_note: str = ""
+    depth_level: str = "标准掌握"
+    previous_question: str = ""
+    variant: int = 0
+
+
+class ClassroomQuizResponse(BaseModel):
+    id: str = ""
+    question: str
+    options: list[ClassroomQuizOption] = Field(default_factory=list)
+    answer_id: str
+    explanation: str = ""
+    transfer: str = ""
+    question_type: str = "concept"
+    difficulty: str = "standard"
+
+
+class ClassroomHandoutSection(BaseModel):
+    heading: str
+    content: str
+
+
+class ClassroomResourceSummary(BaseModel):
+    id: str
+    type: str = ""
+    title: str = ""
+    topic: str = ""
+
+
+class ClassroomSessionResponse(BaseModel):
+    id: str
+    title: str
+    objective: str
+    course_name: str = ""
+    estimated_minutes: int = 20
+    depth_level: str = "标准掌握"
+    slides: list[ClassroomSlide] = Field(default_factory=list)
+    handout: list[ClassroomHandoutSection] = Field(default_factory=list)
+    teacher_scripts: ClassroomTeacherScripts = Field(default_factory=ClassroomTeacherScripts)
+    check_question: ClassroomCheckQuestion
+    homework: list[str] = Field(default_factory=list)
+    source_resources: list[ClassroomResourceSummary] = Field(default_factory=list)
+    prompt_summary: str = ""
+    personalization_brief: str = ""
+
+
+class ClassroomPptxExportRequest(BaseModel):
+    user_id: str = "demo"
+    session: ClassroomSessionResponse
+
+
+class ClassroomGenerationJob(BaseModel):
+    id: str
+    user_id: str
+    title: str = ""
+    status: Literal["queued", "running", "done", "error"] = "queued"
+    stage: str = ""
+    progress: int = 0
+    result: ClassroomSessionResponse | None = None
+    error: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ClassroomLibraryItem(BaseModel):
+    id: str
+    job_id: str
+    user_id: str
+    step_key: str = ""
+    title: str = ""
+    objective: str = ""
+    course_name: str = ""
+    status: Literal["queued", "running", "done", "error"] = "queued"
+    stage: str = ""
+    progress: int = 0
+    is_favorite: bool = False
+    has_result: bool = False
+    error: str = ""
+    seed: dict = Field(default_factory=dict)
+    result: ClassroomSessionResponse | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ClassroomLibraryListResponse(BaseModel):
+    items: list[ClassroomLibraryItem] = Field(default_factory=list)
+
+
+class ClassroomLibraryFavoriteUpdate(BaseModel):
+    is_favorite: bool
 
 
 class ChatAttachmentMeta(BaseModel):
@@ -118,6 +507,7 @@ class AttachmentContextRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     profile: StudentProfile | None = None
+    realtime_state: RealtimeLearningState | None = None
     intent: IntentType = "chat"
     resources: list[dict] = Field(default_factory=list)
     path: dict | None = None

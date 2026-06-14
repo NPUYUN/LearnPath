@@ -16,6 +16,14 @@ class ProfileRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class RealtimeStateRecord(Base):
+    __tablename__ = "realtime_learning_states"
+
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class PathRecord(Base):
     __tablename__ = "learning_paths"
 
@@ -112,6 +120,38 @@ class UserPreferencesRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class LearnerAnalysisRecord(Base):
+    """综合画像分析快照：供路径规划、资源生成等 AI 任务读取，不直接展示给学生。"""
+
+    __tablename__ = "learner_profile_analyses"
+
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ClassroomLibraryRecord(Base):
+    __tablename__ = "classroom_library"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_id: Mapped[str] = mapped_column(String(64), index=True)
+    step_key: Mapped[str] = mapped_column(String(128), default="")
+    title: Mapped[str] = mapped_column(String(256), default="")
+    objective: Mapped[str] = mapped_column(Text, default="")
+    course_name: Mapped[str] = mapped_column(String(256), default="")
+    status: Mapped[str] = mapped_column(String(32), default="queued")
+    stage: Mapped[str] = mapped_column(String(256), default="")
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
+    seed_json: Mapped[str] = mapped_column(Text, default="{}")
+    request_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ChatConversationRecord(Base):
     __tablename__ = "chat_conversations"
 
@@ -155,4 +195,3 @@ def dumps(obj: dict) -> str:
 
 def loads(text: str) -> dict:
     return json.loads(text) if text else {}
-

@@ -10,7 +10,7 @@ export const NAV_ROUTES = [
 ] as const;
 
 /** 独立全屏页（无侧栏） */
-export const STANDALONE_ROUTES = ["/insights"] as const;
+export const STANDALONE_ROUTES = ["/insights", "/classroom"] as const;
 
 export type NavRoute = (typeof NAV_ROUTES)[number];
 export type StandaloneRoute = (typeof STANDALONE_ROUTES)[number];

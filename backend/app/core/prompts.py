@@ -39,6 +39,18 @@ FAST_REPLY_APPEND = (
 )
 
 
+CHAT_UNIFIED_REPLY_APPEND = (
+    "\n\n【统一对话输出风格】\n"
+    "1. 普通模式和深度思考模式必须使用同一种版式：简洁、克制、像学习辅导对话，不要营销感。\n"
+    "2. 禁止使用 emoji、花哨口号、过多加粗、蓝图式大段介绍、Markdown 表格；除非用户明确要求，禁止 mermaid。\n"
+    "3. 简单问题直接用 2-5 句自然回答，不要硬加标题。\n"
+    "4. 复杂学习问题只使用这些朴素结构中的必要部分：`## 分析要点`、`## 回答`、`## 下一步`。\n"
+    "5. `## 分析要点` 最多 3 条；`## 回答` 先给核心结论，再解释；`## 下一步` 只给一个可执行动作。\n"
+    "6. 不要输出表格、能力矩阵、产品介绍式清单，除非用户明确要求。\n"
+    "7. 不要暴露画像字段、内部策略、情绪检测、模型推理过程。"
+)
+
+
 
 FAST_PROFILE_APPEND = (
 
@@ -285,6 +297,51 @@ RECOMMENDATION_SELECT_SYSTEM = (
 )
 
 
+REALTIME_STATE_ANALYSIS_SYSTEM = (
+
+    "你是「学径 LearnPath」实时学习状态分析 Agent。任务：根据用户本轮语言、长期画像、"
+
+    "近期对话与规则初判，输出短期实时画像 JSON。\n"
+
+    "实时画像只描述当前状态，不要把一时情绪永久化；长期稳定信息应只作为辅助依据。\n"
+    "你要特别读出语言里的隐含情绪：短句、重复、问号、语气词、口语化表达、逃避/急切/兴奋等都可作为信号。\n"
+
+    "字段要求：\n"
+
+    "- emotion: neutral/confused/frustrated/excited/tired/anxious\n"
+    "- implicit_emotion: 中文短语，概括语言背后的隐含情绪，如「试探求助」「轻微受挫」「兴奋探索」\n"
+
+    "- engagement: low/medium/high\n"
+
+    "- confusion_level: 0-1\n"
+
+    "- curiosity_level: 0-1\n"
+    "- cognitive_load_level: 0-1，当前理解压力/信息负荷水位\n"
+    "- frustration_level: 0-1，受挫或抵触强度\n"
+    "- confidence_level: 0-1，自我效能/把握感\n"
+    "- initiative_level: 0-1，主动探索和推进意愿\n"
+
+    "- curiosity_topics: 字符串数组，当前好奇点\n"
+
+    "- stuck_topics: 字符串数组，当前卡点\n"
+
+    "- language_style: 当前语言风格或表达偏好\n"
+
+    "- preferred_reply_style: 本轮最适合的回复方式\n"
+
+    "- cognitive_load: low/medium/high\n"
+
+    "- next_best_action: 本轮下一步教学动作\n"
+
+    "- confidence: 0-1\n"
+
+    "- evidence: 字符串数组，最多 5 条证据\n"
+
+    "仅输出 JSON，不要 markdown，不要多余解释。"
+
+)
+
+
 
 # ── 资料库分析 ──────────────────────────────────────────────────────────────
 
@@ -374,7 +431,11 @@ RESOURCE_GENERATION_BASE = (
 
     "若上下文不足，在文末「资料说明」中声明缺口。\n"
 
-    "输出须符合高校自学场景：术语准确、结构清晰、Markdown 格式。"
+    "输出须符合高校自学场景：术语准确、结构清晰、Markdown 格式。\n"
+
+    "数学公式必须使用 LaTeX：行内公式用 $...$（如 $\\frac{dy}{dx}$），"
+
+    "独立一行公式用 $$...$$；禁止使用裸括号包裹（如 (\\int_0^1 x^2 dx)）。"
 
 )
 
@@ -386,7 +447,7 @@ RESOURCE_TYPE_INSTRUCTIONS: dict[str, str] = {
 
         "生成「讲解文档」Markdown：含学习目标、分节正文（定义/直觉/例题）、小结与自测思考题。"
 
-        "正文须引用上下文中的概念。"
+        "正文须引用上下文中的概念；涉及公式时用 $...$ / $$...$$ 书写 LaTeX。"
 
     ),
 
@@ -406,7 +467,7 @@ RESOURCE_TYPE_INSTRUCTIONS: dict[str, str] = {
 
         "\"options\":[\"A\",\"B\",\"C\",\"D\"],\"answer\":0}]}。"
 
-        "至少 3 单选题，题目须来自上下文。"
+        "至少 3 单选题，题目须来自上下文；题干与选项中的公式用 $...$ LaTeX。"
 
     ),
 
@@ -479,6 +540,28 @@ def profile_system(deep: bool = False) -> str:
     return text
 
 
+def profile_analysis_system(deep: bool = False) -> str:
+    text = (
+        "你是「学径 LearnPath」学习者综合画像分析专家。你将收到【长期学习画像】、【实时学习状态】"
+        "与【行为信号】（对话、资源浏览、测验、保留资源等），需要输出一份供后续 AI 规划路径与生成资源使用的"
+        "内部分析报告。\n"
+        "要求：\n"
+        "1. 长期画像描述稳定特征（基础、目标、认知风格、易错点、节奏）；实时画像描述当下状态（情绪、投入、卡点、好奇、负荷）。\n"
+        "2. 行为信号用于佐证或修正上述判断，写出具体依据，避免空泛套话。\n"
+        "3. strengths/gaps/risks/recommended_focus/planning_hints 要可执行，能直接指导路径阶段划分与资源类型选择。\n"
+        "4. summary 用 2-4 句话概括；各 insights 子字段写 1-3 句完整分析。\n"
+        "【输出格式】仅输出一个 JSON 对象，无 markdown 包裹。字段：\n"
+        "summary,\n"
+        "long_term: {knowledge_assessment, goal_clarity, cognitive_style_notes, error_prone_analysis, progress_narrative},\n"
+        "realtime: {emotional_state, engagement_notes, confusion_and_stuck, curiosity_notes, cognitive_load_notes, confidence_notes},\n"
+        "behavioral: {chat_patterns, resource_usage, quiz_performance, modality_preference},\n"
+        "strengths(数组), gaps(数组), risks(数组), recommended_focus(数组), planning_hints(数组)。"
+    )
+    if deep:
+        text += DEEP_THINKING_APPEND
+    return text
+
+
 def profile_refresh_system(deep: bool = False) -> str:
     text = (
         "你是「学径 LearnPath」学习画像分析专家。根据【当前画像】与【学习行为信号】"
@@ -510,11 +593,23 @@ def tutor_system(deep: bool = False) -> str:
 
 
 
-def path_planning_system(deep: bool = False) -> str:
+PATH_REPLAN_QUALITY_APPEND = (
+    "\n\n【高质量重规划模式】\n"
+    "1. 必须结合 learner_analysis_brief 中的学习者分析、优势/短板/风险与 planning_hints 设计路径。\n"
+    "2. 每个阶段 objective 须具体、可执行、可检验（明确学完能做什么）。\n"
+    "3. 阶段递进：筑基 → 深化 → 综合；易错点须有专项阶段或子步骤。\n"
+    "4. 有资源时：合理分配每个 resource_id，避免堆砌到同一节点或遗漏关键资源。\n"
+    "5. 标题须贴合用户真实诉求，禁止套用与主题无关的泛化模板。"
+)
+
+
+def path_planning_system(deep: bool = False, *, quality_replan: bool = False) -> str:
 
     text = PATH_PLANNING_SYSTEM
 
-    if deep:
+    if quality_replan:
+        text += PATH_REPLAN_QUALITY_APPEND
+    elif deep:
 
         text += "\n\n请更细致地分配资源，并在 objective 中体现推理依据。"
 
@@ -524,15 +619,27 @@ def path_planning_system(deep: bool = False) -> str:
 
 
 
-def path_planning_topic_system(deep: bool = False) -> str:
+def path_planning_topic_system(deep: bool = False, *, quality_replan: bool = False) -> str:
 
     text = PATH_PLANNING_TOPIC_SYSTEM
 
-    if deep:
+    if quality_replan:
+        text += PATH_REPLAN_QUALITY_APPEND
+    elif deep:
 
         text += "\n\n请结合备考/学习周期，在 objective 中给出更细的时间分配与优先级。"
 
     return text
+
+
+def path_replan_refine_system() -> str:
+    return (
+        "你是「学径 LearnPath」学习路径质检与优化专家。\n"
+        "你将收到：学习者分析摘要、初稿路径 JSON、可用资源与质检问题列表。\n"
+        "任务：在保持整体递进结构的前提下，优化路径质量——补全薄弱 objective、"
+        "调整阶段粒度、修正资源分配、强化易错点覆盖、消除与画像/诉求不符的标题。\n"
+        "【输出格式】仅输出优化后的完整 JSON 数组（结构与初稿相同），无 markdown 包裹。"
+    )
 
 
 
@@ -586,6 +693,13 @@ def recommendation_select_system() -> str:
 
     return RECOMMENDATION_SELECT_SYSTEM
 
+
+
+
+
+def realtime_state_analysis_system() -> str:
+
+    return REALTIME_STATE_ANALYSIS_SYSTEM
 
 
 
@@ -705,6 +819,8 @@ def path_planning_user_payload(
 
     weak_topics: list[str],
 
+    learner_analysis_brief: str = "",
+
 ) -> str:
 
     import json
@@ -731,31 +847,31 @@ def path_planning_user_payload(
 
     ]
 
-    return json.dumps(
+    body: dict = {
 
-        {
+        "user_request": user_request,
 
-            "user_request": user_request,
+        "topic": topic,
 
-            "topic": topic,
+        "profile_summary": {
 
-            "profile_summary": {
+            "knowledge_level": profile.get("knowledge_level"),
 
-                "knowledge_level": profile.get("knowledge_level"),
+            "learning_goal": profile.get("learning_goal"),
 
-                "learning_goal": profile.get("learning_goal"),
-
-                "error_prone_topics": weak_topics,
-
-            },
-
-            "resources": slim,
+            "error_prone_topics": weak_topics,
 
         },
 
-        ensure_ascii=False,
+        "resources": slim,
 
-    )
+    }
+
+    if learner_analysis_brief:
+
+        body["learner_analysis_brief"] = learner_analysis_brief
+
+    return json.dumps(body, ensure_ascii=False)
 
 
 
@@ -773,42 +889,79 @@ def path_planning_topic_user_payload(
 
     weak_topics: list[str],
 
+    learner_analysis_brief: str = "",
+
 ) -> str:
 
     import json
 
 
 
-    return json.dumps(
+    body: dict = {
 
-        {
+        "user_request": user_request,
 
-            "user_request": user_request,
+        "topic": topic,
 
-            "topic": topic,
+        "profile_summary": {
 
-            "profile_summary": {
+            "knowledge_level": profile.get("knowledge_level"),
 
-                "knowledge_level": profile.get("knowledge_level"),
+            "learning_goal": profile.get("learning_goal"),
 
-                "learning_goal": profile.get("learning_goal"),
+            "cognitive_style": profile.get("cognitive_style"),
 
-                "cognitive_style": profile.get("cognitive_style"),
+            "pace_and_time": profile.get("pace_and_time"),
 
-                "pace_and_time": profile.get("pace_and_time"),
-
-                "error_prone_topics": weak_topics,
-
-            },
+            "error_prone_topics": weak_topics,
 
         },
 
+    }
+
+    if learner_analysis_brief:
+
+        body["learner_analysis_brief"] = learner_analysis_brief
+
+    return json.dumps(body, ensure_ascii=False)
+
+
+def path_replan_refine_user_payload(
+    *,
+    user_request: str,
+    topic: str,
+    profile: dict,
+    resources: list[dict],
+    weak_topics: list[str],
+    learner_analysis_brief: str,
+    draft_steps: list[dict],
+    quality_issues: list[str],
+) -> str:
+    import json
+
+    from app.services.path_utils import slim_steps_for_prompt
+
+    slim_resources = [
+        {"id": r.get("id"), "title": r.get("title"), "type": r.get("type"), "topic": r.get("topic")}
+        for r in resources
+        if r.get("id")
+    ]
+    return json.dumps(
+        {
+            "user_request": user_request,
+            "topic": topic,
+            "profile_summary": {
+                "knowledge_level": profile.get("knowledge_level"),
+                "learning_goal": profile.get("learning_goal"),
+                "error_prone_topics": weak_topics,
+            },
+            "learner_analysis_brief": learner_analysis_brief,
+            "resources": slim_resources,
+            "draft_steps": slim_steps_for_prompt(draft_steps, max_depth=4),
+            "quality_issues": quality_issues,
+        },
         ensure_ascii=False,
-
     )
-
-
-
 
 
 def path_narrative_user_payload(
@@ -898,25 +1051,53 @@ def resource_generation_user(
 
     generation_mode: str,
 
+    stage_objective: str = "",
+
+    learner_analysis_brief: str = "",
+
 ) -> str:
 
-    return (
+    parts = [
 
-        f"学习主题：{topic}\n"
+        f"学习主题：{topic}",
 
-        f"资源标题：{title}\n"
+        f"资源标题：{title}",
 
-        f"生成模式：{generation_mode}\n"
+        f"生成模式：{generation_mode}",
 
-        f"学生画像摘要：{profile_summary or '暂无'}\n\n"
+        f"学生画像摘要：{profile_summary or '暂无'}",
 
-        f"【资料库上下文】\n{library_context or '（无本地资料库）'}\n\n"
+    ]
 
-        f"【全网整理摘要】\n{web_context or '（未启用或未检索）'}\n\n"
+    if stage_objective:
 
-        f"请生成 type={resource_type} 的完整内容。"
+        parts.append(f"路径阶段目标：{stage_objective}")
+
+    if learner_analysis_brief:
+
+        parts.append(f"学习者综合分析（仅供生成参考）：\n{learner_analysis_brief[:1200]}")
+
+    parts.extend(
+
+        [
+
+            "",
+
+            f"【资料库上下文】\n{library_context or '（无本地资料库）'}",
+
+            "",
+
+            f"【全网整理摘要】\n{web_context or '（未启用或未检索）'}",
+
+            "",
+
+            f"请生成 type={resource_type} 的完整、可直接学习使用的内容。",
+
+        ]
 
     )
+
+    return "\n".join(parts)
 
 
 
@@ -974,9 +1155,9 @@ def chat_library_polish_system(question_type: str, deep: bool = False) -> str:
 
         "1. 不得与片段明显矛盾；片段不足处可简要补充，并标注「延伸说明」。\n"
 
-        "2. 学术严谨、分点清晰，使用标准 Markdown（##/### 标题、- 列表、**加粗**）。\n"
+        "2. 学术严谨、分点清晰，但版式保持朴素；不要使用表格或大段加粗。\n"
 
-        "3. 关系图必须用围栏代码块：```mermaid 独占一行，内用 flowchart TD，每条边单独一行，"
+        "3. 只有用户明确要求图解时，关系图才使用围栏代码块：```mermaid 独占一行，内用 flowchart TD，每条边单独一行，"
         "节点 ID 用字母数字；边标签写 |标签|；禁止一行内用分号串联多条边。\n"
 
         f"4. 本问类型侧重：{hint}\n"
@@ -985,13 +1166,11 @@ def chat_library_polish_system(question_type: str, deep: bool = False) -> str:
 
     )
 
+    text += CHAT_UNIFIED_REPLY_APPEND
+
     if deep:
 
-        text += DEEP_THINKING_APPEND
-
-    else:
-
-        text += FAST_REPLY_APPEND
+        text += "\n7. 深度思考开启时，解释可以更充分，但仍保持同一版式，不要额外增加花哨章节。"
 
     return text
 
@@ -1007,7 +1186,8 @@ def chat_chitchat_system(deep: bool = False) -> str:
         "1. 用 2–4 句话友好回应；可简要说明你能帮用户做画像、生成资源、规划路径、答疑。\n"
         "2. 禁止展开任何学科知识（如机器学习定义、算法、公式、课程章节等）。\n"
         "3. 不要使用 ## 标题、mermaid、代码块或长列表。\n"
-        "4. 以邀请用户说出学习需求结尾。"
+        "4. 不要使用 emoji、表格或夸张宣传语。\n"
+        "5. 以邀请用户说出学习需求结尾。"
     )
 
 
@@ -1025,19 +1205,17 @@ def chat_direct_system(question_type: str, deep: bool = False) -> str:
         f"本问类型侧重：{hint}\n"
 
         "要求：必须紧扣【用户问题】作答，不要擅自切换到用户未提及的学科主题；"
-        "结构清晰、标准 Markdown（标题/列表/加粗）；"
-        "关系图仅用 ```mermaid 围栏代码块，勿输出裸 mermaid 文本；"
+        "结构清晰但版式克制；"
+        "只有用户明确要求图解时才使用 ```mermaid 围栏代码块，勿输出裸 mermaid 文本；"
         "不确定处明确说明；禁止编造来源。"
 
     )
 
+    text += CHAT_UNIFIED_REPLY_APPEND
+
     if deep:
 
-        text += DEEP_THINKING_APPEND
-
-    else:
-
-        text += FAST_REPLY_APPEND
+        text += "\n7. 深度思考开启时，解释可以更充分，但仍保持同一版式，不要额外增加花哨章节。"
 
     return text
 
@@ -1086,4 +1264,3 @@ def chat_temperature(deep: bool = False) -> float:
 def resource_temperature(deep: bool = False) -> float:
 
     return 0.3 if deep else 0.55
-

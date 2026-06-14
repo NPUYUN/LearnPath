@@ -22,8 +22,17 @@ from app.db.repository import (
 from app.services.user_defaults import profile_fallback_fields
 
 
-async def _gather_learning_signals(user_id: str) -> dict[str, Any]:
-    messages = list_chat_messages(user_id, limit=300)
+async def _gather_learning_signals(
+    user_id: str,
+    *,
+    conversation_id: str | None = None,
+) -> dict[str, Any]:
+    """汇总学习信号。提供 conversation_id 时，聊天样本/主题仅来自该会话（L1 意图）。"""
+    messages = list_chat_messages(
+        user_id,
+        conversation_id=conversation_id or None,
+        limit=300,
+    )
     user_msgs = [m for m in messages if m.get("role") == "user" and (m.get("content") or "").strip()]
     events = list_events(user_id, limit=80)
     resources = list_resources_with_meta(user_id)

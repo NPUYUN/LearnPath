@@ -175,6 +175,51 @@ const MARQUEE_ITEMS = [
   "Keep-alive 前端",
 ];
 
+const SYSTEM_LOOP = [
+  {
+    title: "智能对话",
+    role: "入口",
+    desc: "学生提问、暴露困惑、触发资源和课堂",
+    icon: <MessageOutlined />,
+    accent: "#4f8ef7",
+  },
+  {
+    title: "学习画像",
+    role: "大脑",
+    desc: "长期画像与实时状态决定 AI 的讲法",
+    icon: <UserOutlined />,
+    accent: "#a855f7",
+  },
+  {
+    title: "资源库",
+    role: "素材",
+    desc: "讲义、课件、练习和案例的内容来源",
+    icon: <BookOutlined />,
+    accent: "#f59e0b",
+  },
+  {
+    title: "学习路径",
+    role: "主线",
+    desc: "安排下一节课、下一份资源和下一次练习",
+    icon: <ApartmentOutlined />,
+    accent: "#2bc0b4",
+  },
+  {
+    title: "AI 课堂",
+    role: "执行场景",
+    desc: "在路径节点中开课，实时调整 PPT、例子和作业",
+    icon: <VideoCameraOutlined />,
+    accent: "#10b981",
+  },
+  {
+    title: "学习评估",
+    role: "校准",
+    desc: "测验和作业结果反哺画像与路径",
+    icon: <BarChartOutlined />,
+    accent: "#ef4444",
+  },
+];
+
 const PREVIEW_NAV = [
   { id: "chat" as const, label: "智能对话", short: "对话", icon: <MessageOutlined />, accent: "#1677ff" },
   { id: "profile" as const, label: "学习画像", short: "画像", icon: <UserOutlined />, accent: "#722ed1" },
@@ -574,6 +619,40 @@ function ShowcaseVisual({ type, accent }: { type: string; accent: string }) {
   );
 }
 
+function SystemLoopMap() {
+  return (
+    <section className="lp-system-map lp-section-band lp-fade-in-1">
+      <div className="lp-section-header lp-section-header--split">
+        <div>
+          <div className="lp-section-tag">系统结构</div>
+          <h2 className="lp-section-title">AI 课堂长在学习路径里，不额外制造一个孤岛</h2>
+          <p className="lp-section-desc">
+            五个原有模块分别承担入口、大脑、素材、主线和校准；课堂只是路径节点里的执行场景。
+          </p>
+        </div>
+        <div className="lp-system-map-note">对话发起 · 画像调节 · 路径承载 · 评估回写</div>
+      </div>
+      <div className="lp-system-map-grid">
+        {SYSTEM_LOOP.map((item, index) => (
+          <article
+            key={item.title}
+            className={`lp-system-map-card ${item.title === "AI 课堂" ? "lp-system-map-card--classroom" : ""}`}
+            style={{ "--loop-accent": item.accent, animationDelay: `${index * 0.06}s` } as React.CSSProperties}
+          >
+            <div className="lp-system-map-card-top">
+              <span className="lp-system-map-icon">{item.icon}</span>
+              <em>{item.role}</em>
+            </div>
+            <strong>{item.title}</strong>
+            <p>{item.desc}</p>
+            {index < SYSTEM_LOOP.length - 1 && <i aria-hidden />}
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function AgentHub() {
   return (
     <div className="lp-agent-hub">
@@ -611,11 +690,6 @@ export default function LandingContent() {
     <div className="lp-root">
       <LandingBackground />
       <ParticleCanvas />
-      <div className="lp-orb lp-orb-1" />
-      <div className="lp-orb lp-orb-2" />
-      <div className="lp-orb lp-orb-3" />
-      <div className="lp-orb lp-orb-4" />
-      <div className="lp-orb lp-orb-5" />
 
       <nav className="lp-nav">
         <div className="lp-nav-brand">
@@ -700,6 +774,8 @@ export default function LandingContent() {
           ))}
         </div>
       </div>
+
+      <SystemLoopMap />
 
       <section id="lp-workflow" className="lp-workflow lp-section-band lp-fade-in-1">
         <div className="lp-section-header lp-section-header--split">

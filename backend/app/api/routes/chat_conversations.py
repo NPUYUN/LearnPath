@@ -13,6 +13,7 @@ from app.models.schemas import (
     ChatMessageItem,
     CreateChatConversationRequest,
 )
+from app.services.replan_context_service import invalidate_chat_derived_state
 
 router = APIRouter(prefix="/chat", tags=["chat-conversations"])
 
@@ -57,4 +58,5 @@ async def remove_conversation(
     ok = await delete_chat_conversation(conversation_id, user_id)
     if not ok:
         raise HTTPException(404, "对话不存在")
+    await invalidate_chat_derived_state(user_id, conversation_id=conversation_id)
     return {"ok": True}

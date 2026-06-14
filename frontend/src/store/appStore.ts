@@ -1,17 +1,47 @@
 import { create } from "zustand";
 import type {
+  ClassroomGenerationJob,
+  ClassroomSession,
   EvalStats,
   LearningPath,
   LearningResource,
+  PathReplanJob,
   StudentProfile,
   UserAccount,
 } from "@/lib/api";
+import { clearFloatPanelState, clearPersistedActiveClassroom } from "@/lib/classroomActive";
+import { clearPathReplanFloatState, clearPersistedActivePathReplan } from "@/lib/pathReplanActive";
 import { clearAccessToken, clearAuthSession, saveAuthSession } from "@/store/authStore";
 
 export const DEMO_USER_ID = "demo";
 export const ADMIN_USER_ID = "admin";
 
 export type UserRole = "user" | "admin";
+export type ClassroomJobPanelMode = "open" | "minimized" | "hidden";
+export type PathReplanPanelMode = "fullscreen" | "open" | "minimized" | "hidden";
+export type ResourceRegenPanelMode = "open" | "minimized" | "hidden";
+
+export type ResourceRegenerationTask = {
+  id: string;
+  resourceId: string;
+  title: string;
+  status: "running" | "done" | "error";
+  progress: number;
+  stage: string;
+  error?: string;
+  updatedResource?: LearningResource;
+};
+
+export type ClassroomSessionSeed = {
+  stepKey: string;
+  title: string;
+  objective: string;
+  resourceIds: string[];
+  estimatedMinutes: number;
+  courseName: string;
+  depthLevel?: string;
+  source: "path" | "manual";
+};
 
 export function isDemoUser(userId: string) {
   return userId === DEMO_USER_ID;
@@ -56,7 +86,31 @@ interface AppState {
   evalStats: EvalStats | null;
   account: UserAccount | null;
   insightsChat: { chatCount: number; userMsgCount: number } | null;
+  pendingClassroomSession: ClassroomSessionSeed | null;
+  activeClassroomSeed: ClassroomSessionSeed | null;
+  activeClassroomJob: ClassroomGenerationJob | null;
+  activeClassroomResult: ClassroomSession | null;
+  classroomJobPanelMode: ClassroomJobPanelMode;
+  pathReplanJob: PathReplanJob | null;
+  pathReplanPanelMode: PathReplanPanelMode;
+  pathReplanFading: boolean;
+  resourceRegenTask: ResourceRegenerationTask | null;
+  resourceRegenPanelMode: ResourceRegenPanelMode;
   pendingResourcePreviewId: string | null;
+  setPendingClassroomSession: (session: ClassroomSessionSeed | null) => void;
+  setActiveClassroomSeed: (session: ClassroomSessionSeed | null) => void;
+  setActiveClassroomJob: (job: ClassroomGenerationJob | null) => void;
+  setActiveClassroomResult: (session: ClassroomSession | null) => void;
+  setClassroomJobPanelMode: (mode: ClassroomJobPanelMode) => void;
+  clearActiveClassroom: () => void;
+  setPathReplanJob: (job: PathReplanJob | null) => void;
+  setPathReplanPanelMode: (mode: PathReplanPanelMode) => void;
+  setPathReplanFading: (fading: boolean) => void;
+  clearPathReplan: () => void;
+  setResourceRegenTask: (task: ResourceRegenerationTask | null) => void;
+  patchResourceRegenTask: (patch: Partial<ResourceRegenerationTask>) => void;
+  setResourceRegenPanelMode: (mode: ResourceRegenPanelMode) => void;
+  clearResourceRegenTask: () => void;
   setPendingResourcePreviewId: (id: string | null) => void;
   setProfile: (p: StudentProfile | null) => void;
   setEvalStats: (s: EvalStats | null) => void;
@@ -114,6 +168,16 @@ export const useAppStore = create<AppState>((set) => ({
       evalStats: null,
       account: null,
       insightsChat: null,
+      pendingClassroomSession: null,
+      activeClassroomSeed: null,
+      activeClassroomJob: null,
+      activeClassroomResult: null,
+      classroomJobPanelMode: "open",
+      pathReplanJob: null,
+      pathReplanPanelMode: "hidden",
+      pathReplanFading: false,
+      resourceRegenTask: null,
+      resourceRegenPanelMode: "hidden",
       pendingResourcePreviewId: null,
     });
   },
@@ -138,6 +202,16 @@ export const useAppStore = create<AppState>((set) => ({
       evalStats: null,
       account: null,
       insightsChat: null,
+      pendingClassroomSession: null,
+      activeClassroomSeed: null,
+      activeClassroomJob: null,
+      activeClassroomResult: null,
+      classroomJobPanelMode: "open",
+      pathReplanJob: null,
+      pathReplanPanelMode: "hidden",
+      pathReplanFading: false,
+      resourceRegenTask: null,
+      resourceRegenPanelMode: "hidden",
       pendingResourcePreviewId: null,
     });
   },
@@ -150,7 +224,59 @@ export const useAppStore = create<AppState>((set) => ({
   evalStats: null,
   account: null,
   insightsChat: null,
+  pendingClassroomSession: null,
+  activeClassroomSeed: null,
+  activeClassroomJob: null,
+  activeClassroomResult: null,
+  classroomJobPanelMode: "open",
+  pathReplanJob: null,
+  pathReplanPanelMode: "hidden",
+  pathReplanFading: false,
+  resourceRegenTask: null,
+  resourceRegenPanelMode: "hidden",
   pendingResourcePreviewId: null,
+  setPendingClassroomSession: (pendingClassroomSession) => set({ pendingClassroomSession }),
+  setActiveClassroomSeed: (activeClassroomSeed) => set({ activeClassroomSeed }),
+  setActiveClassroomJob: (activeClassroomJob) => set({ activeClassroomJob }),
+  setActiveClassroomResult: (activeClassroomResult) => set({ activeClassroomResult }),
+  setClassroomJobPanelMode: (classroomJobPanelMode) => set({ classroomJobPanelMode }),
+  clearActiveClassroom: () => {
+    const jobId = useAppStore.getState().activeClassroomJob?.id;
+    if (jobId) clearFloatPanelState(jobId);
+    clearPersistedActiveClassroom();
+    set({
+      activeClassroomJob: null,
+      activeClassroomResult: null,
+      activeClassroomSeed: null,
+      classroomJobPanelMode: "hidden",
+    });
+  },
+  setPathReplanJob: (pathReplanJob) =>
+    set((s) => (s.pathReplanJob === pathReplanJob ? s : { pathReplanJob })),
+  setPathReplanPanelMode: (pathReplanPanelMode) =>
+    set((s) => (s.pathReplanPanelMode === pathReplanPanelMode ? s : { pathReplanPanelMode })),
+  setPathReplanFading: (pathReplanFading) =>
+    set((s) => (s.pathReplanFading === pathReplanFading ? s : { pathReplanFading })),
+  clearPathReplan: () => {
+    const jobId = useAppStore.getState().pathReplanJob?.id;
+    if (jobId) clearPathReplanFloatState(jobId);
+    clearPersistedActivePathReplan();
+    set({
+      pathReplanJob: null,
+      pathReplanPanelMode: "hidden",
+      pathReplanFading: false,
+    });
+  },
+  setResourceRegenTask: (resourceRegenTask) => set({ resourceRegenTask }),
+  patchResourceRegenTask: (patch) =>
+    set((s) =>
+      s.resourceRegenTask
+        ? { resourceRegenTask: { ...s.resourceRegenTask, ...patch } }
+        : s
+    ),
+  setResourceRegenPanelMode: (resourceRegenPanelMode) => set({ resourceRegenPanelMode }),
+  clearResourceRegenTask: () =>
+    set({ resourceRegenTask: null, resourceRegenPanelMode: "hidden" }),
   setPendingResourcePreviewId: (pendingResourcePreviewId) => set({ pendingResourcePreviewId }),
   setProfile: (profile) => set({ profile }),
   setEvalStats: (evalStats) => set({ evalStats }),
@@ -167,4 +293,3 @@ export const useAppStore = create<AppState>((set) => ({
       ],
     })),
 }));
-

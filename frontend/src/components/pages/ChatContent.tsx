@@ -16,6 +16,7 @@ import PlusOutlined from "@ant-design/icons/PlusOutlined";
 import DeleteOutlined from "@ant-design/icons/DeleteOutlined";
 import CopyOutlined from "@ant-design/icons/CopyOutlined";
 import { usePageActive } from "@/contexts/PageVisibilityContext";
+import { loadActiveChatConversation, persistActiveChatConversation } from "@/lib/chatActive";
 import PageHeader from "@/components/PageHeader";
 import MarkdownPreview from "@/components/MarkdownPreview";
 import StreamingMarkdown from "@/components/StreamingMarkdown";
@@ -90,6 +91,7 @@ const REAL_QUICK_ACTIONS = [
 const MessageItem = memo(function MessageItem({
   msg,
   liveStreamText,
+  thinkingLabel,
   onResourceClick,
   onDeleteTurn,
   onCopy,
@@ -101,6 +103,7 @@ const MessageItem = memo(function MessageItem({
   msg: Message;
   /** 流式进行中：与 msg.id 匹配时传入实时文本 */
   liveStreamText?: string;
+  thinkingLabel?: string;
   onResourceClick?: (id: string) => void;
   onDeleteTurn?: (userMessageId: string) => void;
   onCopy?: (content: string) => void;
@@ -125,9 +128,16 @@ const MessageItem = memo(function MessageItem({
       <div className="lp-chat-body">
         {msg.isTyping ? (
           <div className="lp-chat-bubble lp-chat-bubble--assistant lp-chat-bubble--typing">
-            <span className="typing-dot" />
-            <span className="typing-dot" />
-            <span className="typing-dot" />
+            <div className="lp-chat-thinking">
+              <span className="lp-chat-thinking-dots" aria-hidden>
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+              </span>
+              <span className="lp-chat-thinking-text">
+                {thinkingLabel || "正在理解你的问题"}
+              </span>
+            </div>
           </div>
         ) : (
           <>
@@ -283,10 +293,28 @@ const STAGE_LABELS: Record<string, string> = {
   vision_analysis: "分析图片中",
 };
 
+const WAIT_STAGE_LABELS: Record<string, string> = {
+  vision_analysis: "正在分析你上传的内容",
+  deep_thinking: "正在深入分析问题",
+  fast_reply: "正在理解你的问题",
+  web_research: "正在检索外部资料",
+  realtime_state: "正在结合实时画像",
+  profile: "正在同步学习画像",
+  generate: "正在生成学习资源",
+  path: "正在规划学习路径",
+  eval: "正在整理评估结果",
+  chat: "正在组织回答",
+  tutor: "正在组织回答",
+  retrieval: "正在检索你的资料库",
+  running: "正在处理请求",
+};
+
 const WELCOME_MSG: Message = {
   id: "welcome",
   role: "assistant",
-  content: `你好！我是 **学径 LearnPath 学习助手** 🎓\n\n我可以帮你：\n- 📊 **构建个人学习画像** — 通过对话了解你的学习情况\n- 📚 **生成个性化学习资源** — 文档、思维导图、题库、多模态说明、代码案例\n- 🗺️ **规划学习路径** — 科学分阶段的个性化学习计划\n- 🤔 **智能答疑** — 优先检索你的资源库；可开启 **联网思考** 补充最新资料\n- 📎 **上传图片与文档** — 课件、截图可随问题一并分析\n\n请告诉我你想学习什么，或从左侧目录回顾历史对话 👇`,
+  content:
+    "你好，我是学径学习助手。\n\n" +
+    "你可以直接告诉我现在想学什么、哪里卡住了，或者让我帮你生成资源、规划路径。",
   timestamp: new Date(),
 };
 
@@ -331,6 +359,8 @@ export default function ChatContent() {
   const [conversations, setConversations] = useState<ChatConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<ResourceRecommendation[]>([]);
+  const [refreshingRecommendations, setRefreshingRecommendations] = useState(false);
+  const recommendationRefreshOffsetRef = useRef(0);
   const [input, setInput] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -550,15 +580,21 @@ export default function ChatContent() {
         ensureScrollOnOpen();
         return;
       }
-      const first = list[0].id;
-      setActiveConversationId(first);
-      await loadConversationMessages(first, { scroll: true });
+      const savedId = loadActiveChatConversation();
+      const targetId = savedId && list.some((c) => c.id === savedId) ? savedId : list[0].id;
+      setActiveConversationId(targetId);
+      persistActiveChatConversation(targetId);
+      await loadConversationMessages(targetId, { scroll: true });
     })();
 
     return () => {
       cancelled = true;
     };
   }, [userId, reloadConversations, loadConversationMessages, ensureScrollOnOpen]);
+
+  useEffect(() => {
+    persistActiveChatConversation(activeConversationId);
+  }, [activeConversationId]);
 
   useEffect(() => {
     const onDemoData = (e: Event) => {
@@ -593,11 +629,34 @@ export default function ChatContent() {
     ensureScrollOnOpen();
   }, [pageActive, ensureScrollOnOpen]);
 
+  const loadRecommendations = useCallback(
+    async (showToast = false) => {
+      setRefreshingRecommendations(true);
+      try {
+        const offset = showToast ? ++recommendationRefreshOffsetRef.current : 0;
+        const items = await getRecommendations(userId, 3, {
+          refresh: showToast,
+          offset,
+        });
+        setRecommendations(items);
+        if (showToast) {
+          message.success(items.length ? "今日推荐已刷新" : "暂时没有新的推荐");
+        }
+      } catch (e: unknown) {
+        setRecommendations([]);
+        if (showToast) {
+          message.error(e instanceof Error ? e.message : "刷新推荐失败");
+        }
+      } finally {
+        setRefreshingRecommendations(false);
+      }
+    },
+    [userId]
+  );
+
   useEffect(() => {
-    void getRecommendations(userId, 3)
-      .then(setRecommendations)
-      .catch(() => setRecommendations([]));
-  }, [userId]);
+    void loadRecommendations(false);
+  }, [loadRecommendations]);
 
   const removeTurnFromUi = useCallback((userMessageId: string) => {
     setMessages((prev) => {
@@ -707,6 +766,7 @@ export default function ChatContent() {
           setMessages([{ ...WELCOME_MSG, content: "对话已清空，请重新开始 👋" }]);
           setActiveUserMessageId(null);
           setActiveConversationId(null);
+          persistActiveChatConversation(null);
           await reloadConversations();
           message.success("已清空");
         } catch (e: unknown) {
@@ -745,6 +805,7 @@ export default function ChatContent() {
     }) => {
       const { displayContent, turnId, conversationId, attachments = [] } = params;
       setLoading(true);
+      setStageLabel("正在理解你的问题");
       const typingId = "typing";
       setMessages((prev) => [
         ...prev,
@@ -756,7 +817,8 @@ export default function ChatContent() {
       let msgResources: ResourceSummary[] | undefined;
       let replyId: string | null = null;
 
-      const formatStage = (stage: string) => STAGE_LABELS[stage] || stage;
+      const formatStage = (stage: string) =>
+        WAIT_STAGE_LABELS[stage] || STAGE_LABELS[stage] || stage;
 
       const stopTokenDrain = () => {
         if (tokenDrainTimerRef.current) {
@@ -895,6 +957,7 @@ export default function ChatContent() {
               scheduleTokenDrain();
             },
             onIntent: (intent: string) => setStageLabel(formatStage(intent)),
+            onRealtimeState: () => setStageLabel(formatStage("realtime_state")),
             onProfile: (p) => setProfile(p),
             onResources: (items) => {
               msgResources = items;
@@ -978,9 +1041,7 @@ export default function ChatContent() {
 
         setStageLabel("");
         await syncAfterChat();
-        void getRecommendations(userId, 3)
-          .then(setRecommendations)
-          .catch(() => {});
+        void loadRecommendations(false);
       } catch (err: unknown) {
         const msgText = err instanceof Error ? err.message : "未知错误";
         const errContent = `⚠️ ${msgText}\n\n若持续出现，请运行 **stop.bat** 再 **start.bat** 重启服务，或检查 .env 中 Kimi API 配置。`;
@@ -994,6 +1055,7 @@ export default function ChatContent() {
         tokenQueueRef.current = [];
         setLiveStreamText("");
         setStreamingMessageId(null);
+        setStageLabel("");
         setLoading(false);
         setMessages((prev) =>
           prev
@@ -1014,6 +1076,7 @@ export default function ChatContent() {
       streamSpeed,
       addResources,
       syncAfterChat,
+      loadRecommendations,
       ttsEnabled,
       voice,
       reloadHistory,
@@ -1202,12 +1265,23 @@ export default function ChatContent() {
 
       <div className="lp-chat-main">
         <div className="lp-chat-column">
-          {recommendations.length > 0 && (
-            <div className="lp-chat-recommendations">
-              <span className="lp-muted-text" style={{ fontSize: 12, marginRight: 8 }}>
-                今日推荐
-              </span>
-              {recommendations.map((rec) => (
+          <div className="lp-chat-recommendations">
+            <span className="lp-muted-text lp-chat-recommendations-title">
+              今日推荐
+            </span>
+            <Tooltip title="刷新推荐">
+              <Button
+                aria-label="刷新今日推荐"
+                className="lp-chat-recommendations-refresh"
+                icon={<ReloadOutlined spin={refreshingRecommendations} />}
+                loading={refreshingRecommendations}
+                size="small"
+                type="text"
+                onClick={() => void loadRecommendations(true)}
+              />
+            </Tooltip>
+            {recommendations.length > 0 ? (
+              recommendations.map((rec) => (
                 <Tooltip key={rec.id} title={rec.reason || rec.topic || undefined}>
                   <Tag
                     className="lp-quick-tag"
@@ -1217,9 +1291,13 @@ export default function ChatContent() {
                     {rec.title}
                   </Tag>
                 </Tooltip>
-              ))}
-            </div>
-          )}
+              ))
+            ) : (
+              <span className="lp-muted-text lp-chat-recommendations-empty">
+                暂无推荐
+              </span>
+            )}
+          </div>
 
           <div className="lp-chat-messages" ref={messagesContainerRef}>
             {messages.map((msg) => (
@@ -1227,6 +1305,7 @@ export default function ChatContent() {
                 key={msg.id}
                 msg={msg}
                 liveStreamText={msg.id === streamingMessageId ? liveStreamText : undefined}
+                thinkingLabel={msg.isTyping ? stageLabel : undefined}
                 onResourceClick={handleResourceClick}
                 onDeleteTurn={msg.role === "user" && msg.id !== "welcome" ? handleDeleteTurn : undefined}
                 onCopy={

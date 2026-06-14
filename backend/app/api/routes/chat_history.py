@@ -9,6 +9,7 @@ from app.db.repository import (
     list_chat_messages,
 )
 from app.models.schemas import ChatHistoryAppend, ChatMessageItem
+from app.services.replan_context_service import invalidate_chat_derived_state
 
 router = APIRouter(prefix="/chat", tags=["chat-history"])
 
@@ -52,6 +53,7 @@ async def remove_turn(
         from fastapi import HTTPException
 
         raise HTTPException(404, "对话不存在或无法删除")
+    await invalidate_chat_derived_state(user_id)
     return {"ok": True}
 
 
@@ -78,4 +80,5 @@ async def clear_history(
 ):
     ensure_same_user(user_id, current_user_id)
     count = await clear_chat_messages(user_id, conversation_id=conversation_id or None)
+    await invalidate_chat_derived_state(user_id, conversation_id=conversation_id or None)
     return {"ok": True, "deleted": count}

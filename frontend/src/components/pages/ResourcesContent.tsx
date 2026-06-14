@@ -15,21 +15,27 @@ import {
 } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import CloudUploadOutlined from "@ant-design/icons/CloudUploadOutlined";
+import ResourcePreviewDrawer from "@/components/ResourcePreviewDrawer";
+import { setReplanLibraryId } from "@/lib/replanPrefs";
 import {
   deleteResource,
+  getRecommendations,
   getPreferences,
   listResources,
   patchPreferences,
+  recordResourceComplete,
   streamGenerateResources,
   listLibraries,
   createLibrary,
   uploadLibraryFiles,
   type LearningResource,
+  type ResourceRecommendation,
   type ResourceLibrary,
 } from "@/lib/api";
 import {
   EXTENDED_RESOURCE_TYPES,
   GENERATABLE_RESOURCE_TYPES,
+  mapApiType,
   RESOURCE_CONFIG,
   STANDARD_RESOURCE_TYPES,
 } from "@/lib/resourceConfig";
@@ -43,16 +49,27 @@ import ResourceLibraryPanel from "@/components/ResourceLibraryPanel";
 import { ResourceJourneyView } from "@/components/ResourceJourneyView";
 import { useAppStore } from "@/store/appStore";
 import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
+import { startResourceRegenerationTask } from "@/lib/resourceRegenerationTask";
 import {
   buildUploadAccept,
   formatExtensionsHint,
   isAllowedUploadFile,
 } from "@/lib/uploadFormats";
 import { useSettingsStore } from "@/store/settingsStore";
+import { downloadResourceMarkdown } from "@/lib/downloadResource";
 import PlusOutlined from "@ant-design/icons/PlusOutlined";
 import SearchOutlined from "@ant-design/icons/SearchOutlined";
 import BookOutlined from "@ant-design/icons/BookOutlined";
+import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import CompassOutlined from "@ant-design/icons/CompassOutlined";
+import CheckCircleOutlined from "@ant-design/icons/CheckCircleOutlined";
+import CloseOutlined from "@ant-design/icons/CloseOutlined";
+import DeleteOutlined from "@ant-design/icons/DeleteOutlined";
+import DownloadOutlined from "@ant-design/icons/DownloadOutlined";
+import ReloadOutlined from "@ant-design/icons/ReloadOutlined";
+import ArrowRightOutlined from "@ant-design/icons/ArrowRightOutlined";
+import SettingOutlined from "@ant-design/icons/SettingOutlined";
+import StarOutlined from "@ant-design/icons/StarOutlined";
 
 const { Text } = Typography;
 
@@ -88,23 +105,13 @@ const GEN_STAGE_LABELS: Record<string, string> = {
   fast_resource: "快速生成中",
 };
 
-function downloadMarkdown(r: LearningResource) {
-  const body = `# ${r.title}\n\n> 主题：${r.topic || "—"}\n\n${r.content}`;
-  const blob = new Blob([body], { type: "text/markdown;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${r.title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 export default function ResourcesContent() {
   const router = useRouter();
   const userId = useAppStore((s) => s.userId);
   const learningPath = useAppStore((s) => s.learningPath);
   const cachedResources = useAppStore((s) => s.resources);
   const setResources = useAppStore((s) => s.setResources);
+  const setResourceTitles = useAppStore((s) => s.setResourceTitles);
   const deepThinking = useSettingsStore((s) => s.deepThinking);
   const pendingPreviewId = useAppStore((s) => s.pendingResourcePreviewId);
   const setPendingPreviewId = useAppStore((s) => s.setPendingResourcePreviewId);
@@ -118,6 +125,10 @@ export default function ResourcesContent() {
   const [genStage, setGenStage] = useState("");
   const [genModalOpen, setGenModalOpen] = useState(false);
   const [pageTab, setPageTab] = useState("resources");
+  const [manageMode, setManageMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [recommendations, setRecommendations] = useState<ResourceRecommendation[]>([]);
+  const [recommendationLoading, setRecommendationLoading] = useState(false);
 
   useEffect(() => {
     if (typeof sessionStorage === "undefined") return;
@@ -134,6 +145,21 @@ export default function ResourcesContent() {
   const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
   const uploadExtensions = useSupportedUploadFormats(genModalOpen);
   const [preparingLibrary, setPreparingLibrary] = useState(false);
+  const [previewResource, setPreviewResource] = useState<LearningResource | null>(null);
+  const [regenResource, setRegenResource] = useState<LearningResource | null>(null);
+  const [regenTags, setRegenTags] = useState<string[]>([]);
+  const [regenRequirement, setRegenRequirement] = useState("");
+
+  const REGEN_TAGS = [
+    "难度提高",
+    "更通俗一点",
+    "多些例题",
+    "增加步骤拆解",
+    "贴近当前路径",
+    "加入小测",
+    "加代码示例",
+    "减少废话",
+  ];
 
   const load = async (background = false) => {
     if (!background) setLoading(true);
@@ -162,8 +188,34 @@ export default function ResourcesContent() {
     setGenModalOpen(true);
   };
 
+  const openResourceById = (id: string) => {
+    router.push(`/resources/view/${encodeURIComponent(id)}`);
+  };
+
   const openPreview = (r: LearningResource) => {
-    router.push(`/resources/view/${encodeURIComponent(r.id)}`);
+    setPreviewResource(r);
+  };
+
+  const syncResourceList = (next: LearningResource[]) => {
+    setItems(next);
+    setResources(next);
+    const titles: Record<string, string> = {};
+    next.forEach((item) => {
+      titles[item.id] = item.title;
+    });
+    setResourceTitles(titles);
+  };
+
+  const loadRecommendations = async (background = false) => {
+    if (!background) setRecommendationLoading(true);
+    try {
+      const list = await getRecommendations(userId, 3);
+      setRecommendations(list);
+    } catch {
+      setRecommendations([]);
+    } finally {
+      setRecommendationLoading(false);
+    }
   };
 
   const handleDeleteResource = (r: LearningResource) => {
@@ -177,13 +229,15 @@ export default function ResourcesContent() {
         try {
           await deleteResource(userId, r.id);
           const next = items.filter((x) => x.id !== r.id);
-          setItems(next);
-          setResources(next);
+          syncResourceList(next);
+          setSelectedIds((prev) => prev.filter((id) => id !== r.id));
+          setRecommendations((prev) => prev.filter((rec) => rec.id !== r.id));
           if (starredIds.includes(r.id)) {
             const ids = starredIds.filter((x) => x !== r.id);
             setStarredIds(ids);
             await patchPreferences(userId, { starred_resource_ids: ids });
           }
+          void loadRecommendations(true);
           message.success("已删除");
         } catch (e: unknown) {
           message.error(e instanceof Error ? e.message : "删除失败");
@@ -199,18 +253,50 @@ export default function ResourcesContent() {
   }, [userId]);
 
   useEffect(() => {
+    setItems(cachedResources);
+    if (cachedResources.length > 0) {
+      setLoading(false);
+    }
+  }, [cachedResources]);
+
+  useEffect(() => {
     setItems([]);
     setLoading(true);
+    setManageMode(false);
+    setSelectedIds([]);
+    setRecommendations([]);
     void load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   useEffect(() => {
+    setSelectedIds((prev) => {
+      const itemIds = new Set(items.map((item) => item.id));
+      const next = prev.filter((id) => itemIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [items]);
+
+  useEffect(() => {
+    if (pageTab !== "resources" || items.length === 0) {
+      setRecommendations([]);
+      return;
+    }
+    void loadRecommendations(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, pageTab, items.length]);
+
+  useEffect(() => {
     if (!pendingPreviewId) return;
     const id = pendingPreviewId;
     setPendingPreviewId(null);
-    router.push(`/resources/view/${encodeURIComponent(id)}`);
-  }, [pendingPreviewId, router, setPendingPreviewId]);
+    const hit = items.find((r) => r.id === id) ?? cachedResources.find((r) => r.id === id);
+    if (hit) {
+      setPreviewResource(hit);
+    } else {
+      openResourceById(id);
+    }
+  }, [pendingPreviewId, router, setPendingPreviewId, items, cachedResources]);
 
   const toggleStar = async (id: string) => {
     const next = starredIds.includes(id)
@@ -240,6 +326,205 @@ export default function ResourcesContent() {
   const doneSteps = pathSteps.filter((s) => s.status === "done").length;
   const activeStep = pathSteps.find((s) => s.status === "in_progress");
   const visibleCount = filteredGrouped.stages.reduce((n, s) => n + s.resourceCount, 0);
+  const visibleResources = useMemo(() => {
+    const resourceMap = new Map<string, LearningResource>();
+    filteredGrouped.stages.forEach((stage) => {
+      stage.categories.forEach((category) => {
+        category.resources.forEach((resource) => {
+          resourceMap.set(resource.id, resource);
+        });
+      });
+    });
+    return Array.from(resourceMap.values());
+  }, [filteredGrouped]);
+  const selectedResources = useMemo(() => {
+    const idSet = new Set(selectedIds);
+    return items.filter((resource) => idSet.has(resource.id));
+  }, [items, selectedIds]);
+  const recommendationCards = useMemo(
+    () =>
+      recommendations.map((rec) => {
+        const resource = items.find((item) => item.id === rec.id);
+        const uiType = mapApiType(resource?.type || rec.type);
+        return {
+          rec,
+          resource,
+          cfg: RESOURCE_CONFIG[uiType],
+        };
+      }),
+    [items, recommendations]
+  );
+  const selectedCount = selectedResources.length;
+  const allVisibleSelected =
+    visibleResources.length > 0 &&
+    visibleResources.every((resource) => selectedIds.includes(resource.id));
+
+  const toggleManageMode = () => {
+    const next = !manageMode;
+    setManageMode(next);
+    if (!next) setSelectedIds([]);
+  };
+
+  const toggleResourceSelection = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectVisibleResources = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      visibleResources.forEach((resource) => next.add(resource.id));
+      return Array.from(next);
+    });
+  };
+
+  const clearSelection = () => setSelectedIds([]);
+
+  const handleBatchStar = async (star: boolean) => {
+    if (!selectedCount) return;
+    const selectedIdSet = new Set(selectedResources.map((resource) => resource.id));
+    const next = star
+      ? Array.from(new Set([...starredIds, ...Array.from(selectedIdSet)]))
+      : starredIds.filter((id) => !selectedIdSet.has(id));
+
+    setStarredIds(next);
+    try {
+      await patchPreferences(userId, { starred_resource_ids: next });
+      message.success(star ? `已收藏 ${selectedCount} 项` : `已取消收藏 ${selectedCount} 项`);
+    } catch {
+      setStarredIds(starredIds);
+      message.error("收藏同步失败");
+    }
+  };
+
+  const handleBatchComplete = async () => {
+    if (!selectedCount) return;
+    const key = "resource-batch-complete";
+    message.loading({ content: `正在标记 ${selectedCount} 项资源...`, key, duration: 0 });
+    try {
+      await Promise.all(
+        selectedResources.map((resource) => recordResourceComplete(userId, resource.id))
+      );
+      message.destroy(key);
+      message.success(`已标记完成 ${selectedCount} 项`);
+      void loadRecommendations(true);
+    } catch (e: unknown) {
+      message.destroy(key);
+      message.error(e instanceof Error ? e.message : "标记完成失败");
+    }
+  };
+
+  const handleDownloadResource = async (r: LearningResource) => {
+    const hide = message.loading(`正在准备「${r.title}」…`, 0);
+    try {
+      const result = await downloadResourceMarkdown(userId, r);
+      hide();
+      if (result.cancelled) return;
+      if (result.ok) {
+        message.success(`「${r.title}」${result.saveHint || "已保存到所选位置"}`);
+      } else {
+        message.warning(result.error || "另存为失败");
+      }
+    } catch (e: unknown) {
+      hide();
+      message.error(e instanceof Error ? e.message : "另存为失败");
+    }
+  };
+
+  const openRegenerateModal = (r: LearningResource) => {
+    setRegenResource(r);
+    setRegenTags([]);
+    setRegenRequirement("");
+  };
+
+  const closeRegenerateModal = () => {
+    setRegenResource(null);
+    setRegenTags([]);
+    setRegenRequirement("");
+  };
+
+  const toggleRegenTag = (tag: string) => {
+    setRegenTags((prev) =>
+      prev.includes(tag) ? prev.filter((item) => item !== tag) : [...prev, tag]
+    );
+  };
+
+  const runRegenerateResource = () => {
+    if (!regenResource) return;
+    if (!regenRequirement.trim() && regenTags.length === 0) {
+      message.warning("请选择一个修改方向，或写下你的具体要求");
+      return;
+    }
+
+    const started = startResourceRegenerationTask({
+      userId,
+      resource: regenResource,
+      requirements: regenRequirement.trim(),
+      tags: regenTags,
+    });
+    if (started) {
+      setRegenResource(null);
+      setRegenTags([]);
+      setRegenRequirement("");
+    }
+  };
+
+  const handleBatchDownload = async () => {
+    if (!selectedCount) return;
+    const hide = message.loading(`正在准备另存为 ${selectedCount} 项…`, 0);
+    let okCount = 0;
+    let cancelledCount = 0;
+    for (const r of selectedResources) {
+      const result = await downloadResourceMarkdown(userId, r);
+      if (result.cancelled) cancelledCount += 1;
+      else if (result.ok) okCount += 1;
+    }
+    hide();
+    if (okCount === selectedCount) {
+      message.success(`已另存为 ${okCount} 项`);
+    } else if (okCount > 0) {
+      message.warning(
+        `已保存 ${okCount}/${selectedCount} 项${cancelledCount ? `，${cancelledCount} 项已取消` : ""}`,
+      );
+    } else if (cancelledCount === selectedCount) {
+      return;
+    } else {
+      message.error("另存为失败，请重试");
+    }
+  };
+
+  const handleBatchDelete = () => {
+    if (!selectedCount) return;
+    Modal.confirm({
+      title: `删除选中的 ${selectedCount} 项资源？`,
+      content: "删除后无法恢复，学习路径中的关联也会移除。",
+      okText: "删除",
+      okType: "danger",
+      cancelText: "取消",
+      onOk: async () => {
+        const selectedIdSet = new Set(selectedResources.map((resource) => resource.id));
+        try {
+          await Promise.all(
+            selectedResources.map((resource) => deleteResource(userId, resource.id))
+          );
+          const next = items.filter((resource) => !selectedIdSet.has(resource.id));
+          syncResourceList(next);
+          setSelectedIds((prev) => prev.filter((id) => !selectedIdSet.has(id)));
+          setRecommendations((prev) => prev.filter((rec) => !selectedIdSet.has(rec.id)));
+          if (starredIds.some((id) => selectedIdSet.has(id))) {
+            const ids = starredIds.filter((id) => !selectedIdSet.has(id));
+            setStarredIds(ids);
+            await patchPreferences(userId, { starred_resource_ids: ids });
+          }
+          message.success(`已删除 ${selectedCount} 项`);
+          void loadRecommendations(true);
+        } catch (e: unknown) {
+          message.error(e instanceof Error ? e.message : "批量删除失败");
+        }
+      },
+    });
+  };
 
   useEffect(() => {
     void listLibraries(userId)
@@ -339,6 +624,7 @@ export default function ResourcesContent() {
       const list = await listResources(userId);
       setItems(list);
       setResources(list);
+      void loadRecommendations(true);
       const created = Math.max(0, list.length - before);
       message.destroy(msgKey);
       if (created > 0) {
@@ -360,6 +646,15 @@ export default function ResourcesContent() {
 
   return (
     <div>
+      <ResourcePreviewDrawer
+        open={Boolean(previewResource)}
+        resource={previewResource}
+        onClose={() => setPreviewResource(null)}
+        onOpenFull={(r) => {
+          setPreviewResource(null);
+          openResourceById(r.id);
+        }}
+      />
       <PageHeader
         title="学习资源库"
         subtitle={
@@ -369,6 +664,16 @@ export default function ResourcesContent() {
         }
         icon={<BookOutlined />}
         extra={
+          <div className="lp-resource-header-actions">
+            {pageTab === "resources" && (
+              <Button
+                icon={<SettingOutlined />}
+                type={manageMode ? "primary" : "default"}
+                onClick={toggleManageMode}
+              >
+                {manageMode ? "退出管理" : "管理资源"}
+              </Button>
+            )}
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -377,6 +682,7 @@ export default function ResourcesContent() {
           >
             生成资源
           </Button>
+          </div>
         }
       />
       <Modal
@@ -450,7 +756,10 @@ export default function ResourcesContent() {
                 style={{ width: "100%" }}
                 placeholder="选择用于生成的资料库"
                 value={selectedLibraryId ?? undefined}
-                onChange={(v) => setSelectedLibraryId(v)}
+                onChange={(v) => {
+                  setSelectedLibraryId(v);
+                  setReplanLibraryId(v ?? null);
+                }}
                 options={libraries.map((l) => ({
                   value: l.id,
                   label: `${l.name}${l.chunk_count ? ` (${l.chunk_count} 片段)` : " (空)"}`,
@@ -562,6 +871,63 @@ export default function ResourcesContent() {
           </div>
         </div>
       </Modal>
+      <Modal
+        title="重新生成资源"
+        open={Boolean(regenResource)}
+        onCancel={closeRegenerateModal}
+        maskClosable
+        destroyOnClose={false}
+        width={540}
+        className="lp-resource-regen-modal"
+        footer={
+          <div className="lp-resource-gen-footer">
+            <Button onClick={closeRegenerateModal}>
+              取消
+            </Button>
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              onClick={runRegenerateResource}
+            >
+              开始重新生成
+            </Button>
+          </div>
+        }
+      >
+        {regenResource && (
+          <div className="lp-resource-regen-form">
+            <div className="lp-resource-regen-current">
+              <Text type="secondary">当前资源</Text>
+              <Text strong>{regenResource.title}</Text>
+              <Text type="secondary">
+                {RESOURCE_CONFIG[mapApiType(regenResource.type) as keyof typeof RESOURCE_CONFIG]
+                  ?.label || regenResource.type}
+              </Text>
+            </div>
+            <div className="lp-resource-regen-tags">
+              {REGEN_TAGS.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`lp-resource-regen-tag${regenTags.includes(tag) ? " lp-resource-regen-tag--active" : ""}`}
+                  onClick={() => toggleRegenTag(tag)}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+            <Input.TextArea
+              rows={4}
+              value={regenRequirement}
+              onChange={(e) => setRegenRequirement(e.target.value)}
+              placeholder="写下你希望这份资源怎么改，比如：难度再高一点，多给 3 个例题，每一步写清为什么。"
+            />
+            <Text type="secondary" className="lp-resource-regen-hint">
+              会保留原资源 ID 并覆盖内容，学习路径里对应的资源会同步变成新版。
+            </Text>
+          </div>
+        )}
+      </Modal>
       <div className="lp-resource-tabs">
         <button
           type="button"
@@ -573,7 +939,11 @@ export default function ResourcesContent() {
         <button
           type="button"
           className={`lp-resource-tab${pageTab === "libraries" ? " lp-resource-tab--active" : ""}`}
-          onClick={() => setPageTab("libraries")}
+          onClick={() => {
+            setPageTab("libraries");
+            setManageMode(false);
+            setSelectedIds([]);
+          }}
         >
           课程资料库
         </button>
@@ -639,6 +1009,57 @@ export default function ResourcesContent() {
           </div>
         )}
 
+        {!manageMode && (recommendationLoading || recommendationCards.length > 0) && (
+          <section className="lp-resource-recommend-panel">
+            <div className="lp-resource-recommend-head">
+              <div className="lp-resource-recommend-title">
+                <span className="lp-resource-recommend-bulb">
+                  <BulbOutlined />
+                </span>
+                <div>
+                  <Text strong>当前推荐</Text>
+                  <Text type="secondary">此刻优先看这几项</Text>
+                </div>
+              </div>
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={recommendationLoading}
+                onClick={() => void loadRecommendations(false)}
+              >
+                刷新
+              </Button>
+            </div>
+            {recommendationLoading && recommendationCards.length === 0 ? (
+              <div className="lp-resource-recommend-loading">
+                <Spin size="small" />
+              </div>
+            ) : (
+              <div className="lp-resource-recommend-grid">
+                {recommendationCards.map(({ rec, resource, cfg }, index) => (
+                  <button
+                    key={rec.id}
+                    type="button"
+                    className="lp-resource-recommend-card"
+                    style={{ "--rec-accent": cfg.color } as React.CSSProperties}
+                    onClick={() => openResourceById(rec.id)}
+                  >
+                    <span className="lp-resource-recommend-rank">{index + 1}</span>
+                    <span className="lp-resource-recommend-icon">{cfg.icon}</span>
+                    <span className="lp-resource-recommend-copy">
+                      <span className="lp-resource-recommend-name">{rec.title}</span>
+                      <span className="lp-resource-recommend-reason">
+                        {rec.reason || resource?.topic || rec.topic || "适合当前阶段"}
+                      </span>
+                    </span>
+                    <ArrowRightOutlined className="lp-resource-recommend-arrow" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         <div className="lp-resource-filters">
           <span className="lp-resource-filters-label">资源类型</span>
           <div className="lp-resource-filter-chips">
@@ -672,6 +1093,76 @@ export default function ResourcesContent() {
           />
         </div>
 
+        {manageMode && (
+          <div className="lp-resource-manage-bar">
+            <div className="lp-resource-manage-info">
+              <span>已选</span>
+              <strong>{selectedCount}</strong>
+              <span>项</span>
+              {allVisibleSelected && <Text type="secondary">当前筛选已全选</Text>}
+            </div>
+            <div className="lp-resource-manage-actions">
+              <Button
+                size="small"
+                icon={<CheckCircleOutlined />}
+                disabled={visibleResources.length === 0 || allVisibleSelected}
+                onClick={selectVisibleResources}
+              >
+                全选当前 {visibleResources.length}
+              </Button>
+              <Button
+                size="small"
+                icon={<CloseOutlined />}
+                disabled={!selectedCount}
+                onClick={clearSelection}
+              >
+                清空
+              </Button>
+              <Button
+                size="small"
+                icon={<StarOutlined />}
+                disabled={!selectedCount}
+                onClick={() => void handleBatchStar(true)}
+              >
+                收藏
+              </Button>
+              <Button
+                size="small"
+                icon={<StarOutlined />}
+                disabled={!selectedCount}
+                onClick={() => void handleBatchStar(false)}
+              >
+                取消收藏
+              </Button>
+              <Button
+                size="small"
+                icon={<CheckCircleOutlined />}
+                disabled={!selectedCount}
+                onClick={() => void handleBatchComplete()}
+              >
+                标记完成
+              </Button>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                disabled={!selectedCount}
+                onClick={handleBatchDownload}
+              >
+                另存为
+              </Button>
+              <Button
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                disabled={!selectedCount}
+                onClick={handleBatchDelete}
+              >
+                删除
+              </Button>
+            </div>
+          </div>
+        )}
+
         {loading && items.length === 0 ? (
           <div className="lp-resource-empty">
             <Spin />
@@ -688,8 +1179,12 @@ export default function ResourcesContent() {
             starredIds={starredIds}
             onStar={(id) => void toggleStar(id)}
             onPreview={openPreview}
-            onDownload={downloadMarkdown}
+            onDownload={(r) => void handleDownloadResource(r)}
+            onRegenerate={openRegenerateModal}
             onDelete={handleDeleteResource}
+            manageMode={manageMode}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleResourceSelection}
           />
         )}
 

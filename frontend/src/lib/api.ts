@@ -33,6 +33,28 @@ export type StudentProfile = {
   recent_progress: string;
 };
 
+export type RealtimeLearningState = {
+  user_id: string;
+  emotion: "neutral" | "confused" | "frustrated" | "excited" | "tired" | "anxious";
+  implicit_emotion: string;
+  engagement: "low" | "medium" | "high";
+  confusion_level: number;
+  curiosity_level: number;
+  cognitive_load_level: number;
+  frustration_level: number;
+  confidence_level: number;
+  initiative_level: number;
+  curiosity_topics: string[];
+  stuck_topics: string[];
+  language_style: string;
+  preferred_reply_style: string;
+  cognitive_load: "low" | "medium" | "high";
+  next_best_action: string;
+  confidence: number;
+  evidence: string[];
+  updated_at?: string;
+};
+
 export type LearningResource = {
   id: string;
   type: string;
@@ -68,12 +90,117 @@ export type ResourceSummary = {
   title: string;
 };
 
+export type ClassroomVisualBlock = {
+  type: "table" | "compare" | "process" | "example" | "exercise" | "formula" | "diagram" | string;
+  title?: string;
+  columns?: string[];
+  rows?: string[][];
+  steps?: string[];
+  items?: string[];
+  question?: string;
+  answer?: string;
+  expression?: string;
+  latex?: string;
+  formula?: string;
+  explanation?: string;
+  analysis?: string;
+  solution?: string;
+  difficulty?: string;
+  level?: string;
+};
+
+export type ClassroomSlide = {
+  kicker: string;
+  title: string;
+  body: string;
+  board: string[];
+  teacher_note?: string;
+  layout?: "cover" | "problem" | "concept" | "timeline" | "example" | "mistake" | "quiz" | "summary" | string;
+  visual_theme?: string;
+  accent_color?: "blue" | "teal" | "amber" | "indigo" | "green" | "rose" | "violet" | "cyan" | string;
+  visual_prompt?: string;
+  visual_blocks?: ClassroomVisualBlock[];
+  image_url?: string;
+};
+
+export type ClassroomTeacherScripts = {
+  normal: string;
+  confused: string;
+  slow: string;
+  example: string;
+  practice: string;
+};
+
+export type ClassroomHandoutSection = {
+  heading: string;
+  content: string;
+};
+
+export type ClassroomSession = {
+  id: string;
+  title: string;
+  objective: string;
+  course_name: string;
+  estimated_minutes: number;
+  depth_level?: string;
+  slides: ClassroomSlide[];
+  handout?: ClassroomHandoutSection[];
+  teacher_scripts: ClassroomTeacherScripts;
+  check_question: {
+    question: string;
+    expected_answer: string;
+    hint: string;
+  };
+  homework: string[];
+  source_resources: { id: string; type: string; title: string; topic: string }[];
+  prompt_summary: string;
+  personalization_brief: string;
+};
+
+export type ClassroomQuizInput = {
+  user_id: string;
+  course_title: string;
+  course_objective: string;
+  slide_title: string;
+  slide_body: string;
+  slide_board: string[];
+  teacher_note?: string;
+  depth_level?: string;
+  previous_question?: string;
+  variant?: number;
+};
+
+export type ClassroomQuizResponse = {
+  id: string;
+  question: string;
+  options: { id: string; text: string }[];
+  answer_id: string;
+  explanation: string;
+  transfer: string;
+  question_type: string;
+  difficulty: string;
+};
+
+export type ClassroomGenerationJob = {
+  id: string;
+  user_id: string;
+  title: string;
+  status: "queued" | "running" | "done" | "error";
+  stage: string;
+  progress: number;
+  result?: ClassroomSession | null;
+  error?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type StreamChatCallbacks = {
   onToken?: (t: string) => void;
   onDone?: (reply: string) => void;
   onIntent?: (intent: string) => void;
   onProgress?: (stage: string) => void;
   onProfile?: (profile: StudentProfile) => void;
+  onRealtimeState?: (state: RealtimeLearningState) => void;
   onResources?: (items: ResourceSummary[]) => void;
   onPath?: (info: { steps: number; version: number }) => void;
   onError?: (msg: string) => void;
@@ -132,6 +259,7 @@ export async function chat(userId: string, message: string, deepThinking = false
   return res.json() as Promise<{
     reply: string;
     profile?: StudentProfile;
+    realtime_state?: RealtimeLearningState;
     resources?: ResourceSummary[];
   }>;
 }
@@ -174,6 +302,14 @@ export async function streamChat(
     if (e instanceof Error && e.name === "AbortError") {
       throw new Error(`请求超时（${Math.round(effectiveTimeout / 1000)}s），请稍后重试或关闭深度思考`);
     }
+    if (
+      e instanceof TypeError ||
+      (e instanceof Error && /failed to fetch|network error|load failed/i.test(e.message))
+    ) {
+      throw new Error(
+        "与后端的连接中断（常见于后端热重载或服务未启动）。请运行 stop.bat 再 start.bat 重启后重试。",
+      );
+    }
     throw e;
   }
   clearTimeout(timer);
@@ -185,6 +321,7 @@ export async function streamChat(
   let lastReply = "";
   let gotToken = false;
 
+  try {
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -218,6 +355,13 @@ export async function streamChat(
           /* ignore */
         }
       }
+      if (event === "realtime_state" && data) {
+        try {
+          callbacks.onRealtimeState?.(JSON.parse(data) as RealtimeLearningState);
+        } catch {
+          /* ignore */
+        }
+      }
       if (event === "resources" && data) {
         try {
           callbacks.onResources?.(JSON.parse(data) as ResourceSummary[]);
@@ -240,6 +384,17 @@ export async function streamChat(
       }
       if (event === "done") lastReply = data;
     }
+  }
+  } catch (e: unknown) {
+    if (
+      e instanceof TypeError ||
+      (e instanceof Error && /failed to fetch|network error|load failed/i.test(e.message))
+    ) {
+      throw new Error(
+        "流式连接中断（后端可能正在重启）。请运行 stop.bat 再 start.bat，然后重新发送消息。",
+      );
+    }
+    throw e;
   }
   if (!lastReply && !gotToken) {
     const fallback = "未收到助手回复，请检查后端服务或 Kimi API 配置后重试。";
@@ -317,6 +472,14 @@ export async function getProfile(userId: string) {
   return res.json() as Promise<StudentProfile>;
 }
 
+export async function getRealtimeState(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/profile/${userId}/realtime`), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<RealtimeLearningState>;
+}
+
 export type ProfileRefreshResult = {
   profile: StudentProfile;
   message: string;
@@ -345,6 +508,57 @@ export async function refreshProfile(userId: string) {
   );
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<ProfileRefreshResult>;
+}
+
+export type LearnerProfileAnalysis = {
+  user_id: string;
+  summary: string;
+  long_term: {
+    knowledge_assessment: string;
+    goal_clarity: string;
+    cognitive_style_notes: string;
+    error_prone_analysis: string;
+    progress_narrative: string;
+  };
+  realtime: {
+    emotional_state: string;
+    engagement_notes: string;
+    confusion_and_stuck: string;
+    curiosity_notes: string;
+    cognitive_load_notes: string;
+    confidence_notes: string;
+  };
+  behavioral: {
+    chat_patterns: string;
+    resource_usage: string;
+    quiz_performance: string;
+    modality_preference: string;
+  };
+  strengths: string[];
+  gaps: string[];
+  risks: string[];
+  recommended_focus: string[];
+  planning_hints: string[];
+  ai_context_brief: string;
+  sources: Record<string, unknown>;
+  updated_at: string;
+};
+
+export type ProfileAnalysisResult = {
+  analysis: LearnerProfileAnalysis;
+  profile: StudentProfile;
+  message: string;
+};
+
+export async function analyzeLearnerProfile(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/profile/${userId}/analyze`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ProfileAnalysisResult>;
 }
 
 export type ResourceLibrary = {
@@ -491,9 +705,19 @@ export type ResourceRecommendation = {
   reason: string;
 };
 
-export async function getRecommendations(userId: string, limit = 5) {
+export async function getRecommendations(
+  userId: string,
+  limit = 5,
+  options?: { refresh?: boolean; offset?: number }
+) {
+  const params = new URLSearchParams({
+    user_id: userId,
+    limit: String(limit),
+  });
+  if (options?.refresh) params.set("refresh", "true");
+  if (options?.offset !== undefined) params.set("offset", String(options.offset));
   const res = await handleResponse(
-    await fetch(apiUrl(`/api/resources/recommendations?user_id=${userId}&limit=${limit}`), {
+    await fetch(apiUrl(`/api/resources/recommendations?${params.toString()}`), {
       headers: authHeaders(),
     })
   );
@@ -826,6 +1050,37 @@ export async function deleteResource(userId: string, resourceId: string) {
   return res.json() as Promise<{ ok: boolean }>;
 }
 
+export async function regenerateResource(
+  userId: string,
+  resourceId: string,
+  payload: { requirements?: string; tags?: string[] },
+) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/resources/${encodeURIComponent(resourceId)}/regenerate`), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        user_id: userId,
+        requirements: payload.requirements || "",
+        tags: payload.tags || [],
+      }),
+    }),
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<LearningResource>;
+}
+
+export async function clearUnstarredResources(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/resources/clear-unstarred?user_id=${encodeURIComponent(userId)}`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean; deleted_count: number; kept_count: number }>;
+}
+
 export async function getPath(userId: string) {
   const res = await handleResponse(
     await fetch(apiUrl(`/api/path/${userId}`), { headers: authHeaders() })
@@ -833,6 +1088,229 @@ export async function getPath(userId: string) {
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<LearningPath>;
+}
+
+export async function clearPath(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/path/${userId}/clear`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean; had_path: boolean }>;
+}
+
+export type PathReplanResult = {
+  path: LearningPath;
+  meta: {
+    stage_count: number;
+    node_count: number;
+    quality_checked: boolean;
+    remaining_issues: string[];
+    version: number;
+  };
+};
+
+export type PathResourceRegenResult = {
+  path: LearningPath;
+  resources: LearningResource[];
+  meta: {
+    generated_count: number;
+    stages_processed: number;
+    type_breakdown: Record<string, number>;
+    stages: Array<{
+      step_id: string;
+      title: string;
+      generated_count: number;
+      types: string[];
+      resource_ids: string[];
+      titles?: string[];
+    }>;
+    quality_checked: boolean;
+    generation_mode?: string;
+    library_name?: string;
+    library_id?: string;
+    fallback_count?: number;
+    fallback_warnings?: string[];
+    forced_regen?: boolean;
+  };
+};
+
+export async function regenPathResources(
+  userId: string,
+  options?: { libraryId?: string | null },
+) {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/resources/regen-for-path"), {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        user_id: userId,
+        library_id: options?.libraryId || null,
+      }),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<PathResourceRegenResult>;
+}
+
+export async function replanPath(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/path/${userId}/replan`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<PathReplanResult>;
+}
+
+export type PathConfirmResult = {
+  path: LearningPath;
+  resources: LearningResource[];
+  meta: {
+    ok: boolean;
+    issues: string[];
+    fixes: string[];
+    warnings: string[];
+    stage_count: number;
+    node_count: number;
+    resource_count: number;
+    linked_resource_count: number;
+    starred_count: number;
+    analysis_present: boolean;
+    profile_present: boolean;
+    confirmed_at: string;
+  };
+};
+
+export async function confirmPathReplan(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/path/${userId}/confirm`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<PathConfirmResult>;
+}
+
+export type PathReplanSubPhase = {
+  label: string;
+  status: "pending" | "active" | "done";
+};
+
+export type PathReplanJobResult = {
+  stage_count: number;
+  node_count: number;
+  linked_resource_count: number;
+  generated_count: number;
+  deleted_resource_count: number;
+  kept_resource_count: number;
+  starred_count: number;
+  fallback_count: number;
+  warnings: string[];
+  library_name: string;
+  planning_sources?: Record<string, string | number>;
+};
+
+export type ReplanContext = {
+  learning_goal: string;
+  goal_source: string;
+  conversation_id: string;
+  chat_basis: string;
+  intent_turn_count: number;
+  intent_summary: string;
+  intent_topics: string[];
+  starred_count: number;
+  starred_titles: string[];
+  resource_view_count: number;
+  resource_complete_count: number;
+  quiz_summary: string;
+  library_id: string;
+  library_name: string;
+  can_start: boolean;
+  block_reason: string;
+};
+
+export type PathReplanJob = {
+  id: string;
+  user_id: string;
+  status: "queued" | "running" | "done" | "error";
+  step_index: number;
+  step_label: string;
+  stage: string;
+  progress: number;
+  sub_phases: PathReplanSubPhase[];
+  elapsed_sec: number;
+  started_at?: string | null;
+  result_summary: string;
+  error: string;
+  library_id: string;
+  result: PathReplanJobResult | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function getReplanContext(
+  userId: string,
+  options?: {
+    conversationId?: string | null;
+    learningGoal?: string | null;
+    libraryId?: string | null;
+  },
+) {
+  const params = new URLSearchParams();
+  if (options?.conversationId) params.set("conversation_id", options.conversationId);
+  if (options?.learningGoal?.trim()) params.set("learning_goal", options.learningGoal.trim());
+  if (options?.libraryId) params.set("library_id", options.libraryId);
+  const q = params.toString();
+  const res = await handleResponse(
+    await fetch(
+      apiUrl(`/api/profile/${encodeURIComponent(userId)}/replan-context${q ? `?${q}` : ""}`),
+      { headers: authHeaders() },
+    ),
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ReplanContext>;
+}
+
+export async function createPathReplanJob(
+  userId: string,
+  options?: {
+    libraryId?: string | null;
+    conversationId?: string | null;
+    learningGoal?: string | null;
+  },
+) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/path/${encodeURIComponent(userId)}/replan-jobs`), {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        library_id: options?.libraryId || null,
+        conversation_id: options?.conversationId || null,
+        learning_goal: options?.learningGoal?.trim() || null,
+      }),
+    }),
+  );
+  if (res.status === 409 || res.status === 422) {
+    const text = await res.text();
+    throw new Error(text || "无法启动重规划任务");
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<PathReplanJob>;
+}
+
+export async function getPathReplanJob(jobId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/path/replan-jobs/${encodeURIComponent(jobId)}`), {
+      headers: authHeaders(),
+    }),
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<PathReplanJob>;
 }
 
 export async function refreshPath(userId: string) {
@@ -846,7 +1324,179 @@ export async function refreshPath(userId: string) {
   return res.json() as Promise<LearningPath>;
 }
 
+export type ClassroomGenerateInput = {
+  user_id: string;
+  step_key: string;
+  title: string;
+  objective: string;
+  resource_ids: string[];
+  selected_resource_ids: string[];
+  estimated_minutes: number;
+  course_name: string;
+  teaching_mode?: string;
+  depth_level?: string;
+  classroom_keywords?: string[];
+  local_materials?: { title: string; content_excerpt: string }[];
+  ai_material_requests?: string[];
+};
+
+export async function generateClassroomSession(input: ClassroomGenerateInput) {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/classroom/session"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(input),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ClassroomSession>;
+}
+
 // ── Auth ─────────────────────────────────────────────────────────────────────
+
+export async function generateClassroomQuiz(input: ClassroomQuizInput) {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/classroom/quiz"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(input),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ClassroomQuizResponse>;
+}
+
+export async function startClassroomGenerationJob(input: ClassroomGenerateInput) {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/classroom/session/jobs"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(input),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ClassroomGenerationJob>;
+}
+
+export async function getClassroomGenerationJob(jobId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/classroom/session/jobs/${encodeURIComponent(jobId)}`), {
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ClassroomGenerationJob>;
+}
+
+export async function exportClassroomPptx(userId: string, session: ClassroomSession) {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/classroom/session/export-pptx"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ user_id: userId, session }),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.blob();
+}
+
+export type ClassroomLibrarySeed = {
+  stepKey: string;
+  title: string;
+  objective: string;
+  resourceIds: string[];
+  estimatedMinutes: number;
+  courseName: string;
+  source: "path" | "manual";
+};
+
+export type ClassroomLibraryItem = {
+  id: string;
+  job_id: string;
+  user_id: string;
+  step_key: string;
+  title: string;
+  objective: string;
+  course_name: string;
+  status: "queued" | "running" | "done" | "error";
+  stage: string;
+  progress: number;
+  is_favorite: boolean;
+  has_result: boolean;
+  error: string;
+  seed: ClassroomLibrarySeed;
+  result: ClassroomSession | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function listClassroomLibrary() {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/classroom/library"), { headers: authHeaders() })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const data = (await res.json()) as { items: ClassroomLibraryItem[] };
+  return data.items;
+}
+
+export async function deleteClassroomLibraryItem(itemId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/classroom/library/${encodeURIComponent(itemId)}`), {
+      method: "DELETE",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ ok: boolean }>;
+}
+
+export async function patchClassroomLibraryFavorite(itemId: string, isFavorite: boolean) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/classroom/library/${encodeURIComponent(itemId)}`), {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ is_favorite: isFavorite }),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ClassroomLibraryItem>;
+}
+
+export async function regenerateClassroomLibraryItem(itemId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/classroom/library/${encodeURIComponent(itemId)}/regenerate`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ClassroomLibraryItem>;
+}
+
+export type ClassroomParsedMaterial = {
+  id: string;
+  title: string;
+  size: number;
+  mime_type: string;
+  content_excerpt: string;
+  status: "parsed" | "recorded" | "error";
+  error?: string;
+};
+
+export async function parseClassroomMaterials(userId: string, files: File[]) {
+  const form = new FormData();
+  form.append("user_id", userId);
+  for (const file of files) form.append("files", file);
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/classroom/materials/parse"), {
+      method: "POST",
+      headers: authHeaders({}, false),
+      body: form,
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<{ materials: ClassroomParsedMaterial[] }>;
+}
 
 export type AuthUser = {
   user_id: string;

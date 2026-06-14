@@ -1,25 +1,18 @@
-from app.agents.nodes._resource_base import _build_resource
+from app.agents.nodes._resource_base import _build_resource, resolve_resource_title
 from app.agents.state import AgentState
 
 
 async def mindmap_node(state: AgentState) -> dict:
-    topic = state.get("topic") or "机器学习导论"
+    topic = state.get("topic") or "学习主题"
+    default_title = f"「{topic}」知识导图"
     resource = await _build_resource(
         state,
         resource_type="mindmap",
-        title=f"{topic} 思维导图",
+        title=resolve_resource_title(state, "mindmap", default_title),
         content_template=(
-            "```mermaid\n"
-            "mindmap\n"
-            "  root(({topic}))\n"
-            "    监督学习\n"
-            "      回归\n"
-            "      分类\n"
-            "    无监督学习\n"
-            "      聚类\n"
-            "    模型评估\n"
-            "```\n\n"
-            "知识库上下文：{context}"
+            "请为「{topic}」生成 Mermaid mindmap，节点须来自以下学习上下文，"
+            "勿套用通用机器学习模板：\n\n"
+            "{context}\n"
         ),
     )
     resources = list(state.get("resources") or [])

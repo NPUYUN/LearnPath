@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import AsyncIterator
 
@@ -5,10 +6,15 @@ from app.agents.graph import build_graph
 from app.agents.supervisor import classify_intent
 from app.core.config import get_settings
 from app.db.repository import get_profile, list_resources, save_path, save_resources
-from app.models.schemas import ChatResponse, StudentProfile
+from app.models.schemas import ChatResponse, RealtimeLearningState, StudentProfile
 from app.core.llm.deep_thinking import graph_stream_chunk_size
-from app.services.chat_intelligence_service import stream_intelligent_chat
+from app.services.chat_intelligence_service import (
+    build_chitchat_reply,
+    classify_question_type,
+    stream_intelligent_chat,
+)
 from app.services.graph_state import build_graph_state
+from app.services.realtime_state_service import analyze_realtime_state
 
 
 async def run_chat(
@@ -24,6 +30,14 @@ async def run_chat(
         user_id, message, attachment_context, attachments
     )
     intent = classify_intent(message)
+    existing_profile = await get_profile(user_id)
+    realtime_state = await analyze_realtime_state(
+        user_id,
+        message,
+        profile=existing_profile,
+        question_type=classify_question_type(message),
+        deep_thinking=deep_thinking,
+    )
     base = await build_graph_state(
         user_id,
         {
@@ -63,13 +77,21 @@ async def run_chat(
     if profile:
         profile_obj = StudentProfile(**{k: v for k, v in profile.items() if k in StudentProfile.model_fields})
     else:
-        existing = await get_profile(user_id)
-        profile_obj = StudentProfile(**existing) if existing else None
+        profile_obj = StudentProfile(**existing_profile) if existing_profile else None
+    realtime_state = result.get("realtime_state") or realtime_state
+    realtime_state_obj = (
+        RealtimeLearningState(
+            **{k: v for k, v in realtime_state.items() if k in RealtimeLearningState.model_fields}
+        )
+        if realtime_state
+        else None
+    )
 
     reply = (result.get("reply") or "").strip()
     return ChatResponse(
         reply=reply or "暂时无法生成回复，请稍后重试。",
         profile=profile_obj,
+        realtime_state=realtime_state_obj,
         intent=result.get("intent", intent),
         resources=_resource_summaries(saved_resources),
         path=path_data,
@@ -101,6 +123,30 @@ async def _resolve_attachment_context(
     return (attachment_context or "").strip()
 
 
+def _is_meta_chat_message(message: str) -> bool:
+    text = (message or "").strip().lower()
+    return any(
+        key in text
+        for key in (
+            "你好",
+            "您好",
+            "hello",
+            "hi",
+            "你是谁",
+            "你叫什么",
+            "你能做什么",
+            "你有什么功能",
+            "你能怎么帮",
+            "你可以怎么帮",
+            "怎么帮我",
+            "能帮我",
+            "介绍一下你自己",
+            "学径是什么",
+            "learnpath",
+        )
+    )
+
+
 async def stream_chat(
     user_id: str,
     message: str,
@@ -123,9 +169,55 @@ async def stream_chat(
     attachment_context = await _resolve_attachment_context(
         user_id, message, attachment_context, attachments
     )
+    question_type = classify_question_type(message)
+    if (question_type == "chitchat" or _is_meta_chat_message(message)) and not attachment_context.strip():
+        reply = build_chitchat_reply(message)
+        yield {"event": "intent", "data": "chat"}
+        yield {
+            "event": "progress",
+            "data": json.dumps({"stage": "fast_reply"}, ensure_ascii=False),
+        }
+        async for tok in _yield_text_tokens(reply, chunk_size):
+            yield tok
+        yield {"event": "done", "data": reply}
+        return
+
     intent = classify_intent(message)
     topic = _extract_topic(message)
+    yield {
+        "event": "progress",
+        "data": json.dumps({"stage": "realtime_state"}, ensure_ascii=False),
+    }
+    existing_profile = await get_profile(user_id)
+
+    async def _analyze_state() -> dict:
+        return await analyze_realtime_state(
+            user_id,
+            message,
+            profile=existing_profile,
+            question_type=question_type,
+            deep_thinking=deep_thinking,
+        )
+
+    async def _preload_chat_base() -> dict:
+        return await build_graph_state(
+            user_id,
+            {
+                "messages": [{"role": "user", "content": message}],
+                "intent": "chat",
+                "topic": topic,
+                "deep_thinking": deep_thinking,
+            },
+        )
+
+    if intent == "chat":
+        realtime_state, chat_base = await asyncio.gather(_analyze_state(), _preload_chat_base())
+    else:
+        realtime_state = await _analyze_state()
+        chat_base = None
+
     yield {"event": "intent", "data": intent}
+    yield {"event": "realtime_state", "data": json.dumps(realtime_state, ensure_ascii=False, default=str)}
     if deep_thinking:
         yield {
             "event": "progress",
@@ -146,7 +238,7 @@ async def stream_chat(
     try:
         if intent == "chat":
             yield {"event": "progress", "data": json.dumps({"stage": "retrieval"}, ensure_ascii=False)}
-            base = await build_graph_state(
+            base = chat_base or await build_graph_state(
                 user_id,
                 {
                     "messages": [{"role": "user", "content": message}],
@@ -164,11 +256,13 @@ async def stream_chat(
                 message,
                 topic,
                 profile=base.get("profile"),
+                realtime_state=realtime_state,
                 resources=base.get("resources"),
                 deep_thinking=deep_thinking,
                 web_search=web_search,
                 attachment_context=attachment_context,
                 chunk_size=chunk_size,
+                update_profile=deep_thinking,
             ):
                 if item["type"] == "token":
                     yield {"event": "token", "data": item["data"]}
@@ -183,6 +277,13 @@ async def stream_chat(
                         yield {
                             "event": "profile",
                             "data": json.dumps(profile_data, ensure_ascii=False, default=str),
+                        }
+                elif item["type"] == "realtime_state":
+                    state_data = item.get("data")
+                    if state_data:
+                        yield {
+                            "event": "realtime_state",
+                            "data": json.dumps(state_data, ensure_ascii=False, default=str),
                         }
                 elif item["type"] == "done":
                     final_reply = item.get("data") or ""

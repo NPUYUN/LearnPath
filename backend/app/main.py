@@ -31,6 +31,7 @@ from app.api.routes import (
     chat_history,
     chat_conversations,
     chat_attachments,
+    classroom,
     admin,
     demo,
     health,
@@ -85,6 +86,7 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(classroom.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(resources.router, prefix="/api")
 app.include_router(libraries.router, prefix="/api")

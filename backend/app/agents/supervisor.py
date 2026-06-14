@@ -2,6 +2,19 @@
 
 from app.agents.state import AgentState
 
+CHAT_META_KEYWORDS = [
+    "你是谁",
+    "你叫什么",
+    "你能做什么",
+    "你有什么功能",
+    "你能怎么帮",
+    "你可以怎么帮",
+    "怎么帮我",
+    "能帮我",
+    "介绍一下你自己",
+    "学径是什么",
+    "learnpath",
+]
 GENERATE_KEYWORDS = ["生成", "出题", "思维导图", "文档", "练习", "资源", "案例"]
 PATH_KEYWORDS = ["路径", "计划", "下一步", "学什么", "规划"]
 TUTOR_KEYWORDS = [
@@ -31,6 +44,8 @@ MEDIA_KEYWORDS = ["视频", "分镜", "演示"]
 
 def classify_intent(message: str) -> str:
     text = message.strip()
+    if any(k.lower() in text.lower() for k in CHAT_META_KEYWORDS):
+        return "chat"
     if any(k in text for k in EVAL_KEYWORDS):
         return "eval"
     if any(k in text for k in GENERATE_KEYWORDS):

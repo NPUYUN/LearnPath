@@ -23,13 +23,15 @@ async def _aux_review_snippet(title: str, excerpt: str) -> str | None:
         return None
 
 
-async def review_resources(resources: list[dict]) -> list[dict]:
+async def review_resources(resources: list[dict], *, skip_llm: bool = False) -> list[dict]:
     reviewed: list[dict] = []
     for r in resources:
         content = r.get("content", "")
         review = review_consistency(content, content[:500])
         if not review["passed"]:
             content += f"\n\n> 质检提示：{review['message']}\n"
+        elif skip_llm:
+            content += "\n\n> 质检：规则检查通过。\n"
         else:
             llm_note = await _aux_review_snippet(r.get("title", ""), content)
             if llm_note:

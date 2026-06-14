@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # 控制台：https://bailian.console.aliyun.com/ → API Key（sk- 开头）
     qwen_api_key: str = ""
     qwen_base_url: str = "https://dashscope.aliyuncs.com/api/v1"
-    qwen_image_model: str = "wan2.2-t2i-flash"
+    qwen_image_model: str = "qwen-image-2.0-pro"
     qwen_image_max_images: int = 4
     # 通义万相 · 图生/文生视频（video-synthesis）
     qwen_video_enabled: bool = True
@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     qwen_video_timeout_sec: int = 300
     qwen_video_max_per_resource: int = 1
     qwen_vl_model: str = "qwen-vl-plus"
+
+    # 火山方舟 · 豆包 Seedream（课堂 PPT 教学插图）
+    ark_api_key: str = ""
+    ark_image_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    ark_image_model: str = "doubao-seedream-5-0-260128"
+    ark_image_enabled: bool = True
+    ark_image_max_per_classroom: int = 4
 
     # 辅助云端 LLM（OpenAI 兼容：硅基流动 / DeepSeek / Groq / OpenRouter 等，无需本地权重）
     aux_llm_api_key: str = ""
@@ -110,6 +117,10 @@ class Settings(BaseSettings):
         return self.has_qwen
 
     @property
+    def has_ark_image(self) -> bool:
+        return self.ark_image_enabled and bool(self.ark_api_key.strip())
+
+    @property
     def has_qwen_video(self) -> bool:
         return self.has_qwen and self.qwen_video_enabled
 
@@ -119,10 +130,12 @@ class Settings(BaseSettings):
 
     @property
     def has_ai_image(self) -> bool:
-        return self.has_qwen_image or self.has_spark_tti
+        return self.has_ark_image or self.has_qwen_image or self.has_spark_tti
 
     @property
     def ai_image_max_count(self) -> int:
+        if self.has_ark_image:
+            return max(1, self.ark_image_max_per_classroom)
         if self.has_qwen_image:
             return max(1, self.qwen_image_max_images)
         return max(1, self.spark_tti_max_images)

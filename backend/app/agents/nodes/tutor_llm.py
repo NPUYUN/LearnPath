@@ -6,6 +6,7 @@ from app.services.chat_intelligence_service import (
     retrieve_resource_library_context,
     run_intelligent_chat,
 )
+from app.services.realtime_state_service import analyze_realtime_state
 
 
 async def build_tutor_messages(
@@ -20,12 +21,20 @@ async def build_tutor_messages(
     from app.services.chat_intelligence_service import classify_question_type
 
     qtype = classify_question_type(question)
+    realtime_state = await analyze_realtime_state(
+        user_id,
+        question,
+        profile=profile,
+        question_type=qtype,
+        deep_thinking=deep_thinking,
+    )
     retrieval = await retrieve_resource_library_context(user_id, question, resources)
     messages, chunks, mode = build_intelligent_chat_messages(
         question=question,
         topic=topic,
         question_type=qtype,
         profile=profile,
+        realtime_state=realtime_state,
         retrieval=retrieval,
         deep_thinking=deep_thinking,
     )

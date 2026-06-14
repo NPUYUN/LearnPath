@@ -101,8 +101,6 @@ def compute_progress(steps: list[dict]) -> int:
         st = step.get("status", "pending")
         if st == "done":
             score += 100
-        elif st == "in_progress":
-            score += 50
     return round(score / len(flat))
 
 
@@ -116,6 +114,129 @@ def all_resource_ids(steps: list[dict]) -> set[str]:
 
     walk(steps)
     return ids
+
+
+def _collect_leaf_steps(nodes: list[dict]) -> list[dict]:
+    """收集可挂载资源的叶子子步骤。"""
+    leaves: list[dict] = []
+    for node in nodes:
+        children = node.get("substeps") or []
+        if children:
+            leaves.extend(_collect_leaf_steps(children))
+        else:
+            leaves.append(node)
+    return leaves
+
+
+def clear_step_resources(node: dict) -> None:
+    node["resource_ids"] = []
+    for child in node.get("substeps") or []:
+        clear_step_resources(child)
+
+
+def redistribute_resources_to_substeps(steps: list[dict]) -> None:
+    """将父步骤上的 resource_ids 下沉到子步骤（就地修改）。"""
+    for step in steps:
+        substeps = step.get("substeps") or []
+        for sub in substeps:
+            redistribute_resources_to_substeps([sub])
+
+        if not substeps:
+            continue
+
+        pooled = [rid for rid in (step.get("resource_ids") or []) if rid]
+        step["resource_ids"] = []
+        if not pooled:
+            continue
+
+        targets = _collect_leaf_steps(substeps) or substeps
+        for i, rid in enumerate(pooled):
+            target = targets[i % len(targets)]
+            existing = [x for x in (target.get("resource_ids") or []) if x]
+            if rid not in existing:
+                existing.append(rid)
+                target["resource_ids"] = existing
+
+
+def ensure_substeps_for_resources(stage: dict, items: list[dict]) -> bool:
+    """主阶段无子步骤时，按配套资源自动生成子步骤。"""
+    if stage.get("substeps"):
+        return False
+    if not items:
+        return False
+
+    parent_id = str(stage.get("id") or stage.get("order") or "").strip()
+    prefix = f"{parent_id}." if parent_id else ""
+    substeps: list[dict] = []
+    for j, item in enumerate(items, start=1):
+        title = str(item.get("title") or f"配套资源 {j}")[:36]
+        substeps.append(
+            {
+                "id": f"{prefix}{j}" if prefix else str(j),
+                "order": j,
+                "title": title,
+                "objective": f"学习「{title}」并完成相关练习",
+                "resource_ids": [],
+                "estimated_minutes": 25,
+                "status": "pending",
+                "substeps": [],
+            }
+        )
+    stage["substeps"] = substeps
+    return True
+
+
+def assign_resources_to_stage(stage: dict, resource_ids: list[str]) -> list[dict[str, Any]]:
+    """把资源挂到子步骤；无子步骤时挂到主阶段。返回各节点分配摘要。"""
+    normalized = [rid for rid in resource_ids if rid]
+    clear_step_resources(stage)
+    if not normalized:
+        return []
+
+    substeps = stage.get("substeps") or []
+    if not substeps:
+        stage["resource_ids"] = normalized
+        sid = str(stage.get("id") or "")
+        return [{"step_id": sid, "resource_ids": normalized}]
+
+    targets = _collect_leaf_steps(substeps) or substeps
+    by_step: dict[str, list[str]] = {}
+    for i, rid in enumerate(normalized):
+        target = targets[i % len(targets)]
+        existing = [x for x in (target.get("resource_ids") or []) if x]
+        if rid not in existing:
+            existing.append(rid)
+            target["resource_ids"] = existing
+        sid = str(target.get("id") or f"sub-{i + 1}")
+        by_step[sid] = list(target.get("resource_ids") or [])
+
+    return [{"step_id": sid, "resource_ids": rids} for sid, rids in by_step.items()]
+
+
+def set_resource_ids_to_step(steps: list[dict], step_id: str, resource_ids: list[str]) -> bool:
+    located = find_step_by_id(steps, step_id)
+    if not located:
+        return False
+    normalized = [rid for rid in resource_ids if rid]
+    if located.get("resource_ids") == normalized:
+        return False
+    located["resource_ids"] = normalized
+    return True
+
+
+def append_resource_ids_to_step(steps: list[dict], step_id: str, resource_ids: list[str]) -> bool:
+    located = find_step_by_id(steps, step_id)
+    if not located:
+        return False
+    existing = list(located.get("resource_ids") or [])
+    changed = False
+    for rid in resource_ids:
+        if rid and rid not in existing:
+            existing.append(rid)
+            changed = True
+    if changed:
+        located["resource_ids"] = existing
+    return changed
 
 
 def remove_resource_from_steps(steps: list[dict], resource_id: str) -> bool:
@@ -147,6 +268,7 @@ def normalize_step_tree(
     default_resource_ids: list[str],
     depth: int = 0,
     node_budget: list[int] | None = None,
+    activate_first: bool = True,
 ) -> list[dict] | None:
     """将 LLM 输出规范为带 substeps 的路径树。"""
     if node_budget is None:
@@ -172,6 +294,7 @@ def normalize_step_tree(
             default_resource_ids=default_resource_ids,
             depth=depth + 1,
             node_budget=node_budget,
+            activate_first=activate_first,
         )
 
         if valid_ids and not rids and not child_nodes:
@@ -191,15 +314,20 @@ def normalize_step_tree(
             }
         )
 
-    if depth == 0 and normalized:
+    if depth == 0 and normalized and activate_first:
         normalized[0]["status"] = "in_progress"
 
     return normalized or None
 
 
-def finalize_path_steps(steps: list[dict]) -> list[dict]:
+def finalize_path_steps(steps: list[dict], *, activate_first: bool = True) -> list[dict]:
     assign_step_ids(steps)
-    if steps and not any(s.get("status") == "in_progress" for s in flatten_steps(steps)):
+    redistribute_resources_to_substeps(steps)
+    if (
+        activate_first
+        and steps
+        and not any(s.get("status") == "in_progress" for s in flatten_steps(steps))
+    ):
         for step in iter_steps_preorder(steps):
             if step.get("status") != "done":
                 step["status"] = "in_progress"

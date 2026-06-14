@@ -44,6 +44,9 @@ import RouteLoadingScreen from "@/components/RouteLoadingScreen";
 import PagePane from "@/components/PagePane";
 import { PageScope } from "@/contexts/PageScopeContext";
 import ThemeProvider from "@/components/ThemeProvider";
+import ClassroomGenerationFloat from "@/components/ClassroomGenerationFloat";
+import ResourceRegenerationFloat from "@/components/ResourceRegenerationFloat";
+import PathReplanJobManager from "@/components/PathReplanJobManager";
 import { preloadAdminConsole, preloadLoggedInExtras, preloadStandaloneRoute } from "@/lib/routePreload";
 
 const LoginContent = dynamic(() => import("@/components/LoginContent"), { ssr: false });
@@ -150,8 +153,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [standaloneTx, setStandaloneTx] = useState<StandaloneTransition | null>(null);
 
   useEffect(() => {
-    if (isNavRoute(pathname)) setActiveTab(pathname);
-  }, [pathname]);
+    if (isLoggedIn && (isNavRoute(pathname) || isResourcesSubPath(pathname))) {
+      setActiveTab(routeFromPath);
+    }
+  }, [isLoggedIn, pathname, routeFromPath]);
 
   useEffect(() => {
     if (isAdminRoute(pathname)) setAdminActiveTab(pathname);
@@ -173,7 +178,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const goTo = useCallback(
     (key: AppRoute) => {
       if (isStandaloneRoute(key)) {
-        setStandaloneTx({ target: key, progress: 10, fading: false, ready: false });
+        if (pathname === key) {
+          setStandaloneTx({ target: key, progress: 100, fading: false, ready: true });
+        } else {
+          setStandaloneTx({ target: key, progress: 10, fading: false, ready: false });
+        }
         router.push(key);
         return;
       }
@@ -202,6 +211,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
     NAV_ROUTES.forEach((r) => router.prefetch(r));
     router.prefetch("/insights");
+    router.prefetch("/classroom");
   }, [isLoggedIn, isAdminMode, router]);
 
   useEffect(() => {
@@ -537,6 +547,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         >
           {children}
         </div>
+        <ClassroomGenerationFloat />
+        <ResourceRegenerationFloat />
+        <PathReplanJobManager />
       </ThemeProvider>
     );
   }
@@ -592,6 +605,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           )}
         </main>
       </div>
+      <ClassroomGenerationFloat />
+      <ResourceRegenerationFloat />
+      <PathReplanJobManager />
     </ThemeProvider>
   );
 }

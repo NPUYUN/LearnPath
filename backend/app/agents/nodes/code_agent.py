@@ -1,23 +1,19 @@
-from app.agents.nodes._resource_base import _build_resource
+from app.agents.nodes._resource_base import _build_resource, resolve_resource_title
 from app.agents.state import AgentState
 
 
 async def code_node(state: AgentState) -> dict:
+    topic = state.get("topic") or "学习主题"
+    default_title = f"「{topic}」代码实操"
     resource = await _build_resource(
         state,
         resource_type="code",
-        title="代码实操案例",
+        title=resolve_resource_title(state, "code", default_title),
         content_template=(
-            "## 实操：{topic} — 线性回归示例\n\n"
-            "```python\n"
-            "import numpy as np\n"
-            "from sklearn.linear_model import LinearRegression\n"
-            "X = np.array([[1], [2], [3], [4]])\n"
-            "y = np.array([2, 4, 5, 7])\n"
-            "model = LinearRegression().fit(X, y)\n"
-            "print(model.coef_, model.intercept_)\n"
-            "```\n\n"
-            "参考知识库：{context}"
+            "## 实操：{topic}\n\n"
+            "请根据以下学习上下文编写完整可运行的代码案例（Python 优先），"
+            "须紧扣本阶段目标，勿套用无关的线性回归模板：\n\n"
+            "{context}\n"
         ),
     )
     resources = list(state.get("resources") or [])

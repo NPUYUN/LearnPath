@@ -64,6 +64,13 @@ export const NAV_META: Record<AppRoute, NavMeta> = {
     glow: "rgba(245, 158, 11, 0.35)",
     group: "secondary",
   },
+  "/classroom": {
+    label: "AI 课堂",
+    shortLabel: "课堂",
+    accent: "#10b981",
+    glow: "rgba(16, 185, 129, 0.35)",
+    group: "secondary",
+  },
   "/settings": {
     label: "设置",
     shortLabel: "设置",

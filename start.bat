@@ -37,7 +37,7 @@ if not "%EXITCODE%"=="0" (
     echo FAILED - exit code %EXITCODE%
 ) else (
     echo Launcher finished. Services keep running in the background.
-    echo   App:  http://localhost:3000/chat
+    echo   App:  http://127.0.0.1:3000/chat
     echo   Logs: storage\logs\
     echo   Stop: stop.bat
 )

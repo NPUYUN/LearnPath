@@ -36,4 +36,6 @@ async def chat_node(state: AgentState) -> dict:
     }
     if result.get("profile"):
         out["profile"] = result["profile"]
+    if result.get("realtime_state"):
+        out["realtime_state"] = result["realtime_state"]
     return out

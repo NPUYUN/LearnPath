@@ -16,6 +16,9 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { normalizeMarkdownForDisplay, repairMermaidCode, isMermaidLikelyComplete, purgeMermaidOrphans, buildFallbackFlowchart } from "@/lib/markdownNormalize";
 import { apiUrl } from "@/lib/apiBase";
 
@@ -236,7 +239,8 @@ function buildMarkdownComponents(streaming: boolean, inChat?: boolean): Componen
   };
 }
 
-const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const REMARK_PLUGINS = [remarkGfm, remarkBreaks, remarkMath];
+const REHYPE_PLUGINS = [rehypeKatex];
 
 function MarkdownPreviewInner({
   content,
@@ -258,7 +262,11 @@ function MarkdownPreviewInner({
     <div
       className={`lp-markdown-preview${inChat ? " lp-markdown-preview--chat" : ""}${streaming ? " lp-markdown-preview--streaming" : ""}`}
     >
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={components}>
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={components}
+      >
         {normalized}
       </ReactMarkdown>
     </div>

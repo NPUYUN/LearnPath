@@ -78,7 +78,7 @@ try {
         }
     }
 
-    Write-Host "[4/5] Frontend http://localhost:3000 ..."
+    Write-Host "[4/5] Frontend http://127.0.0.1:3000 ..."
     $frontDir = Join-Path $Root "frontend"
     if ($ShowWindows) {
         $cmd = "title LearnPath Frontend & cd /d `"$frontDir`" & set PORT=3000&& npm run dev"
@@ -100,9 +100,9 @@ try {
     for ($i = 1; $i -le 90; $i++) {
         foreach ($port in @(3000, 3001)) {
             try {
-                $r = Invoke-WebRequest -Uri "http://localhost:$port" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
                 if ($r.StatusCode -eq 200) {
-                    $frontUrl = "http://localhost:$port/chat"
+                    $frontUrl = "http://127.0.0.1:$port/chat"
                     break
                 }
             } catch {}
@@ -111,7 +111,7 @@ try {
         if ($i % 15 -eq 0) { Write-Step "Waiting for frontend ... ${i}s" }
         Start-Sleep -Seconds 1
     }
-    if (-not $frontUrl) { $frontUrl = "http://localhost:3000/chat" }
+    if (-not $frontUrl) { $frontUrl = "http://127.0.0.1:3000/chat" }
 
     Write-Host "[5/5] Done"
     Write-Host ""

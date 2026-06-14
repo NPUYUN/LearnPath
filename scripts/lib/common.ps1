@@ -29,6 +29,9 @@ function Find-PythonCommand {
 
 function Ensure-PythonVenv([string]$Root) {
     $backend = Join-Path $Root "backend"
+    $codexPython = Join-Path $backend ".venv-codex\Scripts\python.exe"
+    if (Test-Path $codexPython) { return $codexPython }
+
     $python = Join-Path $backend ".venv\Scripts\python.exe"
     if (Test-Path $python) { return $python }
 
@@ -103,7 +106,8 @@ function Get-BackendPython([string]$Root) {
     $junction = "C:\LP"
     $ji = Get-Item $junction -ErrorAction SilentlyContinue
     $useJunction = ($ji -and $ji.LinkType -eq "Junction") -and
-        (Test-Path "$junction\backend\.venv\Scripts\python.exe")
+        ((Test-Path "$junction\backend\.venv-codex\Scripts\python.exe") -or
+            (Test-Path "$junction\backend\.venv\Scripts\python.exe"))
     if (-not $useJunction) {
         try {
             if (Test-Path $junction) { cmd /c "rmdir `"$junction`"" 2>$null }
@@ -114,6 +118,13 @@ function Get-BackendPython([string]$Root) {
                 Python = Join-Path $Root "backend\.venv\Scripts\python.exe"
                 WorkDir = Join-Path $Root "backend"
             }
+        }
+    }
+    $junctionCodexPython = "$junction\backend\.venv-codex\Scripts\python.exe"
+    if (Test-Path $junctionCodexPython) {
+        return @{
+            Python = $junctionCodexPython
+            WorkDir = "$junction\backend"
         }
     }
     return @{
@@ -138,7 +149,7 @@ function Stop-PortListeners([int[]]$Ports) {
 }
 
 function Stop-LearnPathProcesses {
-    Stop-PortListeners -Ports @(8000, 3000, 3001, 3002)
+    Stop-PortListeners -Ports @(8000, 8001, 3000, 3001, 3002)
     try {
         Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
             Where-Object {
@@ -181,6 +192,27 @@ function Rotate-LogFile([string]$Path) {
     Move-Item -LiteralPath $Path -Destination $bak -Force -ErrorAction SilentlyContinue
 }
 
+function Get-WritableLogPath([string]$Path, [string]$Label) {
+    try {
+        $s = [System.IO.File]::Open($Path, "OpenOrCreate", "ReadWrite", "None")
+        $s.Close()
+        return $Path
+    } catch {
+        $dir = Split-Path -Parent $Path
+        $file = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+        $ext = [System.IO.Path]::GetExtension($Path)
+        $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $fallback = Join-Path $dir "$file.$stamp.$PID$ext"
+        Write-Step "$Label log is busy; using $(Split-Path -Leaf $fallback)"
+        return $fallback
+    }
+}
+
+function Quote-CmdArg([string]$Value) {
+    if ($null -eq $Value) { return '""' }
+    return '"' + ($Value -replace '"', '""') + '"'
+}
+
 function Start-LoggedBackgroundProcess {
     param(
         [string]$Label,
@@ -192,14 +224,24 @@ function Start-LoggedBackgroundProcess {
     $errFile = "$LogFile.err"
     Rotate-LogFile -Path $LogFile
     Rotate-LogFile -Path $errFile
+    $LogFile = Get-WritableLogPath -Path $LogFile -Label $Label
+    $errFile = Get-WritableLogPath -Path $errFile -Label $Label
     $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    "==== $ts $Label ====" | Out-File -FilePath $errFile -Encoding utf8
-    Start-Process -FilePath $FilePath `
-        -ArgumentList $ArgumentList `
-        -WorkingDirectory $WorkingDirectory `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $LogFile `
-        -RedirectStandardError $errFile | Out-Null
+    try {
+        "==== $ts $Label ====" | Out-File -FilePath $errFile -Encoding utf8
+    } catch {}
+
+    $launcher = Join-Path (Split-Path -Parent $LogFile) "$Label.start.cmd"
+    $quotedArgs = ($ArgumentList | ForEach-Object { Quote-CmdArg $_ }) -join " "
+    $lines = @(
+        "@echo off",
+        "cd /d $(Quote-CmdArg $WorkingDirectory)",
+        "$(Quote-CmdArg $FilePath) $quotedArgs > $(Quote-CmdArg $LogFile) 2> $(Quote-CmdArg $errFile)"
+    )
+    Set-Content -Path $launcher -Value $lines -Encoding ASCII
+
+    $ws = New-Object -ComObject WScript.Shell
+    [void]$ws.Run("cmd.exe /c $(Quote-CmdArg $launcher)", 0, $false)
 }
 
 function Get-NextDevCommand([string]$FrontDir) {

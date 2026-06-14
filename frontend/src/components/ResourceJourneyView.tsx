@@ -5,11 +5,12 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
+  ReloadOutlined,
   RightOutlined,
   StarFilled,
   StarOutlined,
 } from "@ant-design/icons";
-import { Button, Tag, Tooltip, Typography } from "antd";
+import { Button, Checkbox, Tag, Tooltip, Typography } from "antd";
 import type { LearningResource } from "@/lib/api";
 import { generationSourceMeta } from "@/lib/resourceSource";
 import {
@@ -35,7 +36,11 @@ type ResourceCardProps = {
   onStar: () => void;
   onPreview: () => void;
   onDownload: () => void;
+  onRegenerate: () => void;
   onDelete: () => void;
+  manageMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
   compact?: boolean;
 };
 
@@ -45,7 +50,11 @@ function ResourceCard({
   onStar,
   onPreview,
   onDownload,
+  onRegenerate,
   onDelete,
+  manageMode = false,
+  selected = false,
+  onToggleSelect,
   compact,
 }: ResourceCardProps) {
   const uiType = mapApiType(resource.type) as UiResourceType;
@@ -54,10 +63,33 @@ function ResourceCard({
 
   return (
     <article
-      className={`lp-resource-card${compact ? " lp-resource-card--compact" : ""}`}
+      className={`lp-resource-card${compact ? " lp-resource-card--compact" : ""}${manageMode ? " lp-resource-card--manage" : ""}${selected ? " lp-resource-card--selected" : ""}`}
       style={{ "--res-accent": cfg.color } as React.CSSProperties}
+      role={manageMode ? "button" : undefined}
+      tabIndex={manageMode ? 0 : undefined}
+      aria-pressed={manageMode ? selected : undefined}
+      onClick={manageMode ? onToggleSelect : undefined}
+      onKeyDown={
+        manageMode
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onToggleSelect?.();
+              }
+            }
+          : undefined
+      }
     >
       <div className="lp-resource-card-accent" aria-hidden />
+      {manageMode && (
+        <Checkbox
+          className="lp-resource-card-select"
+          checked={selected}
+          aria-label={`选择 ${resource.title}`}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleSelect?.()}
+        />
+      )}
       <div className="lp-resource-card-icon">{cfg.icon}</div>
       <div className="lp-resource-card-body">
         <Text strong className="lp-resource-card-title">
@@ -86,15 +118,47 @@ function ResourceCard({
                 <StarOutlined />
               )
             }
-            onClick={onStar}
+            onClick={(e) => {
+              e.stopPropagation();
+              onStar();
+            }}
           />
         </Tooltip>
         <Tooltip title="预览">
-          <Button type="text" size="small" icon={<EyeOutlined />} onClick={onPreview} />
+          <Button
+            type="text"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPreview();
+            }}
+          />
         </Tooltip>
-        <Tooltip title="下载">
-          <Button type="text" size="small" icon={<DownloadOutlined />} onClick={onDownload} />
+        <Tooltip title="另存为">
+          <Button
+            type="text"
+            size="small"
+            icon={<DownloadOutlined />}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDownload();
+            }}
+          />
         </Tooltip>
+        {!manageMode && (
+          <Tooltip title="重新生成">
+            <Button
+              type="text"
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRegenerate();
+              }}
+            />
+          </Tooltip>
+        )}
         <Tooltip title="删除">
           <Button
             type="text"
@@ -120,7 +184,11 @@ type ResourceStageSectionProps = {
   onStar: (id: string) => void;
   onPreview: (r: LearningResource) => void;
   onDownload: (r: LearningResource) => void;
+  onRegenerate: (r: LearningResource) => void;
   onDelete: (r: LearningResource) => void;
+  manageMode?: boolean;
+  selectedIds?: string[];
+  onToggleSelect?: (id: string) => void;
 };
 
 export function ResourceStageSection({
@@ -131,7 +199,11 @@ export function ResourceStageSection({
   onStar,
   onPreview,
   onDownload,
+  onRegenerate,
   onDelete,
+  manageMode = false,
+  selectedIds = [],
+  onToggleSelect,
 }: ResourceStageSectionProps) {
   const statusMeta = STAGE_STATUS_META[stage.status];
 
@@ -203,7 +275,11 @@ export function ResourceStageSection({
             onStar={onStar}
             onPreview={onPreview}
             onDownload={onDownload}
+            onRegenerate={onRegenerate}
             onDelete={onDelete}
+            manageMode={manageMode}
+            selectedIds={selectedIds}
+            onToggleSelect={onToggleSelect}
           />
         ))}
       </div>
@@ -217,14 +293,22 @@ function CategoryLane({
   onStar,
   onPreview,
   onDownload,
+  onRegenerate,
   onDelete,
+  manageMode = false,
+  selectedIds = [],
+  onToggleSelect,
 }: {
   category: ResourceCategoryGroup;
   starredIds: string[];
   onStar: (id: string) => void;
   onPreview: (r: LearningResource) => void;
   onDownload: (r: LearningResource) => void;
+  onRegenerate: (r: LearningResource) => void;
   onDelete: (r: LearningResource) => void;
+  manageMode?: boolean;
+  selectedIds?: string[];
+  onToggleSelect?: (id: string) => void;
 }) {
   const cfg = RESOURCE_CONFIG[category.type];
 
@@ -247,7 +331,11 @@ function CategoryLane({
             onStar={() => onStar(r.id)}
             onPreview={() => onPreview(r)}
             onDownload={() => onDownload(r)}
+            onRegenerate={() => onRegenerate(r)}
             onDelete={() => onDelete(r)}
+            manageMode={manageMode}
+            selected={selectedIds.includes(r.id)}
+            onToggleSelect={() => onToggleSelect?.(r.id)}
             compact
           />
         ))}
@@ -262,7 +350,11 @@ type ResourceJourneyViewProps = {
   onStar: (id: string) => void;
   onPreview: (r: LearningResource) => void;
   onDownload: (r: LearningResource) => void;
+  onRegenerate: (r: LearningResource) => void;
   onDelete: (r: LearningResource) => void;
+  manageMode?: boolean;
+  selectedIds?: string[];
+  onToggleSelect?: (id: string) => void;
 };
 
 export function ResourceJourneyView({
@@ -271,7 +363,11 @@ export function ResourceJourneyView({
   onStar,
   onPreview,
   onDownload,
+  onRegenerate,
   onDelete,
+  manageMode = false,
+  selectedIds = [],
+  onToggleSelect,
 }: ResourceJourneyViewProps) {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() =>
     defaultExpandedIds(stages)
@@ -338,7 +434,11 @@ export function ResourceJourneyView({
           onStar={onStar}
           onPreview={onPreview}
           onDownload={onDownload}
+          onRegenerate={onRegenerate}
           onDelete={onDelete}
+          manageMode={manageMode}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
         />
       ))}
     </div>

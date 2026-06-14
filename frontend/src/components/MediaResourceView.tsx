@@ -30,10 +30,10 @@ function extractPosterImage(content: string): string | null {
 }
 
 function extractSlideshowImages(content: string): string[] {
-  const urls = [...content.matchAll(/!\[[^\]]*\]\((\/api\/media\/images\/[^)]+)\)/g)].map(
+  const urls = Array.from(content.matchAll(/!\[[^\]]*\]\((\/api\/media\/images\/[^)]+)\)/g)).map(
     (m) => m[1]
   );
-  return [...new Set(urls)];
+  return Array.from(new Set(urls));
 }
 
 function stripHeroSection(content: string): string {

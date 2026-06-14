@@ -157,7 +157,7 @@ def _demo_path(resource_ids: list[str]) -> dict:
             "order": 1,
             "title": "导论与数学基础",
             "objective": "理解 ML 问题定义与线性模型基础",
-            "resource_ids": [ids[6]] if len(ids) > 6 else ids[:1],
+            "resource_ids": [],
             "estimated_minutes": 45,
             "status": "done",
             "substeps": [

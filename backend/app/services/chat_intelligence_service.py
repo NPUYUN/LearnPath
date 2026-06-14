@@ -19,6 +19,15 @@ from app.db.repository import list_libraries, save_profile
 from app.rag.library_retriever import retrieve_from_library
 from app.services.user_defaults import profile_fallback_fields
 from app.services.multimodal_enrich_service import enrich_chat_media_answer_async
+from app.services.personalization_strategy_service import (
+    build_personalization_strategy,
+    format_personalization_strategy_prompt,
+    format_realtime_reply_policy_prompt,
+)
+from app.services.realtime_state_service import (
+    analyze_realtime_state,
+    realtime_state_strategy_hint,
+)
 
 # 资源库片段匹配度阈值（满分约 10+）
 MATCH_THRESHOLD = 2.8
@@ -91,36 +100,19 @@ def _profile_snapshot_md(profile: dict | None) -> str:
 def build_chitchat_reply(question: str, profile: dict | None = None) -> str:
     """寒暄类短回复（不调用 LLM，避免答非所问）。"""
     q = question.strip()
-    goal = str((profile or {}).get("learning_goal") or "").strip()
-    course_hint = ""
-    if goal and goal not in ("待补充", "未设定"):
-        course_hint = f"看到你在学 **{goal[:40]}**，"
-
     if re.match(r"^(谢谢|感谢|多谢)", q):
         return "不客气！有学习上的问题，随时在对话里问我。"
     if re.match(r"^(再见|拜拜)", q, re.I):
-        return "再见，祝你学习顺利！下次有问题再来找我 👋"
-    if re.search(r"(你是谁|你叫什么|你能做什么|你有什么功能|介绍一下)", q):
+        return "再见，祝你学习顺利。下次有问题再来找我。"
+    if re.search(r"(你是谁|你叫什么|你能做什么|你有什么功能|你能怎么帮|你可以怎么帮|怎么帮我|能帮我.*学习|介绍一下)", q):
         return (
-            "## 👋 你好，我是学径助手\n\n"
-            "**LearnPath 学径** 的智能学习伙伴，专注高校自学场景："
-            "理解你的背景、生成个性化资源，并陪伴你完成学习路径。\n\n"
-            "### ✨ 我能帮你\n\n"
-            "| 能力 | 说明 |\n|------|------|\n"
-            "| 学习画像 | 记录基础、目标、薄弱点与偏好 |\n"
-            "| 资源生成 | 文档、导图、测验、代码、多模态讲解 |\n"
-            "| 路径规划 | 按你的节奏安排下一步学什么 |\n"
-            "| 智能答疑 | 概念解释、练习思路、代码辅导 |\n"
-            f"{_profile_snapshot_md(profile)}"
-            "\n> 💡 直接告诉我：**想学什么**、**哪里不懂**，或让我帮你**生成资源**。"
+            "我是学径学习助手，可以帮你把学习问题拆清楚、生成配套资源、规划下一步路径。\n\n"
+            "你可以直接告诉我：现在想学什么、哪里卡住了，或者让我帮你整理一份练习/讲解/学习计划。"
         )
 
     return (
-        f"## 👋 你好！\n\n"
-        f"{course_hint}我是 **学径学习助手**，可以陪你规划学习、生成资源、解答疑问。\n\n"
-        "- 说说你的**学习目标**或**薄弱章节**\n"
-        "- 或输入：「帮我生成线性回归的思维导图」\n\n"
-        "> 我会结合你的画像给出更贴合的回答 😊"
+        "你好，我是学径学习助手。\n\n"
+        "你可以说一个具体学习目标或卡点，我会帮你解释、拆步骤、生成资源，或者规划下一步。"
     )
 
 
@@ -128,7 +120,7 @@ def classify_question_type(message: str) -> str:
     """根据用户提问判断回答形态（关键词优先，轻量快速）。"""
     text = message.strip()
     if re.search(
-        r"(你是谁|你叫什么|你能做什么|你有什么功能|介绍一下你自己|学径是什么|learnpath)",
+        r"(你是谁|你叫什么|你能做什么|你有什么功能|你能怎么帮|你可以怎么帮|怎么帮我|能帮我.*学习|介绍一下你自己|学径是什么|learnpath)",
         text,
         re.I,
     ):
@@ -296,6 +288,7 @@ def build_intelligent_chat_messages(
     topic: str,
     question_type: str,
     profile: dict | None,
+    realtime_state: dict | None,
     retrieval: dict[str, Any],
     deep_thinking: bool = False,
     web_context: str = "",
@@ -313,6 +306,18 @@ def build_intelligent_chat_messages(
             f"薄弱点：{', '.join(profile.get('error_prone_topics') or [])}；"
             f"偏好：{profile.get('preferred_modality', '')}"
         )
+    state_hint = realtime_state_strategy_hint(realtime_state)
+    personalization_strategy = build_personalization_strategy(
+        profile=profile,
+        realtime_state=realtime_state,
+        question_type=question_type,
+        question=question,
+    )
+    strategy_hint = format_personalization_strategy_prompt(personalization_strategy)
+    reply_policy_hint = format_realtime_reply_policy_prompt(
+        personalization_strategy,
+        realtime_state,
+    )
 
     extra_blocks = ""
     if attachment_context.strip():
@@ -324,29 +329,40 @@ def build_intelligent_chat_messages(
         from app.core.prompts import chat_chitchat_system
 
         system = chat_chitchat_system(deep_thinking)
-        user = f"用户说：{question}\n请按系统要求简短回复，不要讲解任何学科知识。"
+        user = (
+            f"用户说：{question}\n"
+            "请按系统要求简短回复：只介绍你能提供的学习帮助，不要提及学生画像、实时状态或任何具体学科知识。"
+        )
         return [{"role": "system", "content": system}, {"role": "user", "content": user}], chunks, mode
 
     if mode == "library_polish":
         system = chat_library_polish_system(question_type, deep_thinking)
+        system = f"{system}\n\n{reply_policy_hint}"
         user = (
             f"学习主题：{topic}\n"
             f"提问类型：{question_type}\n"
             f"学生画像：{profile_hint or '暂无'}\n"
+            f"【实时画像】\n{state_hint}\n"
+            f"【个性化策略】\n{strategy_hint}\n"
             f"用户问题：{question}\n\n"
             f"【资源库检索片段（请优先依据以下内容润色作答）】\n{ctx}"
             f"{extra_blocks}\n\n"
-            "请输出结构化 Markdown 回答，并注明与资源库的对应关系。"
+            "请按系统输出风格回答；不要注明内部检索过程，不要复述学生画像。"
+            "务必执行个性化策略，但不要向用户暴露策略字段或画像字段。"
         )
     else:
         system = chat_direct_system(question_type, deep_thinking)
+        system = f"{system}\n\n{reply_policy_hint}"
         user = (
             f"学习主题：{topic}\n"
             f"提问类型：{question_type}\n"
             f"学生画像：{profile_hint or '暂无'}\n"
+            f"【实时画像】\n{state_hint}\n"
+            f"【个性化策略】\n{strategy_hint}\n"
             f"用户问题：{question}\n\n"
             "说明：资源库匹配度较低，请基于你的学科知识直接作答；"
             "勿编造具体教材页码或链接。"
+            "务必执行个性化策略，但不要向用户暴露策略字段或画像字段，也不要复述学生长期画像。"
             f"{extra_blocks}"
         )
 
@@ -712,17 +728,13 @@ async def run_intelligent_chat(
 ) -> dict[str, Any]:
     """执行完整智能对话管线。"""
     question_type = classify_question_type(question)
-
-    if question_type == "chitchat" and not deep_thinking:
-        reply = build_chitchat_reply(question, profile)
-        return {
-            "reply": filter_sensitive(reply),
-            "profile": None,
-            "question_type": question_type,
-            "retrieval_mode": "direct",
-            "match_score": 0.0,
-            "chunks": [],
-        }
+    realtime_state = await analyze_realtime_state(
+        user_id,
+        question,
+        profile=profile,
+        question_type=question_type,
+        deep_thinking=deep_thinking,
+    )
 
     retrieval = await retrieve_resource_library_context(
         user_id, question, resources
@@ -733,6 +745,7 @@ async def run_intelligent_chat(
         topic=topic,
         question_type=question_type,
         profile=profile,
+        realtime_state=realtime_state,
         retrieval=retrieval,
         deep_thinking=deep_thinking,
     )
@@ -779,6 +792,7 @@ async def run_intelligent_chat(
     return {
         "reply": filter_sensitive(answer),
         "profile": updated_profile,
+        "realtime_state": realtime_state,
         "question_type": question_type,
         "retrieval_mode": mode,
         "match_score": retrieval.get("match_score", 0),
@@ -792,6 +806,7 @@ async def prepare_intelligent_chat(
     topic: str,
     *,
     profile: dict | None = None,
+    realtime_state: dict | None = None,
     resources: list[dict] | None = None,
     deep_thinking: bool = False,
     web_search: bool = False,
@@ -802,6 +817,9 @@ async def prepare_intelligent_chat(
 
     question_type = classify_question_type(question)
 
+    retrieval_timeout = 30.0 if deep_thinking else 10.0
+    web_timeout = 45.0 if deep_thinking else 16.0
+
     if question_type == "chitchat":
         retrieval = {"chunks": [], "match_score": 0.0, "mode": "direct", "resource_count": 0}
         web_context = ""
@@ -809,7 +827,7 @@ async def prepare_intelligent_chat(
         try:
             retrieval = await asyncio.wait_for(
                 retrieve_resource_library_context(user_id, question, resources),
-                timeout=30.0,
+                timeout=retrieval_timeout,
             )
         except Exception:
             retrieval = {"chunks": [], "match_score": 0.0, "mode": "direct", "resource_count": 0}
@@ -820,7 +838,7 @@ async def prepare_intelligent_chat(
             try:
                 summary, _queries = await asyncio.wait_for(
                     full_web_research(question),
-                    timeout=45.0,
+                    timeout=web_timeout,
                 )
                 web_context = summary
             except Exception:
@@ -830,6 +848,7 @@ async def prepare_intelligent_chat(
         topic=topic,
         question_type=question_type,
         profile=profile,
+        realtime_state=realtime_state,
         retrieval=retrieval,
         deep_thinking=deep_thinking,
         web_context=web_context,
@@ -837,6 +856,7 @@ async def prepare_intelligent_chat(
     )
     return {
         "question_type": question_type,
+        "realtime_state": realtime_state,
         "retrieval": retrieval,
         "messages": messages,
         "chunks": chunks,
@@ -847,10 +867,12 @@ async def prepare_intelligent_chat(
 def _pace_from_chunk_size(chunk_size: int) -> float:
     """本地伪流式每行间隔（秒），与前端流速档位对应。"""
     if chunk_size <= 2:
-        return 0.05
-    if chunk_size >= 24:
-        return 0.008
-    return 0.022
+        return 0.04
+    if chunk_size >= 16:
+        return 0.004
+    if chunk_size >= 8:
+        return 0.01
+    return 0.018
 
 
 async def _stream_local_text(
@@ -871,6 +893,7 @@ async def stream_intelligent_chat(
     topic: str,
     *,
     profile: dict | None = None,
+    realtime_state: dict | None = None,
     resources: list[dict] | None = None,
     deep_thinking: bool = False,
     web_search: bool = False,
@@ -888,28 +911,38 @@ async def stream_intelligent_chat(
     from app.core.llm.resilience import stream_with_client_fallback
 
     question_type = classify_question_type(question)
+    if realtime_state is None:
+        realtime_state = await analyze_realtime_state(
+            user_id,
+            question,
+            profile=profile,
+            question_type=question_type,
+            deep_thinking=deep_thinking,
+        )
+        yield {"type": "realtime_state", "data": realtime_state}
 
-    # 寒暄：跳过检索/LLM，直接本地模板逐行流式
-    if question_type == "chitchat" and not deep_thinking and not attachment_context.strip():
-        reply = build_chitchat_reply(question, profile)
-        async for item in _stream_local_text(reply, chunk_size):
+    if question_type == "chitchat" and not attachment_context.strip():
+        reply = build_chitchat_reply(question)
+        async for item in _stream_local_text(reply, chunk_size=chunk_size):
             yield item
         yield {"type": "done", "data": reply, "profile": None}
         return
 
     try:
+        prepare_timeout = 60.0 if deep_thinking else 24.0
         ctx = await asyncio.wait_for(
             prepare_intelligent_chat(
                 user_id,
                 question,
                 topic,
                 profile=profile,
+                realtime_state=realtime_state,
                 resources=resources,
                 deep_thinking=deep_thinking,
                 web_search=web_search,
                 attachment_context=attachment_context,
             ),
-            timeout=60.0,
+            timeout=prepare_timeout,
         )
     except Exception as exc:
         yield {"type": "error", "data": f"准备对话上下文失败：{exc}"}
@@ -971,4 +1004,3 @@ async def stream_intelligent_chat(
             updated_profile = None
         if updated_profile:
             yield {"type": "profile", "data": updated_profile}
-

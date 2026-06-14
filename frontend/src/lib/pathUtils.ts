@@ -22,7 +22,6 @@ export function pathProgressPercent(steps: PathStep[] | undefined): number {
   if (!flat.length) return 0;
   const score = flat.reduce((sum, st) => {
     if (st.status === "done" || st.status === "completed") return sum + 100;
-    if (st.status === "in_progress") return sum + 50;
     return sum;
   }, 0);
   return Math.round(score / flat.length);

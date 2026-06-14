@@ -6,11 +6,13 @@ import uuid
 from app.db.models import (
     ChatConversationRecord,
     ChatMessageRecord,
+    LearnerAnalysisRecord,
     LearningEventRecord,
     OtpRecord,
     PathRecord,
     ProfileRecord,
     QuizAttemptRecord,
+    RealtimeStateRecord,
     ResourceRecord,
     UserPreferencesRecord,
     UserRecord,
@@ -38,6 +40,42 @@ async def get_profile(user_id: str) -> dict | None:
         return loads(row.data_json) if row else None
 
 
+async def save_realtime_state(state: dict) -> None:
+    with SessionLocal() as db:
+        row = db.get(RealtimeStateRecord, state["user_id"])
+        if row is None:
+            row = RealtimeStateRecord(user_id=state["user_id"], data_json=dumps(state))
+            db.add(row)
+        else:
+            row.data_json = dumps(state)
+            row.updated_at = datetime.utcnow()
+        db.commit()
+
+
+async def get_realtime_state(user_id: str) -> dict | None:
+    with SessionLocal() as db:
+        row = db.get(RealtimeStateRecord, user_id)
+        return loads(row.data_json) if row else None
+
+
+async def save_learner_analysis(analysis: dict) -> None:
+    with SessionLocal() as db:
+        row = db.get(LearnerAnalysisRecord, analysis["user_id"])
+        if row is None:
+            row = LearnerAnalysisRecord(user_id=analysis["user_id"], data_json=dumps(analysis))
+            db.add(row)
+        else:
+            row.data_json = dumps(analysis)
+            row.updated_at = datetime.utcnow()
+        db.commit()
+
+
+async def get_learner_analysis(user_id: str) -> dict | None:
+    with SessionLocal() as db:
+        row = db.get(LearnerAnalysisRecord, user_id)
+        return loads(row.data_json) if row else None
+
+
 async def save_path(path: dict) -> None:
     with SessionLocal() as db:
         row = db.get(PathRecord, path["user_id"])
@@ -54,6 +92,17 @@ async def get_path(user_id: str) -> dict | None:
     with SessionLocal() as db:
         row = db.get(PathRecord, user_id)
         return loads(row.data_json) if row else None
+
+
+async def delete_path(user_id: str) -> bool:
+    """彻底删除用户学习路径（含步骤、进度、版本号）。"""
+    with SessionLocal() as db:
+        row = db.get(PathRecord, user_id)
+        if not row:
+            return False
+        db.delete(row)
+        db.commit()
+        return True
 
 
 async def save_resources(user_id: str, resources: list[dict]) -> None:
@@ -76,6 +125,8 @@ async def save_resources(user_id: str, resources: list[dict]) -> None:
                     )
                 )
             else:
+                row.type = r.get("type", row.type)
+                row.title = r.get("title", row.title)
                 row.content = r.get("content", row.content)
                 row.data_json = dumps(payload)
         db.commit()
@@ -128,6 +179,43 @@ async def delete_resource(user_id: str, resource_id: str) -> bool:
             {"starred_resource_ids": [x for x in starred if x != resource_id]},
         )
     return True
+
+
+async def delete_unstarred_resources(user_id: str) -> dict:
+    """删除用户全部未收藏的学习资源（含测验记录与学习事件）。"""
+    from app.db.models import LearningEventRecord, QuizAttemptRecord, ResourceRecord
+
+    prefs = await get_preferences(user_id)
+    starred = set(prefs.get("starred_resource_ids") or [])
+
+    with SessionLocal() as db:
+        rows = db.query(ResourceRecord).filter(ResourceRecord.user_id == user_id).all()
+        kept_ids = {r.id for r in rows if r.id in starred}
+        to_delete_ids = [r.id for r in rows if r.id not in starred]
+
+        if to_delete_ids:
+            db.query(QuizAttemptRecord).filter(
+                QuizAttemptRecord.quiz_resource_id.in_(to_delete_ids)
+            ).delete(synchronize_session=False)
+            db.query(LearningEventRecord).filter(
+                LearningEventRecord.user_id == user_id,
+                LearningEventRecord.resource_id.in_(to_delete_ids),
+            ).delete(synchronize_session=False)
+            db.query(ResourceRecord).filter(
+                ResourceRecord.user_id == user_id,
+                ResourceRecord.id.in_(to_delete_ids),
+            ).delete(synchronize_session=False)
+        db.commit()
+
+    pruned_starred = [rid for rid in starred if rid in kept_ids]
+    if pruned_starred != list(starred):
+        await set_preferences(user_id, {"starred_resource_ids": pruned_starred})
+
+    return {
+        "ok": True,
+        "deleted_count": len(to_delete_ids),
+        "kept_count": len(kept_ids),
+    }
 
 
 async def save_quiz_attempt(

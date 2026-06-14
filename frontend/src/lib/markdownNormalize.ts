@@ -233,6 +233,42 @@ function fixMarkdownStructure(text: string): string {
   return out;
 }
 
+const LATEX_COMMAND_HINT =
+  /\\(?:frac|int|lim|sum|sqrt|sin|cos|tan|log|ln|cdot|times|left|right|infty|partial|alpha|beta|gamma|delta|theta|pi|sigma|vec|overline|underline|text|mathrm|mathbf|displaystyle|to|quad|qquad)/;
+
+/** 判断括号内是否像 LaTeX 公式（LLM 常输出 (\int_0^1 x^2 dx) 这种形式） */
+function looksLikeLatex(inner: string): boolean {
+  const t = inner.trim();
+  if (!t || t.length > 240) return false;
+  if (LATEX_COMMAND_HINT.test(t)) return true;
+  if (/[\^_{}]/.test(t) && /^[a-zA-Z0-9\s+\-=*/.,^_{}()|\\|]+$/.test(t)) return true;
+  return false;
+}
+
+/** 将 LLM 常见 LaTeX 写法转为 remark-math 可识别的 $...$ / $$...$$ */
+export function normalizeLatexDelimiters(text: string): string {
+  const fenced: string[] = [];
+  let out = text.replace(/```[\s\S]*?```/g, (block) => {
+    fenced.push(block);
+    return `\0FENCE${fenced.length - 1}\0`;
+  });
+  out = out.replace(/`[^`\n]+`/g, (inline) => {
+    fenced.push(inline);
+    return `\0FENCE${fenced.length - 1}\0`;
+  });
+
+  out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_, tex: string) => `$${tex.trim()}$`);
+  out = out.replace(/\\\[([\s\S]*?)\\\]/g, (_, tex: string) => `$$${tex.trim()}$$`);
+
+  out = out.replace(/\(([^()\n]{2,200})\)/g, (match, inner: string) => {
+    if (!looksLikeLatex(inner)) return match;
+    return `$${inner.trim()}$`;
+  });
+
+  out = out.replace(/\0FENCE(\d+)\0/g, (_, i) => fenced[Number(i)] ?? "");
+  return out;
+}
+
 export function normalizeMarkdownForDisplay(raw: string): string {
   if (!raw?.trim()) return raw || "";
 
@@ -259,6 +295,7 @@ export function normalizeMarkdownForDisplay(raw: string): string {
   );
 
   text = fixMarkdownStructure(text);
+  text = normalizeLatexDelimiters(text);
 
   // mermaidgraph 粘连
   text = text.replace(

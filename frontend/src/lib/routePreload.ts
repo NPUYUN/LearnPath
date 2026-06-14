@@ -9,6 +9,9 @@ export async function preloadStandaloneRoute(route: StandaloneRoute): Promise<vo
     case "/insights":
       await preloadInsights();
       break;
+    case "/classroom":
+      await import("@/components/pages/ClassroomContent");
+      break;
     default:
       break;
   }
@@ -67,6 +70,7 @@ async function preloadInsights(): Promise<void> {
 export async function preloadLoggedInExtras(): Promise<void> {
   await Promise.all([
     preloadStandaloneRoute("/insights"),
+    preloadStandaloneRoute("/classroom"),
     preloadAccountIfNeeded(),
   ]);
 }
