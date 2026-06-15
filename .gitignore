@@ -33,3 +33,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+tmp_token.json
+*.tsbuildinfo
