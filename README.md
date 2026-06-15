@@ -1008,6 +1008,7 @@ cd frontend && npm run dev
 | [docs/06-LLM双通道路由.md](./docs/06-LLM双通道路由.md) | 星火 / 辅助 / Kimi 路由 |
 | [docs/07-资源库与生成管线.md](./docs/07-资源库与生成管线.md) | 资料库上传、全网模式、SSE 阶段 |
 | [docs/08-Kimi接入与Prompt说明.md](./docs/08-Kimi接入与Prompt说明.md) | Kimi 配置与 Prompt 索引 |
+| [docs/09-近期更新.md](./docs/09-近期更新.md) | 近期功能更新与修复说明（2026-06） |
 | [A3赛题内容.md](./A3赛题内容.md) | 赛题全文、评分、提交要求 |
 
 ---
