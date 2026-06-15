@@ -11,9 +11,11 @@ async def doc_node(state: AgentState) -> dict:
         title=resolve_resource_title(state, "doc", default_title),
         content_template=(
             "# {topic} 讲解\n\n"
-            "## 学习目标\n结合本阶段目标，掌握 {topic} 的核心概念与典型应用。\n\n"
-            "## 正文\n请依据以下学习上下文展开（勿使用通用机器学习套话）：\n{context}\n\n"
-            "## 小结\n请结合本阶段练习巩固理解。"
+            "## 学习目标\n"
+            "掌握本主题的核心概念、典型应用与常见误区。\n\n"
+            "## 核心内容\n{context}\n\n"
+            "## 小结\n"
+            "结合本阶段练习巩固理解，必要时回到资料库原文核对术语。"
         ),
     )
     resources = list(state.get("resources") or [])

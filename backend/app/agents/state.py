@@ -13,6 +13,10 @@ class AgentState(TypedDict, total=False):
     rag_context: str
     topic: str
     resource_types: list[str]
+    resource_type_counts: dict[str, int]
+    resource_generation_jobs: list[tuple[str, int]]
+    resource_variant_index: int
+    resource_variant_total: int
     reply: str
     deep_thinking: bool
     fresh_path: bool

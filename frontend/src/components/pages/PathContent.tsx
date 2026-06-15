@@ -162,6 +162,7 @@ function PathStepCard({
   const substeps = step.substeps ?? [];
   const resourceCount = countStepResources(step);
   const ownResourceIds = step.resource_ids ?? [];
+  const showClassroomAction = depth > 0;
 
   return (
     <div
@@ -242,7 +243,8 @@ function PathStepCard({
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {resourceCount} 个资源
               </Text>
-              <Button
+              {showClassroomAction && (
+                <Button
                   type={
                     classroomPhase === "ready"
                       ? "primary"
@@ -272,7 +274,8 @@ function PathStepCard({
                       : classroomPhase === "error"
                         ? "重新生成"
                         : "AI 课堂"}
-              </Button>
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -283,6 +286,20 @@ function PathStepCard({
             <Paragraph className="lp-prose" style={{ marginBottom: 12 }}>
               {step.objective}
             </Paragraph>
+            <div className="lp-path-step-bridge" onClick={(e) => e.stopPropagation()}>
+              <span>
+                <strong>画像依据</strong>
+                <em>用实时状态调整节奏和讲法</em>
+              </span>
+              <span>
+                <strong>资源供给</strong>
+                <em>{resourceCount ? `${resourceCount} 项材料支撑本阶段` : "暂无绑定资源"}</em>
+              </span>
+              <span>
+                <strong>课堂反馈</strong>
+                <em>提问和答题会继续更新画像</em>
+              </span>
+            </div>
             {ownResourceIds.length > 0 && (
               <>
                 <Text strong style={{ fontSize: 13 }}>
@@ -583,6 +600,10 @@ export default function PathContent() {
   const steps = path?.steps || [];
   const flatSteps = flattenPathSteps(steps);
   const overallProgress = pathProgressPercent(steps);
+  const pathResourceCount = steps.reduce((sum, step) => sum + countStepResources(step), 0);
+  const readyClassroomCount = classroomLibrary.filter(
+    (item) => item.status === "done" && item.result,
+  ).length;
   if (isReplanRunning) {
     return (
       <div style={{ padding: 64, maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
@@ -661,7 +682,7 @@ export default function PathContent() {
         }}
       >
         <p style={{ marginBottom: 12, color: "var(--lp-text-secondary, #666)" }}>
-          第五步将为每个主阶段强制重新生成配套资源（收藏仍保留在资源库，但路径会关联新资源）。
+          重新规划会保留资源库里的旧资源，只为新路径重新匹配当前资源；缺少材料时再生成配套资源。
         </p>
         <Input.TextArea
           rows={2}
@@ -789,6 +810,31 @@ export default function PathContent() {
           <div className="lp-path-hero-stat">
             <strong>{overallProgress}%</strong>
             <span>当前路径完成度</span>
+          </div>
+        </section>
+
+        <section className="lp-path-loop-panel" aria-label="学习闭环">
+          <div className="lp-path-loop-copy">
+            <span>当前闭环</span>
+            <strong>画像决定策略，路径组织顺序，资源提供材料，课堂把反馈写回画像。</strong>
+          </div>
+          <div className="lp-path-loop-steps">
+            <div>
+              <b>画像</b>
+              <em>状态和偏好</em>
+            </div>
+            <div>
+              <b>路径</b>
+              <em>{flatSteps.length} 个节点</em>
+            </div>
+            <div>
+              <b>资源</b>
+              <em>{pathResourceCount} 项绑定</em>
+            </div>
+            <div>
+              <b>课堂</b>
+              <em>{readyClassroomCount} 节可进入</em>
+            </div>
           </div>
         </section>
 

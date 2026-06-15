@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -12,6 +12,7 @@ import {
   Typography,
   Upload,
   message,
+  Progress,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { UploadFile } from "antd/es/upload/interface";
@@ -39,6 +40,7 @@ import {
   formatExtensionsHint,
   isAllowedUploadFile,
 } from "@/lib/uploadFormats";
+import { formatLibraryDescription } from "@/lib/libraryDescription";
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -124,8 +126,33 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
   const [detail, setDetail] = useState<LibraryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const uploadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [activeCategory, setActiveCategory] = useState<FileCategoryKey>("all");
   const uploadExtensions = useSupportedUploadFormats(true);
+
+  useEffect(() => {
+    return () => {
+      if (uploadTimerRef.current) clearInterval(uploadTimerRef.current);
+    };
+  }, []);
+
+  const startUploadProgress = () => {
+    setUploadProgress(10);
+    if (uploadTimerRef.current) clearInterval(uploadTimerRef.current);
+    uploadTimerRef.current = setInterval(() => {
+      setUploadProgress((prev) => (prev >= 92 ? prev : prev + 5));
+    }, 350);
+  };
+
+  const finishUploadProgress = () => {
+    if (uploadTimerRef.current) {
+      clearInterval(uploadTimerRef.current);
+      uploadTimerRef.current = null;
+    }
+    setUploadProgress(100);
+    window.setTimeout(() => setUploadProgress(0), 500);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -194,10 +221,12 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
     }
     if (!files.length) return;
     setUploading(true);
+    startUploadProgress();
     const msgKey = "lib-detail-upload";
-    message.loading({ content: "正在上传并分析文件…", key: msgKey, duration: 0 });
+    message.loading({ content: "正在解析文件并入库…", key: msgKey, duration: 0 });
     try {
       const res = await uploadLibraryFiles(userId, libraryId, files);
+      finishUploadProgress();
       message.destroy(msgKey);
       if (res.errors?.length) {
         message.warning(`部分文件失败：${res.errors.join("；")}`);
@@ -207,6 +236,7 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
       );
       await load();
     } catch (e: unknown) {
+      finishUploadProgress();
       message.destroy(msgKey);
       message.error(e instanceof Error ? e.message : "上传失败");
     } finally {
@@ -276,6 +306,7 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
   const st = STATUS_LABEL[detail.status] || STATUS_LABEL.empty;
   const activeCatLabel =
     FILE_CATEGORIES.find((c) => c.key === activeCategory)?.label ?? "全部";
+  const displayDescription = formatLibraryDescription(detail.description, detail.synthesis);
 
   return (
     <div className="lp-library-detail-page">
@@ -296,9 +327,9 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
             <Title level={3} className="lp-library-detail-page-title">
               {detail.name}
             </Title>
-            {detail.description && (
+            {displayDescription && (
               <Paragraph type="secondary" className="lp-library-detail-page-desc">
-                {detail.description}
+                {displayDescription}
               </Paragraph>
             )}
             <Space size={6} wrap>
@@ -309,6 +340,12 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
                 共 {detail.files.length} 个文件 · {detail.chunk_count} 个知识片段
               </Text>
             </Space>
+            {uploading && uploadProgress > 0 && (
+              <div className="lp-library-upload-progress">
+                <Text type="secondary">正在解析文件并入库… {uploadProgress}%</Text>
+                <Progress percent={uploadProgress} showInfo={false} size={6} status="active" />
+              </div>
+            )}
           </div>
           {detail.source_type === "upload" && (
             <Upload

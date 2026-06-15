@@ -1,4 +1,6 @@
 import json
+import logging
+import uuid
 from collections.abc import AsyncIterator
 
 from app.agents.graph import build_graph
@@ -10,6 +12,45 @@ from app.services.graph_state import build_graph_state
 from app.db.repository import get_library
 from app.services.library_service import get_or_create_library
 from app.services.resource_context_service import build_generation_context
+from app.services.resource_generation_utils import (
+    expand_resource_jobs,
+    normalize_resource_type_counts,
+    progress_stage_key,
+    resource_generation_stage_plan,
+    resource_jobs_to_types,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _resolve_generation_jobs(req: GenerateResourcesRequest) -> tuple[dict[str, int], list[tuple[str, int]]]:
+    counts = normalize_resource_type_counts(req.resource_type_counts, req.resource_types)
+    jobs = expand_resource_jobs(counts)
+    return counts, jobs
+
+
+def _resource_stage_progress(stage_index: int, total: int) -> int:
+    if total <= 0:
+        return 0
+    return min(99, int(round((stage_index + 1) / total * 99)))
+
+
+def _resource_progress_event(
+    stage: str,
+    stage_index: int,
+    total: int,
+    extra: dict | None = None,
+) -> dict:
+    payload: dict = {
+        "stage": stage,
+        "progress": _resource_stage_progress(stage_index, total),
+    }
+    if extra:
+        payload.update(extra)
+    return {
+        "event": "progress",
+        "data": json.dumps(payload, ensure_ascii=False),
+    }
 
 
 def _extract_new_resources(result: dict, prior_ids: set[str]) -> list[dict]:
@@ -21,6 +62,45 @@ def _extract_new_resources(result: dict, prior_ids: set[str]) -> list[dict]:
         for r in (result.get("resources") or [])
         if r.get("id") and r.get("id") not in prior_ids
     ]
+
+
+def _fallback_resource(req: GenerateResourcesRequest, resource_type: str, reason: str = "") -> dict:
+    title_map = {
+        "doc": "讲解文档",
+        "mindmap": "思维导图",
+        "quiz": "练习测验",
+        "reading": "拓展阅读",
+        "media": "多模态讲解",
+        "code": "代码示例",
+        "ppt": "课件提纲",
+        "design": "方案设计",
+        "project": "项目任务",
+    }
+    label = title_map.get(resource_type, "学习资源")
+    reason_line = f"\n\n> 降级原因：{reason}" if reason else ""
+    return {
+        "id": str(uuid.uuid4()),
+        "type": resource_type,
+        "title": f"{req.topic} · {label}",
+        "topic": req.topic,
+        "content": (
+            f"# {req.topic} · {label}\n\n"
+            "## 学习目标\n"
+            f"- 理解「{req.topic}」的核心概念、适用场景和常见误区。\n"
+            "- 能用一个具体例子说明关键步骤。\n"
+            "- 能完成一道基础练习，并说清楚答案依据。\n\n"
+            "## 建议学习路径\n"
+            "1. 先写下你已经知道的内容和最困惑的一点。\n"
+            "2. 按“定义 -> 例子 -> 练习 -> 复盘”的顺序学习。\n"
+            "3. 如果遇到卡点，把卡点带回智能对话或 AI 课堂继续追问。\n\n"
+            "## 快速练习\n"
+            f"- 用自己的话解释「{req.topic}」解决的是什么问题。\n"
+            "- 找一个生活、数学或代码中的小例子，标出输入、过程和输出。"
+            f"{reason_line}"
+        ),
+        "sources": ["本地降级生成"],
+        "generation_mode": "fallback",
+    }
 
 
 def _find_resource_path_context(path: dict | None, resource_id: str) -> dict:
@@ -174,12 +254,17 @@ async def _resolve_generation_context(req: GenerateResourcesRequest) -> dict:
 
 async def generate_resources(req: GenerateResourcesRequest) -> list[LearningResource]:
     gen_ctx = await _resolve_generation_context(req)
+    _, jobs = _resolve_generation_jobs(req)
     base = await build_graph_state(
         req.user_id,
         {
             "intent": "generate",
             "topic": req.topic,
-            "resource_types": req.resource_types,
+            "resource_types": resource_jobs_to_types(jobs),
+            "resource_type_counts": normalize_resource_type_counts(
+                req.resource_type_counts, req.resource_types
+            ),
+            "resource_generation_jobs": jobs,
             "library_id": gen_ctx.get("library_id", ""),
             "generation_context": gen_ctx,
             "deep_thinking": req.deep_thinking,
@@ -203,20 +288,35 @@ async def stream_generate_resources(
 ) -> AsyncIterator[dict]:
     """SSE: context -> progress per type -> resources -> done"""
     gen_ctx = await _resolve_generation_context(req)
-    yield {
-        "event": "progress",
-        "data": json.dumps(
-            {"stage": "context", "mode": gen_ctx.get("mode"), "library": gen_ctx.get("library_name", "")},
-            ensure_ascii=False,
-        ),
-    }
+    _, jobs = _resolve_generation_jobs(req)
+    if not jobs:
+        yield {
+            "event": "error",
+            "data": json.dumps({"message": "请至少选择一种资源类型并设置数量"}, ensure_ascii=False),
+        }
+        return
 
+    stage_plan = resource_generation_stage_plan(gen_ctx, jobs, req.deep_thinking)
+    stage_total = len(stage_plan)
+    stage_index = 0
+
+    yield _resource_progress_event(
+        "context",
+        stage_index,
+        stage_total,
+        {"mode": gen_ctx.get("mode"), "library": gen_ctx.get("library_name", "")},
+    )
+    stage_index += 1
+
+    type_counts = normalize_resource_type_counts(req.resource_type_counts, req.resource_types)
     base = await build_graph_state(
         req.user_id,
         {
             "intent": "generate",
             "topic": req.topic,
-            "resource_types": req.resource_types,
+            "resource_types": resource_jobs_to_types(jobs),
+            "resource_type_counts": type_counts,
+            "resource_generation_jobs": jobs,
             "library_id": gen_ctx.get("library_id", ""),
             "generation_context": gen_ctx,
             "deep_thinking": req.deep_thinking,
@@ -224,41 +324,65 @@ async def stream_generate_resources(
         },
     )
     prior_ids = {r.get("id") for r in base.get("resources") or [] if r.get("id")}
-    types = req.resource_types
     current: AgentState = dict(base)  # type: ignore
     current["resources"] = list(base.get("resources") or [])
     current["generation_context"] = gen_ctx
 
     if gen_ctx.get("mode") == "web":
-        yield {
-            "event": "progress",
-            "data": json.dumps({"stage": "web_research"}, ensure_ascii=False),
-        }
+        yield _resource_progress_event("web_research", stage_index, stage_total)
+        stage_index += 1
 
-    if req.deep_thinking:
-        yield {
-            "event": "progress",
-            "data": json.dumps({"stage": "deep_thinking"}, ensure_ascii=False),
-        }
-    else:
-        yield {
-            "event": "progress",
-            "data": json.dumps({"stage": "fast_resource"}, ensure_ascii=False),
-        }
+    mode_stage = "deep_thinking" if req.deep_thinking else "fast_resource"
+    yield _resource_progress_event(mode_stage, stage_index, stage_total)
+    stage_index += 1
 
-    for rt in types:
-        yield {"event": "progress", "data": json.dumps({"stage": rt}, ensure_ascii=False)}
+    for rt, variant in jobs:
+        variant_total = sum(1 for t, _ in jobs if t == rt)
+        stage_key = progress_stage_key(rt, variant, variant_total)
+        yield _resource_progress_event(
+            stage_key,
+            stage_index,
+            stage_total,
+            {
+                "resource_type": rt,
+                "variant": variant,
+                "variant_total": variant_total,
+            },
+        )
+        stage_index += 1
         node_fn = RESOURCE_NODE_MAP.get(rt)
         if node_fn:
-            result = await node_fn(current)
-            current["resources"] = result.get("resources", current.get("resources", []))
+            current["resource_variant_index"] = variant
+            current["resource_variant_total"] = variant_total
+            try:
+                result = await node_fn(current)
+                current["resources"] = result.get("resources", current.get("resources", []))
+            except Exception as exc:
+                logger.warning(
+                    "resource node failed type=%s variant=%s topic=%s: %s",
+                    rt,
+                    variant,
+                    req.topic,
+                    exc,
+                )
+                fallback = _fallback_resource(req, rt, str(exc))
+                if variant_total > 1:
+                    fallback["title"] = f"{fallback['title']} · 第{variant}份"
+                current["resources"] = [
+                    *(current.get("resources") or []),
+                    fallback,
+                ]
 
-    yield {"event": "progress", "data": json.dumps({"stage": "reviewer"}, ensure_ascii=False)}
+    yield _resource_progress_event("reviewer", stage_index, stage_total)
     from app.agents.nodes.reviewer_agent import review_resources
 
     all_res = current.get("resources") or []
     new_items = [r for r in all_res if r.get("id") and r.get("id") not in prior_ids]
-    reviewed = await review_resources(new_items)
+    try:
+        reviewed = await review_resources(new_items)
+    except Exception as exc:
+        logger.warning("resource review failed topic=%s: %s", req.topic, exc)
+        reviewed = new_items
     if reviewed:
         await save_resources(req.user_id, reviewed)
         summaries = [
@@ -272,7 +396,12 @@ async def stream_generate_resources(
     yield {
         "event": "done",
         "data": json.dumps(
-            {"count": len(new_items), "total": len(full), "mode": gen_ctx.get("mode")},
+            {
+                "count": len(new_items),
+                "total": len(full),
+                "mode": gen_ctx.get("mode"),
+                "progress": 100,
+            },
             ensure_ascii=False,
         ),
     }

@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.db.repository import get_library
 from app.rag.library_retriever import builtin_kb_root, retrieve_from_library
 from app.services.web_research_service import full_web_research, supplement_library_context
+
+logger = logging.getLogger(__name__)
+
+
+def _looks_like_web_prompt_echo(text: str) -> bool:
+    normalized = (text or "").strip()
+    if not normalized:
+        return False
+    markers = ("主题：", "检索查询：", "关注方向：", "请整理为可用于后续生成")
+    return sum(1 for m in markers if m in normalized) >= 2
 
 
 def _profile_summary(profile: dict | None) -> str:
@@ -67,14 +78,29 @@ async def build_generation_context(
 
     if has_library_chunks:
         if len(library_context) < 1200:
-            supplement = await supplement_library_context(topic, library_context)
-            web_context = supplement
-            mode = "library+web"
-            sources.append("全网补充检索")
+            try:
+                supplement = await supplement_library_context(topic, library_context)
+                web_context = supplement
+                mode = "library+web"
+                sources.append("全网补充检索")
+            except Exception as exc:
+                logger.warning("supplement library context failed topic=%s: %s", topic, exc)
+                web_context = _fallback_web_context(topic)
+                sources.append("本地降级补充")
     else:
-        summary, queries = await full_web_research(topic)
-        web_context = summary
-        sources.extend([f"检索:{q}" for q in queries[:3]])
+        try:
+            summary, queries = await full_web_research(topic)
+            if _looks_like_web_prompt_echo(summary):
+                logger.warning("web research summary looks like prompt echo topic=%s", topic)
+                web_context = _fallback_web_context(topic)
+                sources.append("本地降级主题摘要")
+            else:
+                web_context = summary
+                sources.extend([f"检索:{q}" for q in queries[:3]])
+        except Exception as exc:
+            logger.warning("web research failed topic=%s: %s", topic, exc)
+            web_context = _fallback_web_context(topic)
+            sources.append("本地降级主题摘要")
         mode = "web"
 
     return {
@@ -92,3 +118,13 @@ def _fallback_dir(lib: dict) -> Any:
     if path:
         return builtin_kb_root() / path
     return None
+
+
+def _fallback_web_context(topic: str) -> str:
+    return (
+        f"# {topic} 资源生成摘要\n\n"
+        f"- 核心主题：{topic}\n"
+        "- 生成时优先给出定义、关键步骤、典型例题、常见误区和练习任务。\n"
+        "- 如果主题偏概念，先讲清楚概念边界和应用场景；如果主题偏计算或代码，补充步骤化例题和可执行思路。\n"
+        "- 当前外部检索或大模型补充暂不可用，系统将基于主题、画像和已有本地资料降级生成。"
+    )

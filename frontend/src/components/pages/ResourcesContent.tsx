@@ -12,6 +12,8 @@ import {
   Radio,
   Select,
   Upload,
+  Progress,
+  InputNumber,
 } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import CloudUploadOutlined from "@ant-design/icons/CloudUploadOutlined";
@@ -33,12 +35,23 @@ import {
   type ResourceLibrary,
 } from "@/lib/api";
 import {
-  EXTENDED_RESOURCE_TYPES,
   GENERATABLE_RESOURCE_TYPES,
   mapApiType,
   RESOURCE_CONFIG,
-  STANDARD_RESOURCE_TYPES,
 } from "@/lib/resourceConfig";
+import {
+  allGenTypeCounts,
+  buildGenProgressStages,
+  clampGenTypeCount,
+  emptyGenTypeCounts,
+  expandGenTypeCounts,
+  formatGenStageLabel,
+  MAX_RESOURCE_GEN_PER_TYPE,
+  normalizeGenTypeCounts,
+  standardGenTypeCounts,
+  totalGenCount,
+  type ResourceGenTypeCounts,
+} from "@/lib/resourceGenCounts";
 import {
   filterGroupedResources,
   groupResourcesByStage,
@@ -123,6 +136,7 @@ export default function ResourcesContent() {
   const [starredIds, setStarredIds] = useState<string[]>([]);
   const [topic, setTopic] = useState("");
   const [genStage, setGenStage] = useState("");
+  const [genProgress, setGenProgress] = useState(0);
   const [genModalOpen, setGenModalOpen] = useState(false);
   const [pageTab, setPageTab] = useState("resources");
   const [manageMode, setManageMode] = useState(false);
@@ -141,7 +155,7 @@ export default function ResourcesContent() {
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null);
   const [genSource, setGenSource] = useState<GenSource>("");
   const [newLibraryName, setNewLibraryName] = useState("");
-  const [selectedGenTypes, setSelectedGenTypes] = useState<string[]>([]);
+  const [genTypeCounts, setGenTypeCounts] = useState<ResourceGenTypeCounts>(standardGenTypeCounts);
   const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
   const uploadExtensions = useSupportedUploadFormats(genModalOpen);
   const [preparingLibrary, setPreparingLibrary] = useState(false);
@@ -175,12 +189,14 @@ export default function ResourcesContent() {
   };
 
   const resetGenForm = () => {
-    setTopic("");
-    setGenSource("");
+    const defaultTopic =
+      activeStep?.title || learningPath?.steps?.[0]?.title || "";
+    setTopic(defaultTopic);
+    setGenSource("web");
     setSelectedLibraryId(null);
     setNewLibraryName("");
     setPendingFiles([]);
-    setSelectedGenTypes([]);
+    setGenTypeCounts(standardGenTypeCounts());
   };
 
   const openGenModal = () => {
@@ -532,19 +548,22 @@ export default function ResourcesContent() {
       .catch(() => {});
   }, [userId, pageTab, genModalOpen]);
 
-  const toggleGenType = (apiType: string) => {
-    setSelectedGenTypes((prev) =>
-      prev.includes(apiType) ? prev.filter((t) => t !== apiType) : [...prev, apiType]
-    );
+  const setGenTypeCount = (apiType: string, value: number | null) => {
+    setGenTypeCounts((prev) => ({
+      ...prev,
+      [apiType]: clampGenTypeCount(value),
+    }));
   };
 
   const buildGenerateOptions = async (): Promise<{
     resourceTypes: string[];
+    resourceTypeCounts: ResourceGenTypeCounts;
     libraryId?: string;
     newLibraryName?: string;
     deepThinking?: boolean;
   }> => {
-    const base = { deepThinking };
+    const counts = normalizeGenTypeCounts(genTypeCounts);
+    const base = { deepThinking, resourceTypeCounts: counts, resourceTypes: expandGenTypeCounts(counts) };
     if (genSource === "new") {
       if (!newLibraryName.trim()) {
         throw new Error("请输入新资料库名称");
@@ -554,40 +573,97 @@ export default function ResourcesContent() {
         .filter(Boolean) as File[];
       if (files.length > 0) {
         setPreparingLibrary(true);
+        setGenStage("正在创建资料库并上传文件…");
+        setGenProgress(8);
         try {
           const lib = await createLibrary(userId, newLibraryName.trim());
+          setGenProgress(12);
+          setGenStage("正在解析文件并写入资料库…");
           await uploadLibraryFiles(userId, lib.id, files);
+          setGenProgress(18);
+          setGenStage("文件已入库，正在启动资源生成…");
           setSelectedLibraryId(lib.id);
           setGenSource("library");
           setLibraries((prev) => [lib, ...prev.filter((x) => x.id !== lib.id)]);
-          return { ...base, resourceTypes: selectedGenTypes, libraryId: lib.id };
+          return { ...base, libraryId: lib.id };
         } finally {
           setPreparingLibrary(false);
         }
       }
       return {
         ...base,
-        resourceTypes: selectedGenTypes,
         newLibraryName: newLibraryName.trim(),
       };
     }
     if (genSource === "library" && selectedLibraryId) {
-      return { ...base, resourceTypes: selectedGenTypes, libraryId: selectedLibraryId };
+      return { ...base, libraryId: selectedLibraryId };
     }
-    return { ...base, resourceTypes: selectedGenTypes };
+    return base;
   };
 
+  const runCreateLibrary = async () => {
+    if (!newLibraryName.trim()) {
+      message.warning("请输入新资料库名称");
+      return;
+    }
+    const files = pendingFiles
+      .map((f) => f.originFileObj)
+      .filter(Boolean) as File[];
+    if (!files.length) {
+      message.warning("请选择要上传的文件");
+      return;
+    }
+
+    setPreparingLibrary(true);
+    setGenStage("正在创建资料库…");
+    setGenProgress(10);
+    const msgKey = "library-create";
+    message.loading({ content: "正在创建资料库并入库…", key: msgKey, duration: 0 });
+    try {
+      const lib = await createLibrary(userId, newLibraryName.trim());
+      setGenProgress(35);
+      setGenStage("正在解析文件并写入资料库…");
+      const res = await uploadLibraryFiles(userId, lib.id, files);
+      setGenProgress(100);
+      message.destroy(msgKey);
+      if (res.errors?.length) {
+        message.warning(`部分文件失败：${res.errors.join("；")}`);
+      }
+      message.success(
+        `资料库「${lib.name}」已创建，入库 ${res.file_count} 个文件，${res.ingested_chunks} 个知识片段`
+      );
+      setLibraries((prev) => [lib, ...prev.filter((x) => x.id !== lib.id)]);
+      setGenModalOpen(false);
+      setPendingFiles([]);
+      resetGenForm();
+      if (typeof sessionStorage !== "undefined") {
+        sessionStorage.setItem("lp-resources-tab", "libraries");
+      }
+      setPageTab("libraries");
+      router.push(`/resources/library/${encodeURIComponent(lib.id)}`);
+    } catch (e: unknown) {
+      message.destroy(msgKey);
+      message.error(e instanceof Error ? e.message : "创建资料库失败");
+    } finally {
+      setPreparingLibrary(false);
+      setGenStage("");
+      setGenProgress(0);
+    }
+  };
+
+  const isLibraryOnlyMode = genSource === "new";
+
   const runStreamGenerate = async () => {
+    if (isLibraryOnlyMode) return;
     if (!topic.trim()) {
       message.warning("请输入生成主题");
       return;
     }
     if (!genSource) {
-      message.warning("请选择资料来源");
-      return;
+      setGenSource("web");
     }
-    if (!selectedGenTypes.length) {
-      message.warning("请至少选择一种资源类型");
+    if (totalGenCount(genTypeCounts) === 0) {
+      message.warning("请至少为一种资源类型设置生成数量");
       return;
     }
     if (genSource === "library" && !selectedLibraryId) {
@@ -600,7 +676,10 @@ export default function ResourcesContent() {
     }
 
     setGenerating(true);
-    setGenStage("");
+    setGenStage("正在准备生成…");
+    setGenProgress(2);
+    const effectiveSource = genSource || "web";
+    const webMode = effectiveSource === "web";
     const msgKey = "resource-gen";
     message.loading({ content: "正在准备并生成资源…", key: msgKey, duration: 0 });
     try {
@@ -610,10 +689,27 @@ export default function ResourcesContent() {
         userId,
         topic.trim(),
         {
-          onProgress: (stage) => {
-            const text = GEN_STAGE_LABELS[stage] || stage;
+          onProgress: (stage, progress, meta) => {
+            const text =
+              stage === "done"
+                ? "生成完成"
+                : formatGenStageLabel(stage, GEN_STAGE_LABELS, meta);
+            const pct =
+              typeof progress === "number"
+                ? progress
+                : (() => {
+                    const stages = buildGenProgressStages(
+                      options.resourceTypeCounts,
+                      webMode,
+                      options.deepThinking ?? deepThinking
+                    );
+                    const idx = stages.indexOf(stage);
+                    if (idx < 0) return 0;
+                    return Math.min(99, Math.round(((idx + 1) / stages.length) * 99));
+                  })();
             setGenStage(text);
-            message.loading({ content: `生成中：${text}`, key: msgKey, duration: 0 });
+            setGenProgress((prev) => Math.max(prev, pct));
+            message.loading({ content: `生成中：${text}（${pct}%）`, key: msgKey, duration: 0 });
           },
           onError: (err) => {
             throw new Error(err);
@@ -640,6 +736,7 @@ export default function ResourcesContent() {
     } finally {
       setGenerating(false);
       setGenStage("");
+      setGenProgress(0);
       setPreparingLibrary(false);
     }
   };
@@ -686,7 +783,7 @@ export default function ResourcesContent() {
         }
       />
       <Modal
-        title="AI 生成学习资源"
+        title={isLibraryOnlyMode ? "新建资料库" : "AI 生成学习资源"}
         open={genModalOpen}
         onCancel={() => {
           if (!generating && !preparingLibrary) {
@@ -711,32 +808,39 @@ export default function ResourcesContent() {
             </Button>
             <Button
               type="primary"
-              icon={<PlusOutlined />}
+              icon={isLibraryOnlyMode ? <CloudUploadOutlined /> : <PlusOutlined />}
               loading={generating || preparingLibrary}
-              onClick={() => void runStreamGenerate()}
+              onClick={() =>
+                void (isLibraryOnlyMode ? runCreateLibrary() : runStreamGenerate())
+              }
             >
-              开始生成
+              {isLibraryOnlyMode ? "创建并入库" : "开始生成"}
             </Button>
           </div>
         }
       >
         <div className="lp-resource-gen-form">
-          {(genStage || preparingLibrary) && (
+          {(generating || preparingLibrary) && (
             <div className="lp-resource-gen-progress">
-              <Spin size="small" />
-              <Text type="secondary">
-                {preparingLibrary ? "正在创建资料库并分析上传文件…" : genStage}
-              </Text>
+              <div className="lp-resource-gen-progress-head">
+                <Spin size="small" />
+                <Text type="secondary">
+                  {preparingLibrary
+                    ? genStage || "正在创建资料库并上传文件…"
+                    : genStage || "正在生成资源…"}
+                </Text>
+                <span className="lp-resource-gen-progress-pct">{genProgress}%</span>
+              </div>
+              <Progress
+                percent={genProgress}
+                showInfo={false}
+                status="active"
+                strokeColor={{ "0%": "#1677ff", "100%": "#36cfc9" }}
+                trailColor="rgba(22,119,255,0.12)"
+                size={6}
+              />
             </div>
           )}
-          <div className="lp-resource-gen-field">
-            <Text className="lp-resource-gen-label">生成主题</Text>
-            <Input
-              placeholder="例如：线性回归、梯度下降"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-            />
-          </div>
           <div className="lp-resource-gen-field">
             <Text className="lp-resource-gen-label">资料来源</Text>
             <Radio.Group
@@ -749,6 +853,16 @@ export default function ResourcesContent() {
               <Radio value="web">无资料库 · 全网检索</Radio>
             </Radio.Group>
           </div>
+          {!isLibraryOnlyMode && (
+            <div className="lp-resource-gen-field">
+              <Text className="lp-resource-gen-label">生成主题</Text>
+              <Input
+                placeholder="例如：线性回归、梯度下降"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+              />
+            </div>
+          )}
           {genSource === "library" && (
             <div className="lp-resource-gen-field">
               <Text className="lp-resource-gen-label">选择资料库</Text>
@@ -770,6 +884,9 @@ export default function ResourcesContent() {
           )}
           {genSource === "new" && (
             <>
+              <Text type="secondary" className="lp-resource-gen-hint" style={{ marginTop: -4 }}>
+                仅创建资料库并上传文件，不会生成 AI 资源。需要生成时请选「依据已有资料库」或「全网检索」。
+              </Text>
               <div className="lp-resource-gen-field">
                 <Text className="lp-resource-gen-label">新资料库名称</Text>
                 <Input
@@ -814,12 +931,13 @@ export default function ResourcesContent() {
                 </Upload>
                 <Text type="secondary" className="lp-resource-gen-upload-hint">
                   {pendingFiles.length > 0
-                    ? `已选择 ${pendingFiles.length} 个文件，生成前将自动创建资料库并入库分析`
-                    : `支持 ${formatExtensionsHint(uploadExtensions)}；也可不上传，生成时再补充`}
+                    ? `已选择 ${pendingFiles.length} 个文件，点击「创建并入库」即可写入资料库`
+                    : `支持 ${formatExtensionsHint(uploadExtensions)}，请至少选择 1 个文件`}
                 </Text>
               </div>
             </>
           )}
+          {!isLibraryOnlyMode && (
           <div className="lp-resource-gen-field">
             <div className="lp-resource-gen-type-head">
               <Text className="lp-resource-gen-label">资源类型</Text>
@@ -827,21 +945,21 @@ export default function ResourcesContent() {
                 <button
                   type="button"
                   className="lp-resource-gen-preset"
-                  onClick={() => setSelectedGenTypes([...STANDARD_RESOURCE_TYPES])}
+                  onClick={() => setGenTypeCounts(standardGenTypeCounts())}
                 >
                   标准套件
                 </button>
                 <button
                   type="button"
                   className="lp-resource-gen-preset"
-                  onClick={() => setSelectedGenTypes([...EXTENDED_RESOURCE_TYPES])}
+                  onClick={() => setGenTypeCounts(allGenTypeCounts(1))}
                 >
-                  全选
+                  全选 ×1
                 </button>
                 <button
                   type="button"
                   className="lp-resource-gen-preset"
-                  onClick={() => setSelectedGenTypes([])}
+                  onClick={() => setGenTypeCounts(emptyGenTypeCounts())}
                 >
                   全不选
                 </button>
@@ -850,25 +968,40 @@ export default function ResourcesContent() {
             <div className="lp-resource-gen-types">
               {GENERATABLE_RESOURCE_TYPES.map(({ api, ui }) => {
                 const cfg = RESOURCE_CONFIG[ui];
-                const active = selectedGenTypes.includes(api);
+                const count = clampGenTypeCount(genTypeCounts[api]);
+                const active = count > 0;
                 return (
-                  <button
+                  <div
                     key={api}
-                    type="button"
-                    className={`lp-resource-gen-type${active ? " lp-resource-gen-type--active" : ""}`}
-                    onClick={() => toggleGenType(api)}
+                    className={`lp-resource-gen-type-row${active ? " lp-resource-gen-type-row--active" : ""}`}
                     style={{ "--type-color": cfg.color } as React.CSSProperties}
                   >
-                    <span className="lp-resource-gen-type-icon">{cfg.icon}</span>
-                    <span>{cfg.label}</span>
-                  </button>
+                    <button
+                      type="button"
+                      className="lp-resource-gen-type"
+                      onClick={() => setGenTypeCount(api, active ? 0 : 1)}
+                    >
+                      <span className="lp-resource-gen-type-icon">{cfg.icon}</span>
+                      <span>{cfg.label}</span>
+                    </button>
+                    <InputNumber
+                      min={0}
+                      max={MAX_RESOURCE_GEN_PER_TYPE}
+                      value={count}
+                      size="small"
+                      controls
+                      className="lp-resource-gen-type-count"
+                      onChange={(value) => setGenTypeCount(api, value)}
+                    />
+                  </div>
                 );
               })}
             </div>
             <Text type="secondary" className="lp-resource-gen-hint">
-              已选 {selectedGenTypes.length} 种，生成时将按所选类型依次产出。
+              已选 {totalGenCount(genTypeCounts)} 项（每种类型单次最多 {MAX_RESOURCE_GEN_PER_TYPE} 个）。
             </Text>
           </div>
+          )}
         </div>
       </Modal>
       <Modal
@@ -959,6 +1092,24 @@ export default function ResourcesContent() {
           />
         ) : (
           <>
+        <section className="lp-resource-role-panel" aria-label="资源库角色">
+          <div className="lp-resource-role-copy">
+            <span>内容资产库</span>
+            <strong>资源库负责沉淀材料，学习路径负责决定这些材料什么时候被使用。</strong>
+            <p>
+              收藏、重生成和完成记录都会保留在资源库；如果某个资源已经绑定到路径，重生成后路径会继续引用新版内容。
+            </p>
+          </div>
+          <div className="lp-resource-role-actions">
+            <Button size="small" onClick={() => router.push("/path")}>
+              回到路径
+            </Button>
+            <Button size="small" type="primary" ghost onClick={() => void loadRecommendations(false)}>
+              刷新推荐
+            </Button>
+          </div>
+        </section>
+
         {pathSteps.length > 0 && (
           <div className="lp-resource-summary">
             <div className="lp-resource-summary-icon">

@@ -42,6 +42,7 @@ type ResourceCardProps = {
   selected?: boolean;
   onToggleSelect?: () => void;
   compact?: boolean;
+  relationLabel?: string;
 };
 
 function ResourceCard({
@@ -56,6 +57,7 @@ function ResourceCard({
   selected = false,
   onToggleSelect,
   compact,
+  relationLabel,
 }: ResourceCardProps) {
   const uiType = mapApiType(resource.type) as UiResourceType;
   const cfg = RESOURCE_CONFIG[uiType];
@@ -96,6 +98,11 @@ function ResourceCard({
           {resource.title}
         </Text>
         <div className="lp-resource-card-tags">
+          {relationLabel && (
+            <Tag className="lp-resource-relation-tag">
+              {relationLabel}
+            </Tag>
+          )}
           <Tag className="lp-resource-source-tag" color={sourceMeta.color}>
             {sourceMeta.short}
           </Tag>
@@ -206,6 +213,12 @@ export function ResourceStageSection({
   onToggleSelect,
 }: ResourceStageSectionProps) {
   const statusMeta = STAGE_STATUS_META[stage.status];
+  const relationLabel =
+    stage.id === "unassigned"
+      ? "历史资源"
+      : stage.id.startsWith("topic-")
+        ? "主题归档"
+        : "当前路径";
 
   return (
     <section
@@ -280,6 +293,7 @@ export function ResourceStageSection({
             manageMode={manageMode}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
+            relationLabel={relationLabel}
           />
         ))}
       </div>
@@ -298,6 +312,7 @@ function CategoryLane({
   manageMode = false,
   selectedIds = [],
   onToggleSelect,
+  relationLabel,
 }: {
   category: ResourceCategoryGroup;
   starredIds: string[];
@@ -309,6 +324,7 @@ function CategoryLane({
   manageMode?: boolean;
   selectedIds?: string[];
   onToggleSelect?: (id: string) => void;
+  relationLabel?: string;
 }) {
   const cfg = RESOURCE_CONFIG[category.type];
 
@@ -336,6 +352,7 @@ function CategoryLane({
             manageMode={manageMode}
             selected={selectedIds.includes(r.id)}
             onToggleSelect={() => onToggleSelect?.(r.id)}
+            relationLabel={relationLabel}
             compact
           />
         ))}

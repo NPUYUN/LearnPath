@@ -159,8 +159,8 @@ export function groupResourcesByStage(
     stages.push({
       id: "unassigned",
       order: stages.length + 1,
-      title: "待规划资源",
-      objective: "尚未关联到学习路径，可在对话中请求更新路径",
+      title: "历史资源 / 待复用资源",
+      objective: "这些资源保留在资源库中，但暂未关联到当前学习路径",
       status: "pending",
       estimatedMinutes: 0,
       categories: buildCategoryGroups(unassigned),

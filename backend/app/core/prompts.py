@@ -427,11 +427,19 @@ RESOURCE_GENERATION_BASE = (
 
     "你是「学径 LearnPath」多智能体系统中的资源生成 Agent。\n"
 
-    "必须依据提供的【资料库上下文】和/或【全网整理摘要】生成内容，禁止无依据编造。\n"
+    "必须依据用户消息中的参考资料生成**可直接学习**的正文，禁止无依据编造。\n"
 
     "若上下文不足，在文末「资料说明」中声明缺口。\n"
 
     "输出须符合高校自学场景：术语准确、结构清晰、Markdown 格式。\n"
+
+    "【严禁】复述、照抄或输出用户消息里的字段标签与生成指令，例如："
+
+    "「学习主题」「资源标题」「生成模式」「学生画像摘要」「【资料库上下文】」"
+
+    "「【全网整理摘要】」「请生成 type=」「路径阶段目标」「学习者综合分析」等。\n"
+
+    "你只输出最终学习资源正文（Markdown 或任务要求的 JSON/Mermaid），不要输出任何元数据说明。\n"
 
     "数学公式必须使用 LaTeX：行内公式用 $...$（如 $\\frac{dy}{dx}$），"
 
@@ -1055,6 +1063,10 @@ def resource_generation_user(
 
     learner_analysis_brief: str = "",
 
+    variant_index: int = 1,
+
+    variant_total: int = 1,
+
 ) -> str:
 
     parts = [
@@ -1076,6 +1088,13 @@ def resource_generation_user(
     if learner_analysis_brief:
 
         parts.append(f"学习者综合分析（仅供生成参考）：\n{learner_analysis_brief[:1200]}")
+
+    if variant_total > 1:
+
+        parts.append(
+            f"同类型第 {variant_index}/{variant_total} 份：须与已生成同类型资源角度不同，"
+            "避免重复章节结构与例题。"
+        )
 
     parts.extend(
 

@@ -9,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
-from app.db.repository import delete_path, delete_unstarred_resources, get_library
+from app.db.repository import delete_path, get_library, list_resources
 from app.models.schemas import PathReplanJob, PathReplanJobResult, PathReplanSubPhase
 from app.services.path_confirm_service import confirm_replan
 from app.services.path_replan_service import replan_learning_path
@@ -23,7 +23,7 @@ _JOBS: dict[str, PathReplanJob] = {}
 
 STEP_LABELS = [
     "清除当前规划",
-    "清除资源库",
+    "保留历史资源",
     "分析画像",
     "重新规划路线",
     "重新生成配套资源",
@@ -169,11 +169,10 @@ async def _run_full_replan(
             logger.info("path replan job %s: no prior path", job_id)
         _set_step(job, 0, stage="已清除当前规划", progress=_calc_progress(0, in_step=0.9))
 
-        _set_step(job, 1, stage="正在删除未收藏的学习资源…")
-        clear_result = await delete_unstarred_resources(user_id)
-        cleared_count = int(clear_result.get("deleted_count") or 0)
-        kept_count = int(clear_result.get("kept_count") or 0)
-        _set_step(job, 1, stage=f"已删除 {cleared_count} 项，保留收藏 {kept_count} 项")
+        _set_step(job, 1, stage="正在保留旧资源并解除当前路径引用…")
+        kept_count = len(await list_resources(user_id))
+        cleared_count = 0
+        _set_step(job, 1, stage=f"已保留 {kept_count} 项历史资源，后续只重建当前路径引用")
 
         _set_step(job, 2, stage="正在综合画像与学习行为生成分析报告…")
         await analyze_learner_profile(user_id, conversation_id=conversation_id)

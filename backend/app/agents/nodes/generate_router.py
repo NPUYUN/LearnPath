@@ -10,6 +10,7 @@ from app.agents.nodes.design_agent import design_node
 from app.agents.nodes.project_agent import project_node
 from app.agents.nodes.reviewer_agent import review_resources
 from app.core.prompts import chat_reply_hint
+from app.services.resource_generation_utils import expand_resource_jobs, normalize_resource_type_counts
 
 RESOURCE_NODE_MAP = {
     "doc": doc_node,
@@ -26,7 +27,16 @@ RESOURCE_NODE_MAP = {
 
 async def generate_router_node(state: AgentState) -> dict:
     """按 resource_types 依次调用各资源 Agent，仅将本批新增写入 new_resources。"""
-    types = state.get("resource_types") or ["doc", "mindmap", "quiz", "reading", "code"]
+    jobs = state.get("resource_generation_jobs")
+    if not jobs:
+        counts = normalize_resource_type_counts(
+            state.get("resource_type_counts"),
+            state.get("resource_types"),
+        )
+        jobs = expand_resource_jobs(counts)
+    if not jobs:
+        jobs = [(rt, 1) for rt in (state.get("resource_types") or ["doc", "mindmap", "quiz", "reading", "code"])]
+
     prior = list(state.get("resources") or [])
     prior_ids = {r.get("id") for r in prior if r.get("id")}
 
@@ -34,9 +44,17 @@ async def generate_router_node(state: AgentState) -> dict:
     current = dict(state)
     current["resources"] = merged["resources"]
 
-    for rt in types:
+    type_counts = normalize_resource_type_counts(
+        state.get("resource_type_counts"),
+        state.get("resource_types"),
+    )
+
+    for rt, variant in jobs:
         node_fn = RESOURCE_NODE_MAP.get(rt)
         if node_fn:
+            variant_total = sum(1 for t, _ in jobs if t == rt)
+            current["resource_variant_index"] = variant
+            current["resource_variant_total"] = variant_total
             result = await node_fn(current)
             current["resources"] = result.get("resources", current["resources"])
             merged["resources"] = current["resources"]
@@ -53,7 +71,16 @@ async def generate_router_node(state: AgentState) -> dict:
     merged["resources"] = all_resources
 
     deep = bool(state.get("deep_thinking"))
-    type_labels = "、".join(types)
+    ordered_types: list[str] = []
+    for rt, _ in jobs:
+        if rt not in ordered_types:
+            ordered_types.append(rt)
+    type_labels = "、".join(
+        f"{rt}×{sum(1 for t, _ in jobs if t == rt)}"
+        if sum(1 for t, _ in jobs if t == rt) > 1
+        else rt
+        for rt in ordered_types
+    )
     merged["new_resources"] = new_resources
     merged["reply"] = (
         chat_reply_hint("generate", deep)

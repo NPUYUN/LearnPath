@@ -198,13 +198,36 @@ export type StreamChatCallbacks = {
   onToken?: (t: string) => void;
   onDone?: (reply: string) => void;
   onIntent?: (intent: string) => void;
-  onProgress?: (stage: string) => void;
+  onProgress?: (
+    stage: string,
+    progress?: number,
+    meta?: { resource_type?: string; variant?: number; variant_total?: number }
+  ) => void;
   onProfile?: (profile: StudentProfile) => void;
   onRealtimeState?: (state: RealtimeLearningState) => void;
   onResources?: (items: ResourceSummary[]) => void;
   onPath?: (info: { steps: number; version: number }) => void;
   onError?: (msg: string) => void;
 };
+
+function emitStreamProgress(data: string, callbacks: StreamChatCallbacks) {
+  try {
+    const p = JSON.parse(data) as {
+      stage?: string;
+      progress?: number;
+      resource_type?: string;
+      variant?: number;
+      variant_total?: number;
+    };
+    callbacks.onProgress?.(p.stage || data, p.progress, {
+      resource_type: p.resource_type,
+      variant: p.variant,
+      variant_total: p.variant_total,
+    });
+  } catch {
+    callbacks.onProgress?.(data);
+  }
+}
 
 export type HealthResponse = {
   status: string;
@@ -341,12 +364,7 @@ export async function streamChat(
       }
       if (event === "intent" && data) callbacks.onIntent?.(data);
       if (event === "progress" && data) {
-        try {
-          const p = JSON.parse(data) as { stage?: string };
-          callbacks.onProgress?.(p.stage || data);
-        } catch {
-          callbacks.onProgress?.(data);
-        }
+        emitStreamProgress(data, callbacks);
       }
       if (event === "profile" && data) {
         try {
@@ -449,12 +467,7 @@ export async function streamTutor(
           : rawData;
       if (event === "token" && data) callbacks.onToken?.(data);
       if (event === "progress" && data) {
-        try {
-          const p = JSON.parse(data) as { stage?: string };
-          callbacks.onProgress?.(p.stage || data);
-        } catch {
-          callbacks.onProgress?.(data);
-        }
+        emitStreamProgress(data, callbacks);
       }
       if (event === "error" && data) callbacks.onError?.(data);
       if (event === "done") lastReply = data;
@@ -589,6 +602,7 @@ export type LibraryDetail = ResourceLibrary & {
 
 export type GenerateResourceOptions = {
   resourceTypes?: string[];
+  resourceTypeCounts?: Record<string, number>;
   libraryId?: string | null;
   newLibraryName?: string;
   deepThinking?: boolean;
@@ -686,6 +700,7 @@ export async function generateResources(
         user_id: userId,
         topic,
         resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
+        resource_type_counts: options?.resourceTypeCounts ?? {},
         library_id: options?.libraryId || null,
         new_library_name: options?.newLibraryName || null,
         deep_thinking: options?.deepThinking ?? false,
@@ -757,6 +772,7 @@ export async function streamGenerateResources(
         user_id: userId,
         topic,
         resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
+        resource_type_counts: options?.resourceTypeCounts ?? {},
         library_id: options?.libraryId || null,
         new_library_name: options?.newLibraryName || null,
         deep_thinking: options?.deepThinking ?? false,
@@ -780,12 +796,7 @@ export async function streamGenerateResources(
           ? decodeStreamTextPayload(rawData)
           : rawData;
       if (event === "progress" && data) {
-        try {
-          const p = JSON.parse(data) as { stage?: string };
-          callbacks.onProgress?.(p.stage || data);
-        } catch {
-          callbacks.onProgress?.(data);
-        }
+        emitStreamProgress(data, callbacks);
       }
       if (event === "resources" && data) {
         try {
@@ -795,7 +806,17 @@ export async function streamGenerateResources(
         }
       }
       if (event === "error" && data) callbacks.onError?.(data);
-      if (event === "done") callbacks.onDone?.(data);
+      if (event === "done") {
+        try {
+          const d = JSON.parse(data) as { progress?: number };
+          if (typeof d.progress === "number") {
+            callbacks.onProgress?.("done", d.progress);
+          }
+        } catch {
+          /* ignore */
+        }
+        callbacks.onDone?.(data);
+      }
     }
   }
 }

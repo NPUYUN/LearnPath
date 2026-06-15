@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     jwt_expire_hours: int = 72
     auto_path_after_generate: bool = True
     dev_reload: bool = True
+    # 资料库上传：默认快速入库（仅解析+分块+向量化），跳过逐文件 LLM 分析
+    library_fast_ingest: bool = True
 
     spark_tts_url: str = ""
 

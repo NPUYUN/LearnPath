@@ -17,12 +17,20 @@ def mock_chat_response(
     snippet = user_msg[:80] + ("…" if len(user_msg) > 80 else "")
 
     if "资源生成 Agent" in system_msg or "资源生成" in system_msg:
+        import re
+
+        topic_match = re.search(r"学习主题：(.+)", user_msg)
+        title_match = re.search(r"资源标题：(.+)", user_msg)
+        topic = (topic_match.group(1).split("\n")[0].strip() if topic_match else "学习主题")
+        title = (title_match.group(1).split("\n")[0].strip() if title_match else topic)
         body = (
-            f"# {snippet}\n\n"
+            f"# {title}\n\n"
             "## 学习目标\n"
-            "掌握主题核心概念（Mock 模式示例输出）。\n\n"
+            f"- 理解「{topic}」的核心概念、适用场景与常见误区。\n"
+            "- 能结合例题说明关键步骤。\n\n"
             "## 正文\n"
-            "基于资料库/全网摘要生成的占位内容。配置星火 API 后将输出完整 LLM 生成结果。\n\n"
+            f"本节围绕「{topic}」展开自学讲解（Mock 模式占位正文）。"
+            "配置真实 API Key 后将输出完整 LLM 生成结果。\n\n"
         )
         if deep:
             body += (

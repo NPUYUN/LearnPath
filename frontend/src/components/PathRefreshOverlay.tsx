@@ -23,8 +23,8 @@ export const PATH_REFRESH_STEPS = [
   },
   {
     key: "clear-resources",
-    label: "清除资源库",
-    desc: "删除未收藏资源，保留收藏条目",
+    label: "保留历史资源",
+    desc: "旧资源留在资源库，仅重建当前路径引用",
     icon: <BookOutlined />,
   },
   {

@@ -519,6 +519,7 @@ class GenerateResourcesRequest(BaseModel):
     resource_types: list[ResourceType] = Field(
         default_factory=lambda: ["doc", "mindmap", "quiz", "reading", "media", "code"]
     )
+    resource_type_counts: dict[str, int] = Field(default_factory=dict)
     library_id: str | None = None
     new_library_name: str | None = None
     deep_thinking: bool = False

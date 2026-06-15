@@ -37,6 +37,7 @@ import {
   formatExtensionsHint,
   isAllowedUploadFile,
 } from "@/lib/uploadFormats";
+import { formatLibraryDescription } from "@/lib/libraryDescription";
 
 const { Text, Paragraph } = Typography;
 
@@ -122,7 +123,7 @@ export default function ResourceLibraryPanel({
     if (!files.length) return;
     setUploading(true);
     const msgKey = "lib-upload";
-    message.loading({ content: "正在上传并分析文件…", key: msgKey, duration: 0 });
+    message.loading({ content: "正在解析文件并入库…", key: msgKey, duration: 0 });
     try {
       const res = await uploadLibraryFiles(userId, libraryId, files);
       message.destroy(msgKey);
@@ -172,7 +173,7 @@ export default function ResourceLibraryPanel({
             课程资料库
           </Text>
           <Paragraph type="secondary" className="lp-library-panel-desc">
-            点击资料库卡片进入详情页，按 PDF、PPT、Word、Markdown 等类型浏览全部文件；上传后可作为 RAG 生成依据。
+            点击资料库卡片进入详情页，按 PDF、PPT、Word、Markdown 等类型浏览全部文件；上传后快速入库，可作为生成依据。
           </Paragraph>
           {extensions.length > 0 && (
             <Text type="secondary" style={{ fontSize: 12 }}>
@@ -221,7 +222,7 @@ export default function ResourceLibraryPanel({
                     ellipsis={{ rows: 2 }}
                     className="lp-library-card-desc"
                   >
-                    {lib.description}
+                    {formatLibraryDescription(lib.description)}
                   </Paragraph>
                 )}
                 <div className="lp-library-card-stats">
