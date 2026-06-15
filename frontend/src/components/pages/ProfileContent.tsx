@@ -347,38 +347,6 @@ export default function ProfileContent() {
   const avgScore = Math.round(
     dimensions.reduce((s, d) => s + d.score, 0) / Math.max(dimensions.length, 1)
   );
-  const loadValue = realtimeState ? loadPercent(realtimeState) : null;
-  const confusionValue = realtimeState ? percentFromLevel(realtimeState.confusion_level) : null;
-  const curiosityValue = realtimeState ? percentFromLevel(realtimeState.curiosity_level) : null;
-  const primaryStuck = realtimeState?.stuck_topics[0] || profile.error_prone_topics?.[0] || "当前薄弱点";
-  const primaryCuriosity = realtimeState?.curiosity_topics[0] || profile.learning_goal || "当前目标";
-  const profileImpactCards = [
-    {
-      label: "影响路径节奏",
-      value: loadValue !== null && loadValue >= 70 ? "放慢推进" : "稳定推进",
-      desc:
-        loadValue !== null && loadValue >= 70
-          ? "后续路径更适合短节点、低负担任务。"
-          : "路径可以继续按当前阶段推进，保留必要巩固。",
-    },
-    {
-      label: "影响资源推荐",
-      value: confusionValue !== null && confusionValue >= 60 ? "先补卡点" : "匹配偏好",
-      desc:
-        confusionValue !== null && confusionValue >= 60
-          ? `优先推送围绕「${primaryStuck}」的讲解和例题。`
-          : `结合「${profile.preferred_modality}」选择更合适的资料形态。`,
-    },
-    {
-      label: "影响 AI 课堂",
-      value: curiosityValue !== null && curiosityValue >= 60 ? "适度加深" : "清晰讲解",
-      desc:
-        curiosityValue !== null && curiosityValue >= 60
-          ? `课堂会围绕「${primaryCuriosity}」加入追问和挑战题。`
-          : "课堂会先保证概念、例题和反馈节奏稳定。",
-    },
-  ];
-
   return (
     <div className="lp-profile-page">
       <header className="lp-profile-hero">
@@ -435,22 +403,6 @@ export default function ProfileContent() {
       </header>
 
       <div className="lp-profile-body">
-        <section className="lp-profile-impact-panel" aria-label="画像影响">
-          <div className="lp-profile-impact-head">
-            <span>画像正在影响</span>
-            <strong>系统会把这些判断同步给路径、资源推荐和 AI 课堂。</strong>
-          </div>
-          <div className="lp-profile-impact-grid">
-            {profileImpactCards.map((card) => (
-              <article key={card.label} className="lp-profile-impact-card">
-                <span>{card.label}</span>
-                <strong>{card.value}</strong>
-                <p>{card.desc}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
         <section className="lp-profile-view-shell">
           <div className="lp-profile-view-top">
             <div>

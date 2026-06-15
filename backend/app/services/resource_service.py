@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from app.agents.graph import build_graph
 from app.agents.nodes.generate_router import RESOURCE_NODE_MAP
 from app.agents.state import AgentState
-from app.db.repository import get_path, get_resource, save_resources
+from app.db.repository import get_path, get_resource, save_library, save_resources
 from app.models.schemas import GenerateResourcesRequest, LearningResource, ResourceRegenerateRequest
 from app.services.graph_state import build_graph_state
 from app.db.repository import get_library
@@ -24,9 +24,70 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_generation_jobs(req: GenerateResourcesRequest) -> tuple[dict[str, int], list[tuple[str, int]]]:
-    counts = normalize_resource_type_counts(req.resource_type_counts, req.resource_types)
+    counts = normalize_resource_type_counts(
+        req.resource_type_counts,
+        req.resource_types,
+        topic=req.topic,
+        requirements=req.requirements,
+    )
     jobs = expand_resource_jobs(counts)
     return counts, jobs
+
+
+async def _update_library_resource_index(user_id: str, library_id: str, resources: list[dict]) -> None:
+    if not library_id or not resources:
+        return
+    lib = await get_library(library_id, user_id)
+    if not lib:
+        return
+    synthesis = dict(lib.get("synthesis") or {})
+    resource_index = dict(synthesis.get("resource_index") or {})
+    for item in resources:
+        rid = str(item.get("id") or "")
+        if not rid:
+            continue
+        rtype = str(item.get("type") or "doc")
+        bucket = list(resource_index.get(rtype) or [])
+        row = {
+            "id": rid,
+            "title": str(item.get("title") or ""),
+            "topic": str(item.get("topic") or ""),
+            "type": rtype,
+        }
+        bucket = [old for old in bucket if old.get("id") != rid]
+        bucket.append(row)
+        resource_index[rtype] = bucket[-50:]
+    synthesis["resource_index"] = resource_index
+    synthesis["index_doc"] = _render_resource_index_doc(
+        str(lib.get("name") or "资料库"),
+        str(synthesis.get("index_doc") or ""),
+        resource_index,
+    )
+    await save_library({**lib, "synthesis": synthesis})
+
+
+def _render_resource_index_doc(library_name: str, existing: str, resource_index: dict) -> str:
+    base = existing.strip() or f"# {library_name} 索引"
+    marker = "\n\n## 已生成资源索引"
+    if marker in base:
+        base = base.split(marker, 1)[0].rstrip()
+    lines = [base, marker.strip()]
+    label_map = {
+        "doc": "讲解文档",
+        "mindmap": "思维导图",
+        "quiz": "练习题库",
+        "reading": "拓展阅读",
+        "media": "多模态讲解",
+        "code": "代码案例",
+        "ppt": "课件提纲",
+        "design": "设计方案",
+        "project": "实践项目",
+    }
+    for rtype, rows in resource_index.items():
+        lines.append(f"\n### {label_map.get(rtype, rtype)}")
+        for row in list(rows)[-20:]:
+            lines.append(f"- {row.get('title') or row.get('id')}（{row.get('id')}）")
+    return "\n".join(lines).strip()
 
 
 def _resource_stage_progress(stage_index: int, total: int) -> int:
@@ -161,6 +222,7 @@ async def regenerate_resource(
         topic=topic,
         library_id=original.get("library_id") or None,
         user_id=req.user_id,
+        requirements=req.requirements,
     )
     if path_ctx.get("stage_objective"):
         gen_ctx["stage_objective"] = path_ctx["stage_objective"]
@@ -231,19 +293,30 @@ async def _resolve_generation_context(req: GenerateResourcesRequest) -> dict:
         req.user_id,
         library_id=req.library_id,
         new_library_name=req.new_library_name,
+        requirements=req.requirements,
+        source_mode="empty" if req.generation_source in {"empty", "web"} else "upload",
+        source_library_id=req.library_id,
     )
+    if lib and req.requirements:
+        synthesis = dict(lib.get("synthesis") or {})
+        synthesis["requirements"] = req.requirements.strip()
+        lib = {**lib, "synthesis": synthesis}
+        await save_library(lib)
     library_id_for_ctx: str | None = None
-    if lib and lib.get("status") == "ready" and lib.get("chunk_count", 0) > 0:
+    if req.generation_source in {"empty", "web"}:
+        library_id_for_ctx = None
+    elif lib and lib.get("status") == "ready":
         library_id_for_ctx = lib["id"]
     elif req.library_id:
         check = await get_library(req.library_id, req.user_id)
-        if check and check.get("chunk_count", 0) > 0:
+        if check and check.get("status") == "ready":
             library_id_for_ctx = req.library_id
 
     gen_ctx = await build_generation_context(
         topic=req.topic,
         library_id=library_id_for_ctx,
         user_id=req.user_id,
+        requirements=req.requirements,
     )
     if lib:
         gen_ctx["library_id"] = lib["id"]
@@ -262,7 +335,10 @@ async def generate_resources(req: GenerateResourcesRequest) -> list[LearningReso
             "topic": req.topic,
             "resource_types": resource_jobs_to_types(jobs),
             "resource_type_counts": normalize_resource_type_counts(
-                req.resource_type_counts, req.resource_types
+                req.resource_type_counts,
+                req.resource_types,
+                topic=req.topic,
+                requirements=req.requirements,
             ),
             "resource_generation_jobs": jobs,
             "library_id": gen_ctx.get("library_id", ""),
@@ -279,6 +355,7 @@ async def generate_resources(req: GenerateResourcesRequest) -> list[LearningReso
     new_items = _extract_new_resources(result, prior_ids)
     if new_items:
         await save_resources(req.user_id, new_items)
+        await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), new_items)
 
     return await get_user_resources(req.user_id)
 
@@ -308,7 +385,12 @@ async def stream_generate_resources(
     )
     stage_index += 1
 
-    type_counts = normalize_resource_type_counts(req.resource_type_counts, req.resource_types)
+    type_counts = normalize_resource_type_counts(
+        req.resource_type_counts,
+        req.resource_types,
+        topic=req.topic,
+        requirements=req.requirements,
+    )
     base = await build_graph_state(
         req.user_id,
         {
@@ -385,6 +467,7 @@ async def stream_generate_resources(
         reviewed = new_items
     if reviewed:
         await save_resources(req.user_id, reviewed)
+        await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), reviewed)
         summaries = [
             {"id": r.get("id", ""), "type": r.get("type", ""), "title": r.get("title", "")}
             for r in reviewed

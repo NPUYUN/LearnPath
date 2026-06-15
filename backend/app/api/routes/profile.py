@@ -36,6 +36,8 @@ async def read_replan_context(
     conversation_id: str | None = Query(None),
     learning_goal: str | None = Query(None),
     library_id: str | None = Query(None),
+    planning_mode: str = Query("auto"),
+    planning_requirement: str | None = Query(None),
 ):
     library_name = ""
     if library_id:
@@ -47,6 +49,8 @@ async def read_replan_context(
         learning_goal=learning_goal,
         library_id=library_id,
         library_name=library_name,
+        planning_mode=planning_mode,
+        planning_requirement=planning_requirement,
     )
     return ReplanContextResponse(**ctx)
 

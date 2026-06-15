@@ -275,6 +275,8 @@ async def _run_full_replan(
                 "resource_view_count": planning_context.get("resource_view_count", 0),
                 "quiz_summary": planning_context.get("quiz_summary", ""),
                 "library_name": lib_name or planning_context.get("library_name", ""),
+                "planning_mode": planning_context.get("planning_mode", "auto"),
+                "planning_requirement": planning_context.get("planning_requirement", ""),
             },
         )
         _touch(job)
@@ -294,6 +296,8 @@ async def create_path_replan_job(
     library_id: str | None = None,
     conversation_id: str | None = None,
     learning_goal: str | None = None,
+    planning_mode: str = "auto",
+    planning_requirement: str | None = None,
 ) -> PathReplanJob:
     existing = find_running_job_for_user(user_id)
     if existing:
@@ -310,6 +314,8 @@ async def create_path_replan_job(
         learning_goal=learning_goal,
         library_id=library_id,
         library_name=library_name,
+        planning_mode=planning_mode,
+        planning_requirement=planning_requirement,
     )
     if not replan_context.get("can_start"):
         raise ValueError(replan_context.get("block_reason") or "缺少规划依据，无法开始重规划")

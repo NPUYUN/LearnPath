@@ -50,6 +50,8 @@ async def create_path_replan_job_route(
             library_id=body.library_id,
             conversation_id=body.conversation_id,
             learning_goal=body.learning_goal,
+            planning_mode=body.planning_mode,
+            planning_requirement=body.planning_requirement,
         )
     except ValueError as exc:
         msg = str(exc)

@@ -208,17 +208,9 @@ function Get-WritableLogPath([string]$Path, [string]$Label) {
     }
 }
 
-function Quote-CmdArg([string]$Value) {
-    if ($null -eq $Value) { return '""' }
-    return '"' + ($Value -replace '"', '""') + '"'
-}
-
-function Start-LoggedBackgroundProcess {
+function Prepare-ServiceLogs {
     param(
         [string]$Label,
-        [string]$FilePath,
-        [string[]]$ArgumentList,
-        [string]$WorkingDirectory,
         [string]$LogFile
     )
     $errFile = "$LogFile.err"
@@ -230,18 +222,88 @@ function Start-LoggedBackgroundProcess {
     try {
         "==== $ts $Label ====" | Out-File -FilePath $errFile -Encoding utf8
     } catch {}
+    return @{ Log = $LogFile; Err = $errFile }
+}
 
-    $launcher = Join-Path (Split-Path -Parent $LogFile) "$Label.start.cmd"
-    $quotedArgs = ($ArgumentList | ForEach-Object { Quote-CmdArg $_ }) -join " "
-    $lines = @(
-        "@echo off",
-        "cd /d $(Quote-CmdArg $WorkingDirectory)",
-        "$(Quote-CmdArg $FilePath) $quotedArgs > $(Quote-CmdArg $LogFile) 2> $(Quote-CmdArg $errFile)"
+function Show-LogTail {
+    param(
+        [string]$Path,
+        [int]$Lines = 20
     )
-    Set-Content -Path $launcher -Value $lines -Encoding ASCII
+    if (-not (Test-Path $Path)) { return }
+    Write-Host "      --- $(Split-Path -Leaf $Path) (last $Lines lines) ---" -ForegroundColor DarkGray
+    Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host "      $_" -ForegroundColor DarkGray
+    }
+}
 
-    $ws = New-Object -ComObject WScript.Shell
-    [void]$ws.Run("cmd.exe /c $(Quote-CmdArg $launcher)", 0, $false)
+function Start-BackgroundService {
+    param(
+        [string]$Label,
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory,
+        [string]$LogFile,
+        [ValidateSet("Hidden", "Normal")]
+        [string]$WindowStyle = "Hidden"
+    )
+    $logs = Prepare-ServiceLogs -Label $Label -LogFile $LogFile
+    $proc = Start-Process -FilePath $FilePath `
+        -ArgumentList $ArgumentList `
+        -WorkingDirectory $WorkingDirectory `
+        -WindowStyle $WindowStyle `
+        -RedirectStandardOutput $logs.Log `
+        -RedirectStandardError $logs.Err `
+        -PassThru
+    return @{
+        Process = $proc
+        Log = $logs.Log
+        Err = $logs.Err
+    }
+}
+
+function Start-LearnPathBackend {
+    param(
+        [string]$Python,
+        [string]$WorkDir,
+        [string]$LogFile,
+        [string[]]$UvicornArgs,
+        [ValidateSet("Hidden", "Normal")]
+        [string]$WindowStyle = "Hidden"
+    )
+    return Start-BackgroundService -Label "backend" `
+        -FilePath $Python -ArgumentList $UvicornArgs `
+        -WorkingDirectory $WorkDir -LogFile $LogFile -WindowStyle $WindowStyle
+}
+
+function Start-LearnPathFrontend {
+    param(
+        [string]$FrontDir,
+        [string]$LogFile,
+        [ValidateSet("Hidden", "Normal")]
+        [string]$WindowStyle = "Hidden"
+    )
+    $logs = Prepare-ServiceLogs -Label "frontend" -LogFile $LogFile
+    $ws = $WindowStyle
+    $next = Get-NextDevCommand -FrontDir $FrontDir
+    if ($next) {
+        $proc = Start-Process -FilePath $next.Node `
+            -ArgumentList @($next.Next, "dev", "-p", "3000") `
+            -WorkingDirectory $next.Dir `
+            -WindowStyle $ws `
+            -RedirectStandardOutput $logs.Log `
+            -RedirectStandardError $logs.Err `
+            -PassThru
+    } else {
+        $proc = Start-Process -FilePath "cmd.exe" `
+            -ArgumentList @("/c", "set PORT=3000&& npm run dev") `
+            -WorkingDirectory $FrontDir `
+            -WindowStyle $ws `
+            -RedirectStandardOutput $logs.Log `
+            -RedirectStandardError $logs.Err `
+            -PassThru
+    }
+    return @{ Process = $proc; Log = $logs.Log; Err = $logs.Err }
 }
 
 function Get-NextDevCommand([string]$FrontDir) {
@@ -261,7 +323,24 @@ function Get-NextDevCommand([string]$FrontDir) {
 
 function Get-BackendReadyTimeoutSec {
     $chromaModel = Join-Path $env:USERPROFILE ".cache\chroma\onnx_models\all-MiniLM-L6-v2"
-    if (Test-Path $chromaModel) { return 120 }
+    if (Test-Path $chromaModel) { return 180 }
     Write-Step "First run: Chroma may download ~80MB model; backend can take 2-6 min"
     return 360
+}
+
+function Wait-LearnPathFrontend {
+    param([int]$TimeoutSec = 120)
+    for ($i = 1; $i -le $TimeoutSec; $i++) {
+        foreach ($port in @(3000, 3001)) {
+            try {
+                $r = Invoke-WebRequest -Uri "http://127.0.0.1:$port" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+                if ($r.StatusCode -eq 200) {
+                    return "http://127.0.0.1:$port/chat"
+                }
+            } catch {}
+        }
+        if ($i % 15 -eq 0) { Write-Step "Waiting for frontend ... ${i}s" }
+        Start-Sleep -Seconds 1
+    }
+    return $null
 }

@@ -32,6 +32,8 @@ async def generate_router_node(state: AgentState) -> dict:
         counts = normalize_resource_type_counts(
             state.get("resource_type_counts"),
             state.get("resource_types"),
+            topic=str(state.get("topic") or ""),
+            requirements=str((state.get("generation_context") or {}).get("requirements") or ""),
         )
         jobs = expand_resource_jobs(counts)
     if not jobs:
@@ -47,6 +49,8 @@ async def generate_router_node(state: AgentState) -> dict:
     type_counts = normalize_resource_type_counts(
         state.get("resource_type_counts"),
         state.get("resource_types"),
+        topic=str(state.get("topic") or ""),
+        requirements=str((state.get("generation_context") or {}).get("requirements") or ""),
     )
 
     for rt, variant in jobs:

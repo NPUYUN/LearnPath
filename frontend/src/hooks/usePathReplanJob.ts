@@ -15,6 +15,8 @@ export function usePathReplanJob() {
     libraryId?: string | null;
     conversationId?: string | null;
     learningGoal?: string | null;
+    planningMode?: "auto" | "chapter" | "time" | "detailed";
+    planningRequirement?: string | null;
   }) => {
     if (isRunning) {
       message.warning("已有重规划任务进行中");

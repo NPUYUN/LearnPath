@@ -112,10 +112,9 @@ function restoreAuthSessionOnce() {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  restoreAuthSessionOnce();
-
   const router = useRouter();
   const pathname = usePathname();
+  restoreAuthSessionOnce();
   const [collapsed, setCollapsed] = useState(false);
 
   const routeFromPath: NavRoute = isNavRoute(pathname)

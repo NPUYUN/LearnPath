@@ -29,16 +29,16 @@ if not defined PS_EXE (
 echo Starting LearnPath...
 echo.
 
-"%PS_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start.ps1" -KeepOpen
+"%PS_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start.ps1" -NoBrowser -KeepOpen
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
 if not "%EXITCODE%"=="0" (
     echo FAILED - exit code %EXITCODE%
+    echo Check storage\logs\backend.log.err and frontend.log.err
 ) else (
-    echo Launcher finished. Services keep running in the background.
+    echo Services are running in the background.
     echo   App:  http://127.0.0.1:3000/chat
-    echo   Logs: storage\logs\
     echo   Stop: stop.bat
 )
 echo.

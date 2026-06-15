@@ -56,19 +56,46 @@ async def ensure_builtin_libraries() -> int:
     return count
 
 
-async def create_user_library(user_id: str, name: str, description: str = "") -> dict:
+async def create_user_library(
+    user_id: str,
+    name: str,
+    description: str = "",
+    *,
+    requirements: str = "",
+    source_mode: str = "upload",
+    source_library_id: str | None = None,
+) -> dict:
     lib_id = str(uuid.uuid4()).replace("-", "")[:16]
     collection = f"lib_{lib_id}"
+    clean_name = name.strip() or "未命名资料库"
+    clean_requirements = requirements.strip()
+    synthesis = {
+        "name": clean_name,
+        "description": description.strip() or f"「{clean_name}」学习资料库",
+        "build_mode": source_mode,
+        "source_library_id": source_library_id or "",
+        "requirements": clean_requirements,
+        "description_doc": (
+            f"# {clean_name} 说明\n\n"
+            f"## 复习用途\n{description.strip() or clean_requirements or '用于整理课程复习材料、生成学习资源和规划学习路径。'}\n\n"
+            "## 当前状态\n资料库尚未写入文件，后续可上传资料或依据诉求生成资源。"
+        ),
+        "index_doc": "# 资源索引\n\n当前暂无文件资源。",
+        "file_docs": [],
+        "relationship_doc": "",
+        "resource_index": {},
+    }
     payload = {
         "id": lib_id,
         "user_id": user_id,
-        "name": name.strip() or "未命名资料库",
+        "name": clean_name,
         "description": description.strip(),
         "source_type": "upload",
-        "status": "empty",
+        "status": "ready" if source_mode == "empty" else "empty",
         "collection_name": collection,
         "file_count": 0,
         "chunk_count": 0,
+        "synthesis": synthesis,
         "created_at": datetime.utcnow().isoformat(),
     }
     await save_library(payload)
@@ -80,11 +107,20 @@ async def get_or_create_library(
     *,
     library_id: str | None = None,
     new_library_name: str | None = None,
+    requirements: str = "",
+    source_mode: str = "upload",
+    source_library_id: str | None = None,
 ) -> dict | None:
     if library_id:
         return await get_library(library_id, user_id)
     if new_library_name and new_library_name.strip():
-        return await create_user_library(user_id, new_library_name.strip())
+        return await create_user_library(
+            user_id,
+            new_library_name.strip(),
+            requirements=requirements,
+            source_mode=source_mode,
+            source_library_id=source_library_id,
+        )
     return None
 
 
@@ -164,4 +200,4 @@ async def list_library_files_resolved(lib: dict) -> list[dict]:
         if disk:
             return disk
     files = await list_library_files(lib["id"])
-    return files
+    return [f for f in files if f.get("status") != "skipped"]

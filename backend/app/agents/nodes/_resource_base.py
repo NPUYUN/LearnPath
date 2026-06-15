@@ -137,6 +137,7 @@ async def _generate_with_llm(
                 learner_analysis_brief=str(gen_ctx.get("learner_analysis_brief") or ""),
                 variant_index=int(state.get("resource_variant_index") or 1),
                 variant_total=int(state.get("resource_variant_total") or 1),
+                requirements=str(gen_ctx.get("requirements") or ""),
             ),
         },
     ]
@@ -271,7 +272,10 @@ async def _build_resource(
         "【学术讲义风格】条理清晰、术语准确、适合高校自学阅读。\n\n" + body
     )
 
-    pseudo_chunks = [{"text": combined_context[:800], "metadata": {"title": source_labels[0] if source_labels else topic}}]
+    pseudo_chunks = [
+        {"text": combined_context[:800], "metadata": {"title": label, "chapter": label}}
+        for label in (source_labels[:5] if source_labels else [topic])
+    ]
     content = attach_sources(content, pseudo_chunks if combined_context else [])
 
     review = review_consistency(content, combined_context)

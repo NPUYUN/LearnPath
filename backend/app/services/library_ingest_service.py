@@ -97,7 +97,7 @@ def _normalize_library_description(
 
 
 def _fast_file_analysis(filename: str, text: str) -> dict:
-    preview = re.sub(r"\s+", " ", text[:600]).strip()
+    preview = _meaningful_excerpt(text, limit=700)
     title = Path(filename).stem if filename else "文档"
     return {
         "title": title,
@@ -128,6 +128,172 @@ def _fast_library_synthesis(library_name: str, parsed: list[dict[str, Any]]) -> 
     }
 
 
+def _meaningful_excerpt(text: str, *, limit: int = 800) -> str:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for raw in (text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw).strip()
+        if len(line) < 6:
+            continue
+        low = line.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        alpha_num = sum(1 for ch in line if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
+        if alpha_num / max(len(line), 1) < 0.45:
+            continue
+        if line in {"计算机网络", "西北工业大学软件学院"}:
+            continue
+        lines.append(line)
+        if sum(len(x) for x in lines) >= limit:
+            break
+    return " ".join(lines)[:limit].strip()
+
+
+def _analysis_topics(analysis: dict) -> list[str]:
+    topics = analysis.get("topics") or analysis.get("key_concepts") or []
+    if not isinstance(topics, list):
+        return []
+    return [str(t).strip() for t in topics if str(t).strip()][:8]
+
+
+def _build_file_doc(filename: str, analysis: dict, text: str, requirements: str = "") -> str:
+    title = str(analysis.get("title") or Path(filename).stem or filename).strip()
+    summary = str(analysis.get("summary") or "").strip()
+    if not summary:
+        summary = _meaningful_excerpt(text, limit=800)
+    topics = _analysis_topics(analysis)
+    chapters = analysis.get("suggested_chapters") or []
+    lines = [
+        f"# {title}",
+        "",
+        f"- 文件：{filename}",
+        f"- 难度：{analysis.get('difficulty') or '待评估'}",
+    ]
+    if topics:
+        lines.append(f"- 关键词：{'、'.join(topics[:8])}")
+    if requirements.strip():
+        lines.append(f"- 建库诉求：{requirements.strip()[:240]}")
+    lines.extend(["", "## 内容说明", summary[:800] or "该文件已入库，可用于生成讲解、练习和路径节点。"])
+    if chapters:
+        lines.extend(["", "## 复习切入点"])
+        for item in chapters[:8]:
+            if isinstance(item, dict):
+                name = str(item.get("title") or "").strip()
+                brief = str(item.get("brief") or "").strip()
+                if name:
+                    lines.append(f"- {name}：{brief[:160]}")
+            else:
+                lines.append(f"- {str(item)[:180]}")
+    return "\n".join(lines).strip()
+
+
+def _build_index_doc(library_name: str, parsed: list[dict[str, Any]], requirements: str = "") -> str:
+    lines = [f"# {library_name} 索引", ""]
+    if requirements.strip():
+        lines.extend(["## 建库诉求", requirements.strip()[:1000], ""])
+    lines.append("## 文件索引")
+    for item in parsed:
+        analysis = item.get("analysis") or {}
+        topics = _analysis_topics(analysis)
+        title = str(analysis.get("title") or Path(item.get("filename") or "").stem).strip()
+        lines.append(
+            f"- {item.get('filename')}: {title}"
+            + (f"；主题：{'、'.join(topics[:5])}" if topics else "")
+        )
+    lines.extend(["", "## 资源类型建议"])
+    lines.extend(
+        [
+            "- 讲解文档：用于梳理概念、公式、章节脉络。",
+            "- 练习题库：用于检查定义、计算步骤和易错点。",
+            "- 思维导图：用于复习章节结构和概念关系。",
+            "- 代码案例/实践项目：用于把方法落到可运行或可交付任务。",
+            "- 多模态讲解：用于把抽象概念转为画面、旁白和流程。",
+        ]
+    )
+    return "\n".join(lines).strip()
+
+
+def _build_relationship_doc(library_name: str, parsed: list[dict[str, Any]]) -> str:
+    if len(parsed) <= 1:
+        return ""
+    topic_owner: dict[str, list[str]] = {}
+    for item in parsed:
+        filename = str(item.get("filename") or "")
+        for topic in _analysis_topics(item.get("analysis") or {}):
+            topic_owner.setdefault(topic, []).append(filename)
+    overlaps = [f"- {topic}: {'、'.join(files[:4])}" for topic, files in topic_owner.items() if len(files) > 1]
+    ordered = [
+        str((item.get("analysis") or {}).get("title") or item.get("filename") or "").strip()
+        for item in parsed
+    ]
+    lines = [
+        f"# {library_name} 文件关系",
+        "",
+        "## 建议阅读顺序",
+        *[f"{idx + 1}. {name}" for idx, name in enumerate(ordered) if name],
+    ]
+    if overlaps:
+        lines.extend(["", "## 重叠主题", *overlaps[:10]])
+    lines.extend(
+        [
+            "",
+            "## 使用建议",
+            "先用索引确认章节范围，再按文件说明定位重点；生成学习路径时，优先把同一主题的文件放到相邻子路径中。",
+        ]
+    )
+    return "\n".join(lines).strip()
+
+
+def _attach_library_docs(
+    library_name: str,
+    synthesis: dict,
+    parsed: list[dict[str, Any]],
+    requirements: str = "",
+) -> dict:
+    file_docs = [
+        {
+            "file_id": item.get("id", ""),
+            "filename": item.get("filename", ""),
+            "title": str((item.get("analysis") or {}).get("title") or Path(item.get("filename") or "").stem),
+            "doc": _build_file_doc(
+                str(item.get("filename") or ""),
+                item.get("analysis") or {},
+                str(item.get("text") or ""),
+                requirements,
+            ),
+        }
+        for item in parsed
+    ]
+    description = str(synthesis.get("description") or "").strip() or f"「{library_name}」学习资料库"
+    description_doc = str(synthesis.get("description_doc") or "").strip()
+    if not description_doc:
+        objectives = synthesis.get("learning_objectives") or []
+        obj_lines = [f"- {str(o)}" for o in objectives[:6] if str(o).strip()] if isinstance(objectives, list) else []
+        description_doc = "\n".join(
+            [
+                f"# {library_name} 说明",
+                "",
+                "## 复习用途",
+                description,
+                "",
+                "## 学习目标",
+                *(obj_lines or ["- 理解资料覆盖的核心概念并完成配套练习。"]),
+            ]
+        ).strip()
+    return {
+        **synthesis,
+        "requirements": requirements.strip(),
+        "description_doc": description_doc,
+        "index_doc": str(synthesis.get("index_doc") or "").strip()
+        or _build_index_doc(library_name, parsed, requirements),
+        "file_docs": file_docs,
+        "relationship_doc": str(synthesis.get("relationship_doc") or "").strip()
+        or _build_relationship_doc(library_name, parsed),
+        "resource_index": synthesis.get("resource_index") or {},
+    }
+
+
 async def analyze_single_file(filename: str, text: str, *, fast: bool = False) -> dict:
     if fast:
         return _fast_file_analysis(filename, text)
@@ -153,6 +319,8 @@ async def analyze_single_file(filename: str, text: str, *, fast: bool = False) -
             "difficulty": "入门",
         }
     data["raw_analysis"] = raw
+    if not data.get("description_doc"):
+        data["description_doc"] = _build_file_doc(filename, data, text)
     return data
 
 
@@ -194,6 +362,8 @@ async def process_uploaded_files(
     user_id: str,
     library_id: str,
     files: list[tuple[str, bytes]],
+    *,
+    requirements: str = "",
 ) -> dict[str, Any]:
     lib = await get_library(library_id, user_id)
     if not lib or lib.get("source_type") == "builtin":
@@ -207,7 +377,21 @@ async def process_uploaded_files(
         fid = str(uuid.uuid4()).replace("-", "")[:12]
         try:
             text = extract_text_from_bytes(filename, data)
+            if len(_meaningful_excerpt(text, limit=120)) < 20:
+                await save_library_file(
+                    {
+                        "id": fid,
+                        "library_id": library_id,
+                        "filename": filename,
+                        "mime_type": guess_mime(filename),
+                        "size": len(data),
+                        "status": "skipped",
+                        "error": "有效文本过少，已跳过",
+                    }
+                )
+                continue
             analysis = await analyze_single_file(filename, text, fast=fast_ingest)
+            analysis["description_doc"] = _build_file_doc(filename, analysis, text, requirements)
             record = {
                 "id": fid,
                 "library_id": library_id,
@@ -246,6 +430,7 @@ async def process_uploaded_files(
         return {"library_id": library_id, "ingested": 0, "errors": errors}
 
     synthesis = await synthesize_library(lib.get("name", ""), parsed, fast=fast_ingest)
+    synthesis = _attach_library_docs(lib.get("name", ""), synthesis, parsed, requirements)
     chunks = chunk_uploaded_documents(parsed, library_id=library_id)
     reset = lib.get("chunk_count", 0) == 0
     ingested = ingest_text_chunks(
@@ -256,11 +441,12 @@ async def process_uploaded_files(
     )
 
     all_files = await list_library_files(library_id)
+    ready_files = [f for f in all_files if f.get("status") == "ready"]
     updated = {
         **lib,
         "status": "ready",
         "description": synthesis.get("description") or lib.get("description", ""),
-        "file_count": len(all_files),
+        "file_count": len(ready_files),
         "chunk_count": (0 if reset else lib.get("chunk_count", 0)) + ingested,
         "synthesis": synthesis,
         "updated_at": datetime.utcnow().isoformat(),

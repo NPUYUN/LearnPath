@@ -17,6 +17,7 @@ import UserOutlined from "@ant-design/icons/UserOutlined";
 import DatabaseOutlined from "@ant-design/icons/DatabaseOutlined";
 import LineChartOutlined from "@ant-design/icons/LineChartOutlined";
 import DashboardOutlined from "@ant-design/icons/DashboardOutlined";
+import { BRAND_CN, BRAND_TITLE } from "@/lib/brand";
 
 export type RouteLoadingVariant = "init" | "admin" | "insights" | "default";
 
@@ -32,7 +33,7 @@ const VARIANTS: Record<
   { title: string; subtitle: string; logo: ReactNode; steps: StepItem[]; tips: string[] }
 > = {
   init: {
-    title: "学径 LearnPath",
+    title: BRAND_TITLE,
     subtitle: "个性化学习多智能体系统",
     logo: <BulbOutlined />,
     steps: [
@@ -52,7 +53,7 @@ const VARIANTS: Record<
     ],
   },
   admin: {
-    title: "学径管理台",
+    title: `${BRAND_CN}管理台`,
     subtitle: "Platform Console · 平台运营控制台",
     logo: <SafetyCertificateOutlined />,
     steps: [
@@ -80,7 +81,7 @@ const VARIANTS: Record<
     tips: ["正在读取你的学习轨迹…", "构建能力雷达与学力指数…", "成就徽章即将揭晓…"],
   },
   default: {
-    title: "学径 LearnPath",
+    title: BRAND_TITLE,
     subtitle: "页面加载中",
     logo: <BulbOutlined />,
     steps: [{ key: "page", label: "加载页面", desc: "请稍候…", icon: <BulbOutlined /> }],

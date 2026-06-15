@@ -361,7 +361,8 @@ LIBRARY_FILE_ANALYSIS_SYSTEM = (
 
     "输出 JSON 字段：title, discipline, topics(数组), key_concepts(数组), "
 
-    "difficulty, summary, suggested_chapters(数组，每项含 title 与 brief)。"
+    "difficulty, summary, suggested_chapters(数组，每项含 title 与 brief), "
+    "description_doc(面向学习者的文件说明，说明适合复习什么、先看哪些部分、可产出哪些资源)。"
 
 )
 
@@ -375,7 +376,9 @@ LIBRARY_SYNTHESIS_SYSTEM = (
 
     "knowledge_map(数组，含 topic 与 subtopics), coverage_gaps(数组), "
 
-    "recommended_learning_order(数组)。内容须与各文件分析一致，不得虚构来源。"
+    "recommended_learning_order(数组), description_doc, index_doc, relationship_doc。"
+    "description_doc 面向学习者说明资料库用途；index_doc 按文件/主题/资源类型建立索引；"
+    "relationship_doc 说明多个文件之间的先后、互补、重复与缺口。内容须与各文件分析一致，不得虚构来源。"
 
 )
 
@@ -428,6 +431,9 @@ RESOURCE_GENERATION_BASE = (
     "你是「学径 LearnPath」多智能体系统中的资源生成 Agent。\n"
 
     "必须依据用户消息中的参考资料生成**可直接学习**的正文，禁止无依据编造。\n"
+
+    "如果提供了资料库说明、索引或课件片段，正文必须体现这些资料中的章节、协议名、术语或例子，"
+    "不得只输出通用百科式解释；缺少某一章证据时要写明资料不足。\n"
 
     "若上下文不足，在文末「资料说明」中声明缺口。\n"
 
@@ -846,6 +852,7 @@ def path_planning_user_payload(
             "type": r.get("type"),
 
             "topic": r.get("topic"),
+            "brief": str(r.get("content") or "")[:500],
 
         }
 
@@ -950,7 +957,13 @@ def path_replan_refine_user_payload(
     from app.services.path_utils import slim_steps_for_prompt
 
     slim_resources = [
-        {"id": r.get("id"), "title": r.get("title"), "type": r.get("type"), "topic": r.get("topic")}
+        {
+            "id": r.get("id"),
+            "title": r.get("title"),
+            "type": r.get("type"),
+            "topic": r.get("topic"),
+            "brief": str(r.get("content") or "")[:500],
+        }
         for r in resources
         if r.get("id")
     ]
@@ -1066,6 +1079,7 @@ def resource_generation_user(
     variant_index: int = 1,
 
     variant_total: int = 1,
+    requirements: str = "",
 
 ) -> str:
 
@@ -1088,6 +1102,10 @@ def resource_generation_user(
     if learner_analysis_brief:
 
         parts.append(f"学习者综合分析（仅供生成参考）：\n{learner_analysis_brief[:1200]}")
+
+    if requirements.strip():
+
+        parts.append(f"用户诉求：{requirements.strip()[:800]}")
 
     if variant_total > 1:
 

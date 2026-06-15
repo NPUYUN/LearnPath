@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Avatar, Button, Flex, Tag, Tooltip, Typography } from "antd";
 import { NAV_META, pathProgress } from "@/lib/navMeta";
+import { BRAND_CN, BRAND_EN } from "@/lib/brand";
 import { useAppStore } from "@/store/appStore";
 import SidebarDailyPlan from "@/components/SidebarDailyPlan";
 import BulbOutlined from "@ant-design/icons/BulbOutlined";
@@ -156,8 +157,8 @@ export default function AppSidebar({
         </div>
         {!collapsed && (
           <div className="learnpath-sider-brand-text">
-            <span className="learnpath-sider-title">学径</span>
-            <span className="learnpath-sider-subtitle">Learning Cockpit</span>
+            <span className="learnpath-sider-title">{BRAND_CN}</span>
+            <span className="learnpath-sider-subtitle">{BRAND_EN}</span>
           </div>
         )}
       </button>

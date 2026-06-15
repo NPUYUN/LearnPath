@@ -605,6 +605,8 @@ export type GenerateResourceOptions = {
   resourceTypeCounts?: Record<string, number>;
   libraryId?: string | null;
   newLibraryName?: string;
+  generationSource?: "existing_library" | "uploaded" | "empty" | "web";
+  requirements?: string;
   deepThinking?: boolean;
 };
 
@@ -618,12 +620,28 @@ export async function listLibraries(userId: string) {
   return res.json() as Promise<ResourceLibrary[]>;
 }
 
-export async function createLibrary(userId: string, name: string, description = "") {
+export async function createLibrary(
+  userId: string,
+  name: string,
+  description = "",
+  options?: {
+    requirements?: string;
+    sourceLibraryId?: string | null;
+    sourceMode?: "upload" | "existing_library" | "empty";
+  },
+) {
   const res = await handleResponse(
     await fetch(apiUrl("/api/libraries"), {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ user_id: userId, name, description }),
+      body: JSON.stringify({
+        user_id: userId,
+        name,
+        description,
+        requirements: options?.requirements ?? "",
+        source_library_id: options?.sourceLibraryId || null,
+        source_mode: options?.sourceMode ?? "upload",
+      }),
     })
   );
   if (!res.ok) throw new Error(await res.text());
@@ -638,9 +656,15 @@ export async function getSupportedUploadFormats() {
   return res.json() as Promise<{ extensions: string[] }>;
 }
 
-export async function uploadLibraryFiles(userId: string, libraryId: string, files: File[]) {
+export async function uploadLibraryFiles(
+  userId: string,
+  libraryId: string,
+  files: File[],
+  options?: { requirements?: string },
+) {
   const form = new FormData();
   form.append("user_id", userId);
+  form.append("requirements", options?.requirements ?? "");
   for (const f of files) form.append("files", f);
   const token = getAccessToken();
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
@@ -703,6 +727,8 @@ export async function generateResources(
         resource_type_counts: options?.resourceTypeCounts ?? {},
         library_id: options?.libraryId || null,
         new_library_name: options?.newLibraryName || null,
+        generation_source: options?.generationSource ?? "web",
+        requirements: options?.requirements ?? "",
         deep_thinking: options?.deepThinking ?? false,
       }),
     })
@@ -775,6 +801,8 @@ export async function streamGenerateResources(
         resource_type_counts: options?.resourceTypeCounts ?? {},
         library_id: options?.libraryId || null,
         new_library_name: options?.newLibraryName || null,
+        generation_source: options?.generationSource ?? "web",
+        requirements: options?.requirements ?? "",
         deep_thinking: options?.deepThinking ?? false,
       }),
     })
@@ -1251,6 +1279,8 @@ export type ReplanContext = {
   quiz_summary: string;
   library_id: string;
   library_name: string;
+  planning_mode: string;
+  planning_requirement: string;
   can_start: boolean;
   block_reason: string;
 };
@@ -1280,12 +1310,18 @@ export async function getReplanContext(
     conversationId?: string | null;
     learningGoal?: string | null;
     libraryId?: string | null;
+    planningMode?: "auto" | "chapter" | "time" | "detailed";
+    planningRequirement?: string | null;
   },
 ) {
   const params = new URLSearchParams();
   if (options?.conversationId) params.set("conversation_id", options.conversationId);
   if (options?.learningGoal?.trim()) params.set("learning_goal", options.learningGoal.trim());
   if (options?.libraryId) params.set("library_id", options.libraryId);
+  if (options?.planningMode) params.set("planning_mode", options.planningMode);
+  if (options?.planningRequirement?.trim()) {
+    params.set("planning_requirement", options.planningRequirement.trim());
+  }
   const q = params.toString();
   const res = await handleResponse(
     await fetch(
@@ -1303,6 +1339,8 @@ export async function createPathReplanJob(
     libraryId?: string | null;
     conversationId?: string | null;
     learningGoal?: string | null;
+    planningMode?: "auto" | "chapter" | "time" | "detailed";
+    planningRequirement?: string | null;
   },
 ) {
   const res = await handleResponse(
@@ -1313,6 +1351,8 @@ export async function createPathReplanJob(
         library_id: options?.libraryId || null,
         conversation_id: options?.conversationId || null,
         learning_goal: options?.learningGoal?.trim() || null,
+        planning_mode: options?.planningMode || "auto",
+        planning_requirement: options?.planningRequirement?.trim() || null,
       }),
     }),
   );

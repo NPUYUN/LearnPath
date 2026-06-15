@@ -7,6 +7,9 @@ from __future__ import annotations
 
 
 import io
+import logging
+import re
+import unicodedata
 
 from pathlib import Path
 
@@ -100,6 +103,34 @@ BINARY_EXTENSIONS = {
 
 }
 
+_SYMBOL_RUN_RE = re.compile(r"[!\"#$%&'()*+,./:;<=>?@\[\\\]^_`{|}~]{4,}")
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def clean_extracted_text(text: str) -> str:
+    """清理 PDF/PPT 抽取出的装饰符号、兼容字形和控制字符。"""
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKC", text)
+    text = _CONTROL_RE.sub(" ", text)
+    text = text.replace("\ufeff", " ").replace("\u00a0", " ")
+    text = text.replace("Ø", "\n- ")
+    text = _SYMBOL_RUN_RE.sub(" ", text)
+    text = re.sub(r"(^|[\s。；;，,])([upr])(?=[\u4e00-\u9fffA-Z])", r"\1- ", text)
+    text = re.sub(r"(?<=[\u4e00-\u9fff)）:：])([upr])(?=[\u4e00-\u9fffA-Za-z])", " - ", text)
+    text = re.sub(r"\s+\*\s+", " ", text)
+    lines: list[str] = []
+    for raw in text.splitlines():
+        line = re.sub(r"\s+", " ", raw).strip()
+        if not line:
+            continue
+        visible = re.sub(r"\s+", "", line)
+        alpha_num = sum(1 for ch in visible if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
+        if len(visible) >= 6 and alpha_num / max(len(visible), 1) < 0.35:
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
 
 
 
@@ -192,19 +223,20 @@ def extract_text_from_bytes(filename: str, data: bytes) -> str:
 
             try:
 
-                return data.decode(enc)
+                return clean_extracted_text(data.decode(enc))
 
             except UnicodeDecodeError:
 
                 continue
 
-        return data.decode("utf-8", errors="replace")
+        return clean_extracted_text(data.decode("utf-8", errors="replace"))
 
 
 
     if ext == ".pdf":
 
         try:
+            logging.getLogger("pypdf").setLevel(logging.ERROR)
 
             from pypdf import PdfReader
 
@@ -218,7 +250,7 @@ def extract_text_from_bytes(filename: str, data: bytes) -> str:
 
                 parts.append(page.extract_text() or "")
 
-            return "\n\n".join(parts).strip()
+            return clean_extracted_text("\n\n".join(parts))
 
         except Exception as e:
 
@@ -240,7 +272,7 @@ def extract_text_from_bytes(filename: str, data: bytes) -> str:
 
             doc = Document(io.BytesIO(data))
 
-            return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            return clean_extracted_text("\n".join(p.text for p in doc.paragraphs if p.text.strip()))
 
         except Exception as e:
 
@@ -262,7 +294,7 @@ def extract_text_from_bytes(filename: str, data: bytes) -> str:
 
                 raise ValueError("PPT 中未提取到文本（可能为纯图片幻灯片）")
 
-            return text
+            return clean_extracted_text(text)
 
         except ValueError:
 
@@ -288,7 +320,7 @@ def extract_text_from_bytes(filename: str, data: bytes) -> str:
 
                 raise ValueError("Excel 中未提取到有效单元格文本")
 
-            return text
+            return clean_extracted_text(text)
 
         except ValueError:
 
@@ -345,4 +377,3 @@ def guess_mime(filename: str) -> str:
     }
 
     return mapping.get(ext, "application/octet-stream")
-

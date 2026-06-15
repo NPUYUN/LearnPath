@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from app.core.config import ROOT_DIR, get_settings
@@ -47,15 +48,16 @@ async def retrieve_from_library(
 ) -> list[dict[str, Any]]:
     collection = get_collection(library_id, collection_name)
     if collection is not None and collection.count() > 0:
-        n = min(k, collection.count())
+        n = min(max(k * 4, k), collection.count())
         result = collection.query(query_texts=[query], n_results=n)
         docs = result.get("documents", [[]])[0]
         metas = result.get("metadatas", [[]])[0]
         ids = result.get("ids", [[]])[0]
-        return [
+        rows = [
             {"id": ids[i], "text": docs[i], "metadata": metas[i] or {}}
             for i in range(len(docs))
         ]
+        return _diversify_chunks(rows, query=query, limit=k)
 
     if fallback_dir and fallback_dir.exists():
         docs = load_markdown_files(fallback_dir)
@@ -68,6 +70,66 @@ async def retrieve_from_library(
         return [d for _, d in scored[:k]] or docs[:k]
 
     return []
+
+
+def _diversify_chunks(rows: list[dict[str, Any]], *, query: str, limit: int) -> list[dict[str, Any]]:
+    if len(rows) <= limit:
+        return rows
+    query_text = query.lower()
+    query_tokens = _query_tokens(query_text)
+    per_source: dict[str, int] = {}
+    selected: list[dict[str, Any]] = []
+
+    def source_key(row: dict[str, Any]) -> str:
+        meta = row.get("metadata") or {}
+        return str(meta.get("source_file") or meta.get("title") or row.get("id") or "")
+
+    def chapter_bonus(row: dict[str, Any]) -> int:
+        meta = row.get("metadata") or {}
+        blob = f"{meta.get('source_file', '')} {meta.get('title', '')}".lower()
+        return sum(1 for token in query_tokens if token in blob)
+
+    ordered = sorted(enumerate(rows), key=lambda pair: (chapter_bonus(pair[1]), -pair[0]), reverse=True)
+    for _, row in ordered:
+        src = source_key(row)
+        if per_source.get(src, 0) >= 2:
+            continue
+        selected.append(row)
+        per_source[src] = per_source.get(src, 0) + 1
+        if len(selected) >= limit:
+            break
+    if len(selected) < limit:
+        picked = {r.get("id") for r in selected}
+        for row in rows:
+            if row.get("id") in picked:
+                continue
+            selected.append(row)
+            if len(selected) >= limit:
+                break
+    return selected[:limit]
+
+
+def _query_tokens(query: str) -> list[str]:
+    tokens = [t for t in re.split(r"[\s,，、:：;；/]+", query) if len(t) >= 2]
+    known = [
+        "应用层",
+        "运输层",
+        "传输层",
+        "网络层",
+        "链路层",
+        "无线网络",
+        "移动网络",
+        "因特网",
+        "tcp",
+        "udp",
+        "http",
+        "dns",
+        "ip",
+    ]
+    for item in known:
+        if item in query and item not in tokens:
+            tokens.append(item)
+    return tokens
 
 
 def ingest_text_chunks(

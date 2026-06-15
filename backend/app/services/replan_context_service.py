@@ -53,6 +53,8 @@ async def get_replan_context(
     learning_goal: str | None = None,
     library_id: str | None = None,
     library_name: str = "",
+    planning_mode: str = "auto",
+    planning_requirement: str | None = None,
 ) -> dict[str, Any]:
     """汇总本次重规划四层依据，供 API 预览与 Job 执行。"""
     profile = await get_profile(user_id) or {}
@@ -120,6 +122,8 @@ async def get_replan_context(
         "quiz_summary": quiz_label,
         "library_id": library_id or "",
         "library_name": _library_label(library_id, library_name),
+        "planning_mode": planning_mode or "auto",
+        "planning_requirement": (planning_requirement or "").strip(),
         "has_l1_intent": bool(intent_turns or _is_meaningful_goal(explicit_goal) or _is_meaningful_goal(profile_goal)),
         "has_l2_anchor": bool(kept_resources or library_id),
         "has_l3_behavior": bool(
@@ -155,6 +159,17 @@ def build_replan_user_request(context: dict[str, Any]) -> str:
     lib = context.get("library_name") or ""
     if lib:
         parts.append(f"配套资源生成需结合资料库「{lib}」。")
+    mode = str(context.get("planning_mode") or "auto")
+    mode_labels = {
+        "chapter": "按章节/知识模块划分，章节下可继续拆子路径。",
+        "time": "按时间节奏划分，目标中写明每阶段建议时长与复习节奏。",
+        "detailed": "生成更细的路径结构，复杂节点必须拆成可执行子步骤。",
+        "auto": "由模型按资料结构和学习规律自动决定划分方式。",
+    }
+    parts.append(f"路径划分偏好：{mode_labels.get(mode, mode_labels['auto'])}")
+    requirement = str(context.get("planning_requirement") or "").strip()
+    if requirement:
+        parts.append(f"用户对路径划分的补充要求：{requirement}。")
     quiz = context.get("quiz_summary") or ""
     if quiz:
         parts.append(f"行为参考：{quiz}；资源浏览 {context.get('resource_view_count', 0)} 次。")

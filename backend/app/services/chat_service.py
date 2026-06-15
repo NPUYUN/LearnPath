@@ -11,6 +11,7 @@ from app.core.llm.deep_thinking import graph_stream_chunk_size
 from app.services.chat_intelligence_service import (
     build_chitchat_reply,
     classify_question_type,
+    stream_local_text,
     stream_intelligent_chat,
 )
 from app.services.graph_state import build_graph_state
@@ -171,14 +172,15 @@ async def stream_chat(
     )
     question_type = classify_question_type(message)
     if (question_type == "chitchat" or _is_meta_chat_message(message)) and not attachment_context.strip():
-        reply = build_chitchat_reply(message)
+        existing_profile = await get_profile(user_id)
+        reply = build_chitchat_reply(message, existing_profile)
         yield {"event": "intent", "data": "chat"}
         yield {
             "event": "progress",
             "data": json.dumps({"stage": "fast_reply"}, ensure_ascii=False),
         }
-        async for tok in _yield_text_tokens(reply, chunk_size):
-            yield tok
+        async for item in stream_local_text(reply, chunk_size):
+            yield {"event": "token", "data": item.get("data", "")}
         yield {"event": "done", "data": reply}
         return
 

@@ -275,6 +275,8 @@ class PathReplanJobCreateRequest(BaseModel):
     library_id: str | None = None
     conversation_id: str | None = None
     learning_goal: str | None = None
+    planning_mode: Literal["auto", "chapter", "time", "detailed"] = "auto"
+    planning_requirement: str | None = None
 
 
 class ReplanContextResponse(BaseModel):
@@ -292,6 +294,8 @@ class ReplanContextResponse(BaseModel):
     quiz_summary: str = ""
     library_id: str = ""
     library_name: str = ""
+    planning_mode: str = "auto"
+    planning_requirement: str = ""
     can_start: bool = False
     block_reason: str = ""
 
@@ -522,6 +526,8 @@ class GenerateResourcesRequest(BaseModel):
     resource_type_counts: dict[str, int] = Field(default_factory=dict)
     library_id: str | None = None
     new_library_name: str | None = None
+    generation_source: Literal["existing_library", "uploaded", "empty", "web"] = "web"
+    requirements: str = ""
     deep_thinking: bool = False
 
 
@@ -542,6 +548,9 @@ class CreateLibraryRequest(BaseModel):
     user_id: str = "demo"
     name: str
     description: str = ""
+    requirements: str = ""
+    source_library_id: str | None = None
+    source_mode: Literal["upload", "existing_library", "empty"] = "upload"
 
 
 class LibraryFileInfo(BaseModel):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import asyncio
 from datetime import datetime
 from typing import Any, AsyncIterator
 
@@ -98,21 +99,59 @@ def _profile_snapshot_md(profile: dict | None) -> str:
 
 
 def build_chitchat_reply(question: str, profile: dict | None = None) -> str:
-    """寒暄类短回复（不调用 LLM，避免答非所问）。"""
+    """寒暄类回复（不调用 LLM，但给出可继续推进的学习入口）。"""
     q = question.strip()
+    profile = profile or {}
+    weak = [str(x) for x in (profile.get("error_prone_topics") or []) if str(x).strip()]
+    goal = str(profile.get("learning_goal") or "").strip()
+    modality = str(profile.get("preferred_modality") or "").strip()
+    has_profile = any([weak, goal and goal not in ("未设定", "待设定"), modality and modality != "未设定"])
+    weak_line = f"我也会优先照顾你当前记录里的薄弱点：{'、'.join(weak[:3])}。" if weak else ""
+    goal_line = f"如果继续围绕「{goal[:36]}」推进，我可以帮你拆成今天能完成的一步。" if goal else ""
+
+    variants = [
+        "我在。我们可以直接把这次对话变成一个可执行的学习动作。",
+        "你好，我是学径学习助手。与其只寒暄一下，不如我先把能帮你的入口摆清楚。",
+        "收到。你可以把我当成学习路上的拆题、找资料和规划搭子。",
+    ]
+    idx = (sum(ord(c) for c in q) + datetime.utcnow().second) % len(variants)
+    opener = variants[idx]
+
     if re.match(r"^(谢谢|感谢|多谢)", q):
-        return "不客气！有学习上的问题，随时在对话里问我。"
+        return (
+            "不客气。你后面可以继续把问题丢给我，我会尽量按“先结论、再步骤、最后给练习”的方式回答。\n\n"
+            "如果你想继续推进，现在可以直接说：\n"
+            "1. 还有哪个概念没懂；\n"
+            "2. 想要几道练习题；\n"
+            "3. 需要我把今天的学习任务排一下。"
+        )
     if re.match(r"^(再见|拜拜)", q, re.I):
-        return "再见，祝你学习顺利。下次有问题再来找我。"
+        return (
+            "再见，今天的学习可以先收个尾。\n\n"
+            "下次回来时，你可以直接发一句“继续上次的学习路径”或“复习我上次的薄弱点”，"
+            "我会接着帮你梳理资源、练习和下一步计划。"
+        )
     if re.search(r"(你是谁|你叫什么|你能做什么|你有什么功能|你能怎么帮|你可以怎么帮|怎么帮我|能帮我.*学习|介绍一下)", q):
         return (
-            "我是学径学习助手，可以帮你把学习问题拆清楚、生成配套资源、规划下一步路径。\n\n"
-            "你可以直接告诉我：现在想学什么、哪里卡住了，或者让我帮你整理一份练习/讲解/学习计划。"
+            "我是学径学习助手，主要帮你做三件事：\n\n"
+            "1. **讲清楚**：把概念、公式、代码或题目拆成你能跟上的步骤。\n"
+            "2. **生成资源**：按你的主题生成讲解文档、练习、思维导图、多模态分镜或代码案例。\n"
+            "3. **规划路径**：根据你的画像、资源和学习记录，安排下一步该学什么。\n\n"
+            "你可以直接发：“我在学 XXX，卡在 YYY”，我会从这个卡点开始。"
         )
 
+    profile_hint = ""
+    if has_profile:
+        profile_hint = "\n\n" + " ".join(x for x in (weak_line, goal_line) if x)
+
     return (
-        "你好，我是学径学习助手。\n\n"
-        "你可以说一个具体学习目标或卡点，我会帮你解释、拆步骤、生成资源，或者规划下一步。"
+        f"{opener}\n\n"
+        "你现在可以从下面任选一种说法开始：\n\n"
+        "1. **解释一个卡点**：比如“用三句话解释梯度下降”。\n"
+        "2. **生成一组资源**：比如“围绕线性回归生成讲解、练习和代码案例”。\n"
+        "3. **规划下一步**：比如“按我现在的基础安排今晚 40 分钟学习计划”。\n\n"
+        "如果你还没想好主题，也可以只发一句：**我正在学什么 + 哪里不懂**，我会继续追问并帮你补全画像。"
+        f"{profile_hint}"
     )
 
 
@@ -728,6 +767,17 @@ async def run_intelligent_chat(
 ) -> dict[str, Any]:
     """执行完整智能对话管线。"""
     question_type = classify_question_type(question)
+    if question_type == "chitchat":
+        return {
+            "reply": filter_sensitive(build_chitchat_reply(question, profile)),
+            "profile": None,
+            "realtime_state": None,
+            "question_type": question_type,
+            "retrieval_mode": "direct",
+            "match_score": 0,
+            "chunks": [],
+        }
+
     realtime_state = await analyze_realtime_state(
         user_id,
         question,
@@ -875,16 +925,20 @@ def _pace_from_chunk_size(chunk_size: int) -> float:
     return 0.018
 
 
-async def _stream_local_text(
+async def stream_local_text(
     text: str,
     chunk_size: int = 2,
 ) -> AsyncIterator[dict[str, Any]]:
-    """本地模板文本的伪流式输出（按行 + 短间隔，便于寒暄等场景可见流式）。"""
-    from app.core.llm.resilience import yield_text_stream
-
+    """本地模板文本的伪流式输出，寒暄场景也要有可感知的打字过程。"""
+    if not text:
+        return
     delay = _pace_from_chunk_size(chunk_size)
-    async for piece in yield_text_stream(text, line_delay=delay, atomic_lines=True):
+    step = max(4, min(12, int(chunk_size or 8)))
+    for i in range(0, len(text), step):
+        piece = text[i : i + step]
         yield {"type": "token", "data": piece}
+        # 本地模板没有真实模型等待时间，主动放慢一点，避免前端看起来像一次性完成。
+        await asyncio.sleep(delay)
 
 
 async def stream_intelligent_chat(
@@ -922,8 +976,8 @@ async def stream_intelligent_chat(
         yield {"type": "realtime_state", "data": realtime_state}
 
     if question_type == "chitchat" and not attachment_context.strip():
-        reply = build_chitchat_reply(question)
-        async for item in _stream_local_text(reply, chunk_size=chunk_size):
+        reply = build_chitchat_reply(question, profile)
+        async for item in stream_local_text(reply, chunk_size=chunk_size):
             yield item
         yield {"type": "done", "data": reply, "profile": None}
         return

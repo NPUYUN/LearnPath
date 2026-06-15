@@ -286,20 +286,6 @@ function PathStepCard({
             <Paragraph className="lp-prose" style={{ marginBottom: 12 }}>
               {step.objective}
             </Paragraph>
-            <div className="lp-path-step-bridge" onClick={(e) => e.stopPropagation()}>
-              <span>
-                <strong>画像依据</strong>
-                <em>用实时状态调整节奏和讲法</em>
-              </span>
-              <span>
-                <strong>资源供给</strong>
-                <em>{resourceCount ? `${resourceCount} 项材料支撑本阶段` : "暂无绑定资源"}</em>
-              </span>
-              <span>
-                <strong>课堂反馈</strong>
-                <em>提问和答题会继续更新画像</em>
-              </span>
-            </div>
             {ownResourceIds.length > 0 && (
               <>
                 <Text strong style={{ fontSize: 13 }}>
@@ -396,6 +382,8 @@ export default function PathContent() {
   const [replanLibraryId, setReplanLibraryIdState] = useState<string | null>(null);
   const [replanLibrariesLoading, setReplanLibrariesLoading] = useState(false);
   const [replanGoalInput, setReplanGoalInput] = useState("");
+  const [replanPlanningMode, setReplanPlanningMode] = useState<"auto" | "chapter" | "time" | "detailed">("auto");
+  const [replanPlanningRequirement, setReplanPlanningRequirement] = useState("");
   const [replanContext, setReplanContext] = useState<ReplanContext | null>(null);
   const [replanContextLoading, setReplanContextLoading] = useState(false);
   const replanContextReqSeq = useRef(0);
@@ -507,6 +495,8 @@ export default function PathContent() {
           conversationId: loadActiveChatConversation(),
           learningGoal: goalOverride ?? replanGoalInput,
           libraryId: libId,
+          planningMode: replanPlanningMode,
+          planningRequirement: replanPlanningRequirement,
         });
         if (seq === replanContextReqSeq.current) setReplanContext(ctx);
       } catch {
@@ -515,7 +505,7 @@ export default function PathContent() {
         if (seq === replanContextReqSeq.current) setReplanContextLoading(false);
       }
     },
-    [userId, replanGenSource, replanLibraryId, replanGoalInput],
+    [userId, replanGenSource, replanLibraryId, replanGoalInput, replanPlanningMode, replanPlanningRequirement],
   );
 
   const replanGoalInputRef = useRef(replanGoalInput);
@@ -527,7 +517,7 @@ export default function PathContent() {
       void refreshReplanContext(replanGoalInputRef.current);
     }, 420);
     return () => window.clearTimeout(timer);
-  }, [replanGoalInput, replanModalOpen, refreshReplanContext]);
+  }, [replanGoalInput, replanPlanningMode, replanPlanningRequirement, replanModalOpen, refreshReplanContext]);
 
   const openReplanModal = async () => {
     if (isReplanRunning) return;
@@ -535,6 +525,8 @@ export default function PathContent() {
     setReplanGenSource(saved ? "library" : "web");
     setReplanLibraryIdState(saved);
     setReplanGoalInput("");
+    setReplanPlanningMode("auto");
+    setReplanPlanningRequirement("");
     setReplanModalOpen(true);
     setReplanLibrariesLoading(true);
     try {
@@ -600,10 +592,32 @@ export default function PathContent() {
   const steps = path?.steps || [];
   const flatSteps = flattenPathSteps(steps);
   const overallProgress = pathProgressPercent(steps);
-  const pathResourceCount = steps.reduce((sum, step) => sum + countStepResources(step), 0);
-  const readyClassroomCount = classroomLibrary.filter(
-    (item) => item.status === "done" && item.result,
-  ).length;
+  const readyLibraries = replanLibraries.filter(
+    (l) => l.status === "ready" && (l.chunk_count ?? 0) > 0,
+  );
+  const submitReplan = () => {
+    const trimmedGoal = replanGoalInput.trim();
+    if (replanGenSource === "library" && !replanLibraryId) {
+      message.warning("请选择课程资料库，或改用全网检索模式");
+      return;
+    }
+    if (!trimmedGoal && replanContext && !replanContext.can_start) {
+      message.warning(replanContext.block_reason || "缺少规划依据，请先补全学习目标或资料库");
+      return;
+    }
+    const libId = replanGenSource === "library" ? replanLibraryId : null;
+    setReplanLibraryId(libId);
+    setReplanModalOpen(false);
+    setPath(null);
+    setExpanded("");
+    void startPathReplan({
+      libraryId: libId,
+      conversationId: loadActiveChatConversation(),
+      learningGoal: trimmedGoal || null,
+      planningMode: replanPlanningMode,
+      planningRequirement: replanPlanningRequirement.trim() || null,
+    });
+  };
   if (isReplanRunning) {
     return (
       <div style={{ padding: 64, maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
@@ -632,6 +646,71 @@ export default function PathContent() {
   if (!path?.steps?.length) {
     return (
       <>
+        <Modal
+          title="生成学习路径"
+          open={replanModalOpen}
+          okText="开始生成"
+          cancelText="取消"
+          confirmLoading={isReplanRunning}
+          onCancel={() => setReplanModalOpen(false)}
+          onOk={submitReplan}
+        >
+          <Input.TextArea
+            rows={2}
+            placeholder="学习目标，例如：系统学习机器学习入门"
+            value={replanGoalInput}
+            onChange={(e) => setReplanGoalInput(e.target.value)}
+            onBlur={() => void refreshReplanContext()}
+            style={{ marginBottom: 12 }}
+          />
+          <Radio.Group
+            value={replanPlanningMode}
+            onChange={(e) => setReplanPlanningMode(e.target.value)}
+            style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginBottom: 12 }}
+          >
+            <Radio.Button value="auto">自动划分</Radio.Button>
+            <Radio.Button value="chapter">按章节</Radio.Button>
+            <Radio.Button value="time">按时间</Radio.Button>
+            <Radio.Button value="detailed">详细子路径</Radio.Button>
+          </Radio.Group>
+          <Input
+            placeholder="划分要求（可空）：例如 4 周复习、每章先概念后练习"
+            value={replanPlanningRequirement}
+            onChange={(e) => setReplanPlanningRequirement(e.target.value)}
+            onBlur={() => void refreshReplanContext()}
+            style={{ marginBottom: 12 }}
+          />
+          <Radio.Group
+            value={replanGenSource}
+            onChange={(e) => {
+              const next = e.target.value as "web" | "library";
+              setReplanGenSource(next);
+              void refreshReplanContext(undefined, next === "library" ? replanLibraryId : null);
+            }}
+            style={{ display: "flex", flexDirection: "column", gap: 8 }}
+          >
+            <Radio value="web">无资料库 · 全网检索整理后生成</Radio>
+            <Radio value="library" disabled={!readyLibraries.length && !replanLibrariesLoading}>
+              依据课程资料库生成
+            </Radio>
+          </Radio.Group>
+          {replanGenSource === "library" && (
+            <Select
+              style={{ width: "100%", marginTop: 12 }}
+              placeholder={replanLibrariesLoading ? "加载资料库…" : "选择资料库"}
+              loading={replanLibrariesLoading}
+              value={replanLibraryId ?? undefined}
+              onChange={(v) => {
+                setReplanLibraryIdState(v);
+                void refreshReplanContext(undefined, v);
+              }}
+              options={readyLibraries.map((l) => ({
+                value: l.id,
+                label: `${l.name}（${l.chunk_count ?? 0} 片段）`,
+              }))}
+            />
+          )}
+        </Modal>
         <div style={{ padding: 48, maxWidth: 520, margin: "0 auto" }}>
           <Empty description="尚未生成学习路径">
             <Button type="primary" loading={isReplanRunning} onClick={openReplanModal}>
@@ -646,10 +725,6 @@ export default function PathContent() {
     );
   }
 
-  const readyLibraries = replanLibraries.filter(
-    (l) => l.status === "ready" && (l.chunk_count ?? 0) > 0,
-  );
-
   return (
     <>
       <Modal
@@ -659,27 +734,7 @@ export default function PathContent() {
         cancelText="取消"
         confirmLoading={isReplanRunning}
         onCancel={() => setReplanModalOpen(false)}
-        onOk={() => {
-          const trimmedGoal = replanGoalInput.trim();
-          if (replanGenSource === "library" && !replanLibraryId) {
-            message.warning("请选择课程资料库，或改用全网检索模式");
-            return;
-          }
-          if (!trimmedGoal && replanContext && !replanContext.can_start) {
-            message.warning(replanContext.block_reason || "缺少规划依据，请先补全学习目标或资料库");
-            return;
-          }
-          const libId = replanGenSource === "library" ? replanLibraryId : null;
-          setReplanLibraryId(libId);
-          setReplanModalOpen(false);
-          setPath(null);
-          setExpanded("");
-          void startPathReplan({
-            libraryId: libId,
-            conversationId: loadActiveChatConversation(),
-            learningGoal: trimmedGoal || null,
-          });
-        }}
+        onOk={submitReplan}
       >
         <p style={{ marginBottom: 12, color: "var(--lp-text-secondary, #666)" }}>
           重新规划会保留资源库里的旧资源，只为新路径重新匹配当前资源；缺少材料时再生成配套资源。
@@ -691,6 +746,23 @@ export default function PathContent() {
           onChange={(e) => {
             setReplanGoalInput(e.target.value);
           }}
+          onBlur={() => void refreshReplanContext()}
+          style={{ marginBottom: 12 }}
+        />
+        <Radio.Group
+          value={replanPlanningMode}
+          onChange={(e) => setReplanPlanningMode(e.target.value)}
+          style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginBottom: 12 }}
+        >
+          <Radio.Button value="auto">自动划分</Radio.Button>
+          <Radio.Button value="chapter">按章节</Radio.Button>
+          <Radio.Button value="time">按时间</Radio.Button>
+          <Radio.Button value="detailed">详细子路径</Radio.Button>
+        </Radio.Group>
+        <Input
+          placeholder="划分要求（可空）：例如 4 周复习、每章先概念后练习"
+          value={replanPlanningRequirement}
+          onChange={(e) => setReplanPlanningRequirement(e.target.value)}
           onBlur={() => void refreshReplanContext()}
           style={{ marginBottom: 12 }}
         />
@@ -763,6 +835,16 @@ export default function PathContent() {
                 {replanContext.quiz_summary ? ` · ${replanContext.quiz_summary}` : ""}
               </div>
               {replanContext.library_name ? <div>资料库：{replanContext.library_name}</div> : null}
+              <div>
+                划分方式：
+                {{
+                  auto: "自动划分",
+                  chapter: "按章节",
+                  time: "按时间",
+                  detailed: "详细子路径",
+                }[replanPlanningMode]}
+                {replanPlanningRequirement.trim() ? ` · ${replanPlanningRequirement.trim()}` : ""}
+              </div>
               {!replanContext.can_start ? (
                 <Alert
                   type="warning"
@@ -799,45 +881,6 @@ export default function PathContent() {
         }
       />
       <div className="lp-page-body lp-path-page">
-        <section className="lp-path-hero">
-          <div className="lp-path-hero-copy">
-            <span>学习主线</span>
-            <h2>路径负责安排，AI 课堂负责真正讲会</h2>
-            <p>
-              每个阶段都可以直接进入一节 AI 课堂，跟着当前目标完成讲解、练习和课后巩固。
-            </p>
-          </div>
-          <div className="lp-path-hero-stat">
-            <strong>{overallProgress}%</strong>
-            <span>当前路径完成度</span>
-          </div>
-        </section>
-
-        <section className="lp-path-loop-panel" aria-label="学习闭环">
-          <div className="lp-path-loop-copy">
-            <span>当前闭环</span>
-            <strong>画像决定策略，路径组织顺序，资源提供材料，课堂把反馈写回画像。</strong>
-          </div>
-          <div className="lp-path-loop-steps">
-            <div>
-              <b>画像</b>
-              <em>状态和偏好</em>
-            </div>
-            <div>
-              <b>路径</b>
-              <em>{flatSteps.length} 个节点</em>
-            </div>
-            <div>
-              <b>资源</b>
-              <em>{pathResourceCount} 项绑定</em>
-            </div>
-            <div>
-              <b>课堂</b>
-              <em>{readyClassroomCount} 节可进入</em>
-            </div>
-          </div>
-        </section>
-
         <Card className="lp-path-progress-card" style={{ marginBottom: 20 }}>
           <div className="lp-path-progress-head">
             <div className="lp-path-progress-copy">
@@ -853,7 +896,7 @@ export default function PathContent() {
                 )}
               />
               <Text type="secondary" style={{ fontSize: 12 }}>
-                路径由 AI 按章节与学习规律动态划分，主阶段下可展开子路径。
+                完成当前阶段后，可继续进入下一阶段。
               </Text>
             </div>
             <div className="lp-path-progress-badge">

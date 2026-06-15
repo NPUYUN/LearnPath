@@ -25,6 +25,18 @@ DEFAULT_RESOURCE_TYPE_COUNTS: dict[str, int] = {
     "code": 1,
 }
 
+DYNAMIC_TYPE_WEIGHTS: dict[str, int] = {
+    "doc": 2,
+    "quiz": 2,
+    "code": 1,
+    "project": 1,
+    "mindmap": 1,
+    "reading": 1,
+    "media": 1,
+    "ppt": 1,
+    "design": 1,
+}
+
 
 def clamp_type_count(value: int) -> int:
     try:
@@ -37,6 +49,9 @@ def clamp_type_count(value: int) -> int:
 def normalize_resource_type_counts(
     counts: dict[str, int] | None,
     types: list[str] | None = None,
+    *,
+    topic: str = "",
+    requirements: str = "",
 ) -> dict[str, int]:
     if counts:
         normalized = {
@@ -47,8 +62,37 @@ def normalize_resource_type_counts(
         if normalized:
             return normalized
     if types:
-        return {str(t): 1 for t in types if str(t).strip()}
+        return infer_default_resource_type_counts(types, topic=topic, requirements=requirements)
     return dict(DEFAULT_RESOURCE_TYPE_COUNTS)
+
+
+def infer_default_resource_type_counts(
+    types: list[str],
+    *,
+    topic: str = "",
+    requirements: str = "",
+) -> dict[str, int]:
+    """后台动态决定默认数量；前端只需要传选中的类型。"""
+    selected = [str(t).strip() for t in types if str(t).strip()]
+    if not selected:
+        return {}
+
+    signal = f"{topic} {requirements}"
+    complex_hint = any(
+        token in signal
+        for token in ("考试", "期末", "课程", "章节", "系统", "项目", "代码", "实践", "详细", "全面")
+    )
+    counts: dict[str, int] = {}
+    for rt in selected:
+        base = DYNAMIC_TYPE_WEIGHTS.get(rt, 1)
+        if complex_hint and rt in {"doc", "quiz"}:
+            base += 1
+        if "代码" in signal and rt == "code":
+            base += 1
+        if "项目" in signal and rt == "project":
+            base += 1
+        counts[rt] = clamp_type_count(base)
+    return counts
 
 
 def expand_resource_jobs(counts: dict[str, int]) -> list[tuple[str, int]]:

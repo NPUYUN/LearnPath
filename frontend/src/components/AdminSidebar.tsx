@@ -7,6 +7,7 @@ import LineChartOutlined from "@ant-design/icons/LineChartOutlined";
 import LogoutOutlined from "@ant-design/icons/LogoutOutlined";
 import SafetyCertificateOutlined from "@ant-design/icons/SafetyCertificateOutlined";
 import { useAppStore } from "@/store/appStore";
+import { BRAND_CN } from "@/lib/brand";
 import type { AdminRoute } from "@/hooks/adminRoutes";
 
 const NAV: { key: AdminRoute; icon: React.ReactNode; label: string }[] = [
@@ -37,7 +38,7 @@ export default function AdminSidebar({
         <SafetyCertificateOutlined className="lp-admin-sider-brand-icon" />
         {!collapsed && (
           <div>
-            <div className="lp-admin-sider-title">学径管理台</div>
+            <div className="lp-admin-sider-title">{BRAND_CN}管理台</div>
             <div className="lp-admin-sider-sub">Platform Console</div>
           </div>
         )}

@@ -32,11 +32,59 @@ def _profile_summary(profile: dict | None) -> str:
     return "；".join(p for p in parts if p.split("：", 1)[-1])
 
 
+def _library_docs_context(lib: dict | None, *, query: str = "", max_chars: int = 4200) -> str:
+    if not lib:
+        return ""
+    synthesis = lib.get("synthesis") or {}
+    if not isinstance(synthesis, dict):
+        return ""
+    parts: list[str] = []
+    for label, key in (
+        ("资料库说明", "description_doc"),
+        ("资料库索引", "index_doc"),
+        ("文件关系", "relationship_doc"),
+    ):
+        text = str(synthesis.get(key) or "").strip()
+        if text:
+            parts.append(f"【{label}】\n{text}")
+    file_docs = synthesis.get("file_docs") or []
+    if isinstance(file_docs, list) and file_docs:
+        rendered: list[str] = []
+        query_tokens = [t for t in query.replace("：", " ").replace("、", " ").split() if len(t) >= 2]
+        ordered_docs = sorted(
+            [item for item in file_docs if isinstance(item, dict)],
+            key=lambda item: _file_doc_score(item, query_tokens),
+            reverse=True,
+        )
+        for item in ordered_docs[:5]:
+            if not isinstance(item, dict):
+                continue
+            filename = str(item.get("filename") or item.get("title") or "文件说明")
+            doc = str(item.get("doc") or "").strip()
+            if doc:
+                rendered.append(f"### {filename}\n{doc[:700]}")
+        if rendered:
+            parts.append("【文件说明文档】\n" + "\n\n".join(rendered))
+    requirements = str(synthesis.get("requirements") or "").strip()
+    if requirements:
+        parts.append(f"【建库诉求】\n{requirements}")
+    text = "\n\n---\n\n".join(parts)
+    return text[:max_chars]
+
+
+def _file_doc_score(item: dict, query_tokens: list[str]) -> int:
+    if not query_tokens:
+        return 0
+    blob = f"{item.get('filename', '')} {item.get('title', '')} {item.get('doc', '')[:300]}"
+    return sum(1 for token in query_tokens if token in blob)
+
+
 async def build_generation_context(
     *,
     topic: str,
     library_id: str | None,
     user_id: str,
+    requirements: str = "",
 ) -> dict[str, Any]:
     """
     返回:
@@ -53,6 +101,8 @@ async def build_generation_context(
     if library_id:
         lib = await get_library(library_id, user_id)
 
+    library_docs = _library_docs_context(lib, query=topic)
+
     has_library_chunks = False
     if lib and lib.get("status") == "ready" and lib.get("chunk_count", 0) > 0:
         library_name = lib.get("name", "")
@@ -60,7 +110,7 @@ async def build_generation_context(
             library_id,
             topic,
             collection_name=lib.get("collection_name", ""),
-            k=6,
+            k=10,
             fallback_dir=_fallback_dir(lib),
         )
         if chunks:
@@ -69,6 +119,8 @@ async def build_generation_context(
                 f"【{c.get('metadata', {}).get('title', '片段')}】\n{c['text']}"
                 for c in chunks
             )
+            if library_docs:
+                library_context = f"{library_docs}\n\n---\n\n【索引命中的资源片段】\n{library_context}"
             sources.extend(
                 c.get("metadata", {}).get("source_file")
                 or c.get("metadata", {}).get("title", "chunk")
@@ -76,10 +128,18 @@ async def build_generation_context(
             )
             mode = "library"
 
+    elif library_docs:
+        library_name = lib.get("name", "") if lib else ""
+        library_context = library_docs
+        has_library_chunks = True
+        mode = "library"
+        sources.append("资料库说明与索引文档")
+
     if has_library_chunks:
         if len(library_context) < 1200:
             try:
-                supplement = await supplement_library_context(topic, library_context)
+                supplement_topic = f"{topic}\n补充诉求：{requirements}" if requirements else topic
+                supplement = await supplement_library_context(supplement_topic, library_context)
                 web_context = supplement
                 mode = "library+web"
                 sources.append("全网补充检索")
@@ -89,7 +149,8 @@ async def build_generation_context(
                 sources.append("本地降级补充")
     else:
         try:
-            summary, queries = await full_web_research(topic)
+            research_topic = f"{topic}\n资料库名称/诉求：{requirements}" if requirements else topic
+            summary, queries = await full_web_research(research_topic)
             if _looks_like_web_prompt_echo(summary):
                 logger.warning("web research summary looks like prompt echo topic=%s", topic)
                 web_context = _fallback_web_context(topic)
@@ -110,6 +171,7 @@ async def build_generation_context(
         "sources": sources,
         "library_name": library_name,
         "library_id": library_id or "",
+        "requirements": requirements,
     }
 
 

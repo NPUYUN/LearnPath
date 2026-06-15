@@ -40,7 +40,14 @@ async def list_libs(user_id: str = "demo", current_user_id: str = Depends(get_cu
 @router.post("", response_model=ResourceLibrarySummary)
 async def create_lib(req: CreateLibraryRequest, current_user_id: str = Depends(get_current_user_id)):
     ensure_same_user(req.user_id, current_user_id)
-    lib = await create_user_library(req.user_id, req.name, req.description)
+    lib = await create_user_library(
+        req.user_id,
+        req.name,
+        req.description,
+        requirements=req.requirements,
+        source_mode=req.source_mode,
+        source_library_id=req.source_library_id,
+    )
     return ResourceLibrarySummary(
         id=lib["id"],
         name=lib["name"],
@@ -106,6 +113,7 @@ async def remove_lib(
 async def upload_files(
     library_id: str,
     user_id: str = Form("demo"),
+    requirements: str = Form(""),
     files: list[UploadFile] = File(...),
     current_user_id: str = Depends(get_current_user_id),
 ):
@@ -124,7 +132,7 @@ async def upload_files(
         raise HTTPException(400, "文件内容为空")
 
     try:
-        result = await process_uploaded_files(user_id, library_id, pairs)
+        result = await process_uploaded_files(user_id, library_id, pairs, requirements=requirements)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
