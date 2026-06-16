@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import MessageOutlined from "@ant-design/icons/MessageOutlined";
 import UserOutlined from "@ant-design/icons/UserOutlined";
@@ -244,6 +244,29 @@ function LandingBackground() {
       <div className="lp-bg-aurora" />
       <div className="lp-bg-spotlight" />
       <div className="lp-bg-grid" />
+      <div className="lp-bg-orbit lp-bg-orbit--one" />
+      <div className="lp-bg-orbit lp-bg-orbit--two" />
+      <div className="lp-bg-scan" />
+      <div className="lp-bg-beams">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="lp-bg-particles">
+        {Array.from({ length: 26 }).map((_, index) => (
+          <i
+            key={index}
+            style={
+              {
+                "--px": `${(index * 37) % 100}%`,
+                "--py": `${(index * 53) % 100}%`,
+                "--pd": `${(index % 7) * 0.45}s`,
+                "--ps": `${3 + (index % 4)}px`,
+              } as React.CSSProperties
+            }
+          />
+        ))}
+      </div>
       <div className="lp-bg-vignette" />
     </div>
   );
@@ -614,13 +637,30 @@ function AgentChipRow() {
 
 export default function LandingContent() {
   const setShowLanding = useAppStore((s) => s.setShowLanding);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [navScrolled, setNavScrolled] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setNavScrolled(window.scrollY > 24);
-    onScroll();
+    let frame = 0;
+    const updateScrollState = () => {
+      const scrollY = window.scrollY;
+      const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      const progress = Math.min(1, Math.max(0, scrollY / maxScroll));
+      setNavScrolled(scrollY > 24);
+      rootRef.current?.style.setProperty("--lp-scroll-progress", progress.toFixed(4));
+      rootRef.current?.style.setProperty("--lp-scroll-shift", `${Math.min(96, scrollY * 0.08)}px`);
+      frame = 0;
+    };
+    const onScroll = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(updateScrollState);
+    };
+    updateScrollState();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
+    };
   }, []);
 
   const goLogin = () => setShowLanding(false);
@@ -632,7 +672,7 @@ export default function LandingContent() {
   }, []);
 
   return (
-    <div className="lp-root">
+    <div className="lp-root" ref={rootRef}>
       <LandingBackground />
 
       <header className={`lp-nav${navScrolled ? " lp-nav--scrolled" : ""}`}>
@@ -701,6 +741,10 @@ export default function LandingContent() {
             <div className="lp-hero-preview-glow" aria-hidden />
             <AppPreviewCarousel />
           </div>
+          <button type="button" className="lp-scroll-cue" onClick={() => scrollTo("lp-how")}>
+            <span>向下探索</span>
+            <i />
+          </button>
       </section>
 
       <section id="lp-how" className="lp-section lp-container">

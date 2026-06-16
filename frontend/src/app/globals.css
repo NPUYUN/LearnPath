@@ -7358,7 +7358,7 @@ html[data-theme="dark"] .lp-quick-tag.ant-tag:hover {
   transform: translateX(-50%);
   width: 120%;
   height: 100%;
-  background: radial-gradient(circle, rgba(79, 142, 247, 0.22), transparent 62%);
+  background: radial-gradient(circle, rgba(79, 142, 247, 0.1), transparent 68%);
   pointer-events: none;
 }
 
@@ -7832,6 +7832,354 @@ html[data-theme="dark"] .lp-quick-tag.ant-tag:hover {
   .lp-features { padding: 0 20px 56px; }
   .lp-features-grid { grid-template-columns: 1fr; }
   .lp-hero-sub br { display: none; }
+}
+
+/* ── Landing dark-tech polish ── */
+.lp-root {
+  --lp-scroll-progress: 0;
+  --lp-scroll-shift: 0px;
+  background:
+    radial-gradient(ellipse at 12% 14%, rgba(79, 142, 247, 0.14), transparent 34%),
+    radial-gradient(ellipse at 88% 16%, rgba(168, 85, 247, 0.12), transparent 34%),
+    radial-gradient(ellipse at 52% 100%, rgba(43, 192, 180, 0.1), transparent 44%),
+    #050a14;
+}
+
+.lp-bg-aurora {
+  animation: lpAuroraBreath 12s ease-in-out infinite alternate;
+}
+
+.lp-bg-spotlight {
+  animation: lpSpotlightSweep 14s ease-in-out infinite alternate;
+}
+
+.lp-bg-orbit {
+  position: absolute;
+  border: 1px solid rgba(79, 142, 247, 0.16);
+  border-radius: 50%;
+  opacity: 0.75;
+  transform-style: preserve-3d;
+}
+
+.lp-bg-orbit::before,
+.lp-bg-orbit::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #55d5ff;
+  box-shadow: 0 0 18px rgba(85, 213, 255, 0.9);
+}
+
+.lp-bg-orbit::before {
+  top: 13%;
+  left: 22%;
+}
+
+.lp-bg-orbit::after {
+  right: 15%;
+  bottom: 24%;
+  background: #a855f7;
+  box-shadow: 0 0 18px rgba(168, 85, 247, 0.8);
+}
+
+.lp-bg-orbit--one {
+  width: 520px;
+  height: 520px;
+  right: -120px;
+  top: 130px;
+  transform: rotateX(64deg) rotateZ(-18deg);
+  animation: lpOrbitSpin 26s linear infinite;
+}
+
+.lp-bg-orbit--two {
+  width: 360px;
+  height: 360px;
+  left: -90px;
+  bottom: 8%;
+  transform: rotateX(58deg) rotateZ(24deg);
+  animation: lpOrbitSpin 32s linear infinite reverse;
+}
+
+.lp-bg-scan {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(79, 142, 247, 0.06) 48%,
+    transparent 54%
+  );
+  opacity: 0.52;
+  transform: translateY(-100%);
+  animation: lpScanLine 7s linear infinite;
+}
+
+.lp-bg-beams {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.lp-bg-beams span {
+  position: absolute;
+  width: 42vw;
+  height: 1px;
+  left: -45vw;
+  background: linear-gradient(90deg, transparent, rgba(85, 213, 255, 0.55), transparent);
+  filter: blur(0.2px);
+  transform: rotate(-18deg);
+  animation: lpBeamFly 8s linear infinite;
+}
+
+.lp-bg-beams span:nth-child(1) {
+  top: 22%;
+}
+
+.lp-bg-beams span:nth-child(2) {
+  top: 48%;
+  animation-delay: 2.3s;
+  opacity: 0.55;
+}
+
+.lp-bg-beams span:nth-child(3) {
+  top: 72%;
+  animation-delay: 4.8s;
+  opacity: 0.45;
+}
+
+.lp-bg-particles {
+  position: absolute;
+  inset: 0;
+}
+
+.lp-bg-particles i {
+  position: absolute;
+  left: var(--px);
+  top: var(--py);
+  width: var(--ps);
+  height: var(--ps);
+  border-radius: 50%;
+  background: rgba(125, 211, 252, 0.75);
+  box-shadow: 0 0 16px rgba(125, 211, 252, 0.58);
+  opacity: 0.38;
+  animation: lpParticleDrift 6s ease-in-out infinite;
+  animation-delay: var(--pd);
+}
+
+.lp-bg-grid {
+  transform: translate3d(0, calc(var(--lp-scroll-shift) * -0.18), 0);
+  transition: transform 0.12s linear;
+}
+
+.lp-bg-aurora {
+  transform: translate3d(0, calc(var(--lp-scroll-shift) * -0.08), 0);
+}
+
+.lp-hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: min(100%, 430px);
+}
+
+.lp-hero-metric-wrap {
+  justify-content: center;
+  min-width: 0;
+}
+
+.lp-hero-metric-divider {
+  margin: 0 12px 0 0;
+}
+
+.lp-hero-metric {
+  min-width: 0;
+  text-align: center;
+}
+
+.lp-hero-split.lp-screen::before {
+  content: "";
+  position: absolute;
+  inset: 96px 18px 48px;
+  z-index: -1;
+  border-radius: 34px;
+  background:
+    linear-gradient(120deg, rgba(79, 142, 247, 0.08), transparent 36%),
+    linear-gradient(300deg, rgba(168, 85, 247, 0.08), transparent 38%);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  filter: drop-shadow(0 30px 80px rgba(0, 0, 0, 0.18));
+}
+
+.lp-hero-split.lp-screen::after {
+  content: "";
+  position: absolute;
+  left: 34px;
+  right: 34px;
+  bottom: 42px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(79, 142, 247, 0.48), transparent);
+  opacity: 0.7;
+}
+
+.lp-scroll-cue {
+  grid-column: 1 / -1;
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: -10px;
+  padding: 9px 14px;
+  border: 1px solid rgba(79, 142, 247, 0.24);
+  border-radius: 999px;
+  color: #9ec5ff;
+  background: rgba(8, 14, 28, 0.62);
+  box-shadow: 0 12px 36px rgba(79, 142, 247, 0.12);
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  animation: lpCueFloat 2.6s ease-in-out infinite;
+}
+
+.lp-scroll-cue span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.lp-scroll-cue i {
+  width: 8px;
+  height: 18px;
+  border: 1px solid rgba(158, 197, 255, 0.54);
+  border-radius: 999px;
+  position: relative;
+}
+
+.lp-scroll-cue i::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #7dd3fc;
+  transform: translateX(-50%);
+  animation: lpMouseDot 1.4s ease-in-out infinite;
+}
+
+@keyframes lpAuroraBreath {
+  0% { transform: scale(1) translate3d(0, 0, 0); filter: hue-rotate(0deg); opacity: 0.82; }
+  100% { transform: scale(1.08) translate3d(-2%, 1.5%, 0); filter: hue-rotate(18deg); opacity: 1; }
+}
+
+@keyframes lpSpotlightSweep {
+  0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.45; }
+  100% { transform: translate3d(-16vw, 8vh, 0) scale(1.16); opacity: 0.74; }
+}
+
+@keyframes lpOrbitSpin {
+  to { rotate: 360deg; }
+}
+
+@keyframes lpScanLine {
+  0% { transform: translateY(-105%); }
+  100% { transform: translateY(105%); }
+}
+
+@keyframes lpBeamFly {
+  0% { transform: translateX(0) rotate(-18deg); opacity: 0; }
+  12% { opacity: 0.7; }
+  72% { opacity: 0.7; }
+  100% { transform: translateX(150vw) rotate(-18deg); opacity: 0; }
+}
+
+@keyframes lpParticleDrift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.24; }
+  50% { transform: translate3d(18px, -26px, 0) scale(1.45); opacity: 0.78; }
+}
+
+@keyframes lpCueFloat {
+  0%, 100% { transform: translateY(0); opacity: 0.86; }
+  50% { transform: translateY(8px); opacity: 1; }
+}
+
+@keyframes lpMouseDot {
+  0% { transform: translate(-50%, 0); opacity: 0; }
+  25% { opacity: 1; }
+  100% { transform: translate(-50%, 8px); opacity: 0; }
+}
+
+@supports (animation-timeline: view()) {
+  .lp-section > .lp-section-header,
+  .lp-section > .lp-block-gap,
+  .lp-system-map-grid,
+  .lp-workflow-track,
+  .lp-showcase-stack .lp-showcase-row,
+  .lp-bento-card,
+  .lp-tech-mosaic,
+  .lp-agent-chips,
+  .lp-cta-card {
+    animation: lpScrollDepthReveal linear both;
+    animation-timeline: view();
+    animation-range: entry 0% cover 34%;
+    transform-origin: center top;
+  }
+
+  .lp-showcase-stack .lp-showcase-row:nth-child(odd) {
+    animation-name: lpScrollCylinderRight;
+  }
+
+  .lp-showcase-stack .lp-showcase-row:nth-child(even) {
+    animation-name: lpScrollCylinderLeft;
+  }
+}
+
+@keyframes lpScrollDepthReveal {
+  from {
+    transform: translateY(56px) rotateX(5deg) scale(0.98);
+  }
+  to {
+    transform: translateY(0) rotateX(0) scale(1);
+  }
+}
+
+@keyframes lpScrollCylinderRight {
+  from {
+    transform: translateX(72px) translateY(28px) rotateY(-10deg) scale(0.98);
+  }
+  to {
+    transform: translateX(0) translateY(0) rotateY(0) scale(1);
+  }
+}
+
+@keyframes lpScrollCylinderLeft {
+  from {
+    transform: translateX(-72px) translateY(28px) rotateY(10deg) scale(0.98);
+  }
+  to {
+    transform: translateX(0) translateY(0) rotateY(0) scale(1);
+  }
+}
+
+@media (max-width: 520px) {
+  .lp-hero-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 12px;
+  }
+
+  .lp-hero-metric-divider {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .lp-bg-orbit,
+  .lp-bg-beams {
+    display: none;
+  }
+
+  .lp-scroll-cue {
+    display: none;
+  }
 }
 
 /* ── 主题 CSS 变量（浅色默认） ── */
