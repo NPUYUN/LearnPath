@@ -5,21 +5,30 @@ __pycache__/
 .venv/
 venv/
 .venv-codex/
+backend/.venv/
 backend/.venv-codex/
 .env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
 
 # Node
 node_modules/
 frontend/.next/
 frontend/out/
 frontend/.env.local
+frontend/.env.*.local
 *.tsbuildinfo
 
 # Local secrets / tokens
 tmp_token.json
+*apiKey*.csv
+*api-key*.csv
 
 # Runtime storage
 storage/
+backend/storage/
 !storage/.gitkeep
 
 # IDE
