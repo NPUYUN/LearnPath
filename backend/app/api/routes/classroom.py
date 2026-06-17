@@ -17,6 +17,8 @@ from app.db.classroom_library_repository import (
 from app.models.schemas import (
     ClassroomGenerateRequest,
     ClassroomGenerationJob,
+    ClassroomInteractionRequest,
+    ClassroomInteractionResponse,
     ClassroomLibraryFavoriteUpdate,
     ClassroomLibraryItem,
     ClassroomLibraryListResponse,
@@ -35,7 +37,7 @@ from app.services.classroom_job_service import (
     get_classroom_generation_job,
     restart_classroom_generation_job,
 )
-from app.services.classroom_service import generate_classroom_quiz, generate_classroom_session
+from app.services.classroom_service import generate_classroom_interaction, generate_classroom_quiz, generate_classroom_session
 
 router = APIRouter(prefix="/classroom", tags=["classroom"])
 
@@ -82,6 +84,15 @@ async def create_classroom_quiz(
 ):
     ensure_same_user(req.user_id, current_user_id)
     return await generate_classroom_quiz(req)
+
+
+@router.post("/interaction", response_model=ClassroomInteractionResponse)
+async def create_classroom_interaction(
+    req: ClassroomInteractionRequest,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ensure_same_user(req.user_id, current_user_id)
+    return await generate_classroom_interaction(req)
 
 
 @router.get("/session/jobs/{job_id}", response_model=ClassroomGenerationJob)

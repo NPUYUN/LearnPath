@@ -10,54 +10,83 @@ from app.services.classroom_service import generate_classroom_session
 
 _JOBS: dict[str, ClassroomGenerationJob] = {}
 
-_STAGES: list[tuple[str, int]] = [
-    ("整理参考材料", 12),
-    ("分析学习画像", 24),
-    ("规划课堂结构", 38),
-    ("生成讲义主线", 54),
-    ("生成课件页面", 64),
-    ("生成教学配图", 76),
-    ("设计互动检查", 86),
-    ("生成课后作业", 93),
-    ("检查内容一致性", 96),
+_START_PROGRESS = 3
+_MAX_RUNNING_PROGRESS = 99
+
+_STAGE_FLOORS: dict[str, int] = {
+    "整理参考材料": 8,
+    "读取学习画像": 16,
+    "规划课堂结构": 25,
+    "生成讲义主线": 36,
+    "生成课件页面": 52,
+    "生成教学配图": 66,
+    "设计互动检查": 76,
+    "生成课后作业": 84,
+    "检查内容一致性": 88,
+    "写入课堂库": 98,
+}
+
+_CONSISTENCY_SUB_STAGES = [
+    ("检查知识点覆盖", 89),
+    ("检查幻灯片与讲稿一致性", 91),
+    ("检查小测验与知识点对应关系", 93),
+    ("修复不一致内容", 95),
+    ("写入课堂库", 98),
 ]
 
 
 def _touch(job: ClassroomGenerationJob) -> None:
-    job.updated_at = datetime.utcnow()
+    now = datetime.utcnow()
+    job.elapsed_seconds = max(0, int((now - job.created_at).total_seconds()))
+    job.heartbeat_at = now
+    job.updated_at = now
     _JOBS[job.id] = job
     sync_library_from_job(job)
+
+
+def _update_progress(
+    job: ClassroomGenerationJob,
+    stage: str,
+    sub_stage: str = "",
+    progress: int | None = None,
+) -> None:
+    next_progress = progress if progress is not None else _STAGE_FLOORS.get(stage, job.progress)
+    job.stage = stage
+    job.sub_stage = sub_stage
+    job.progress = max(job.progress, min(int(next_progress), _MAX_RUNNING_PROGRESS))
+    _touch(job)
 
 
 async def _run_generation(job_id: str, req: ClassroomGenerateRequest) -> None:
     job = _JOBS[job_id]
     job.status = "running"
-    _touch(job)
+    _update_progress(job, "整理参考材料", "任务已启动", _START_PROGRESS)
     try:
-        for stage, progress in _STAGES[:3]:
-            job.stage = stage
-            job.progress = progress
-            _touch(job)
-            await asyncio.sleep(0.65)
+        def report(stage: str, sub_stage: str = "", progress: int | None = None) -> None:
+            _update_progress(job, stage, sub_stage, progress)
 
-        generation_task = asyncio.create_task(generate_classroom_session(req))
-        stage_index = 3
+        generation_task = asyncio.create_task(generate_classroom_session(req, progress_cb=report))
+        heartbeat_tick = 0
         while not generation_task.done():
-            stage, progress = _STAGES[min(stage_index, len(_STAGES) - 1)]
-            job.stage = stage
-            job.progress = max(job.progress, min(progress, 94))
-            _touch(job)
-            stage_index = min(stage_index + 1, len(_STAGES) - 1)
-            await asyncio.sleep(1.4)
+            heartbeat_tick += 1
+            if heartbeat_tick % 2 == 0:
+                job.sub_stage = job.sub_stage or "仍在生成，请稍候"
+                _touch(job)
+            await asyncio.sleep(1.0)
 
         job.result = await generation_task
+        for sub_stage, progress in _CONSISTENCY_SUB_STAGES:
+            _update_progress(job, "检查内容一致性", sub_stage, progress)
+            await asyncio.sleep(0.15)
         job.status = "done"
         job.stage = "生成完成"
+        job.sub_stage = "课堂内容已写入课堂库"
         job.progress = 100
         _touch(job)
     except Exception as exc:
         job.status = "error"
         job.stage = "生成失败"
+        job.sub_stage = "请重试或调整参考材料"
         job.error = str(exc)
         job.progress = max(job.progress, 8)
         _touch(job)
@@ -70,7 +99,8 @@ def _start_classroom_generation_job(req: ClassroomGenerateRequest) -> ClassroomG
         title=req.title or "AI 课堂",
         status="queued",
         stage="已加入生成队列",
-        progress=4,
+        sub_stage="等待后端开始处理",
+        progress=_START_PROGRESS,
     )
     _touch(job)
     asyncio.create_task(_run_generation(job.id, req))

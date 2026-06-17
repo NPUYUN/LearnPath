@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from app.core.guardrails import filter_sensitive
 from app.core.llm.router import get_primary_llm
@@ -13,6 +13,8 @@ from app.models.schemas import (
     ClassroomCheckQuestion,
     ClassroomGenerateRequest,
     ClassroomHandoutSection,
+    ClassroomInteractionRequest,
+    ClassroomInteractionResponse,
     ClassroomQuizOption,
     ClassroomQuizRequest,
     ClassroomQuizResponse,
@@ -28,6 +30,9 @@ from app.services.personalization_strategy_service import (
     format_personalization_strategy_prompt,
     format_realtime_reply_policy_prompt,
 )
+
+
+ProgressCallback = Callable[[str, str, int | None], None]
 
 
 def _clip(text: str, limit: int) -> str:
@@ -571,6 +576,501 @@ async def generate_classroom_quiz(req: ClassroomQuizRequest) -> ClassroomQuizRes
         return fallback
 
 
+QUIZ_LEVELS = ["basic", "application", "trap", "exam"]
+QUIZ_LEVEL_ABILITIES = {
+    "basic": "concept_understanding",
+    "application": "application",
+    "trap": "misconception_detection",
+    "exam": "exam_reasoning",
+}
+BAD_QUIZ_PHRASES = ["复述本节课", "核心直觉", "本节课最重要", "本节内容很重要", "这个方法很有用"]
+BAD_OPTION_PHRASES = ["只记结论", "跳过当前知识点", "只看答案", "不解释中间步骤", "直接做综合题"]
+
+
+def _quiz_level_from_req(req: ClassroomQuizRequest) -> str:
+    if req.wrong_streak >= 2:
+        return "basic"
+    if req.target_level in QUIZ_LEVELS:
+        return req.target_level
+    used = {x for x in req.correct_levels if x in QUIZ_LEVELS}
+    for level in QUIZ_LEVELS:
+        if level not in used:
+            return level
+    return QUIZ_LEVELS[req.variant % len(QUIZ_LEVELS)]
+
+
+def _quiz_context(req: ClassroomQuizRequest) -> tuple[str, str, list[str]]:
+    topic = _clean_text(req.slide_title) or _clean_text(req.course_title) or "当前知识点"
+    body = _clean_text(req.slide_body)
+    points = _normalize_points(req.slide_board, [topic, body, req.teacher_note], limit=5)
+    return topic, body, points or [topic]
+
+
+def _looks_math_or_code(text: str) -> bool:
+    keywords = [
+        "函数",
+        "导数",
+        "积分",
+        "极限",
+        "概率",
+        "矩阵",
+        "回归",
+        "梯度",
+        "损失",
+        "算法",
+        "Python",
+        "代码",
+        "模型",
+        "训练",
+        "公式",
+        "计算",
+    ]
+    lowered = text.lower()
+    return any(key.lower() in lowered for key in keywords)
+
+
+def _make_single_choice(
+    question: str,
+    options: list[tuple[str, str]],
+    answer_id: str,
+    explanation: str,
+    level: str,
+    kp: str,
+    misconception: str,
+    remedial: str,
+) -> ClassroomQuizResponse:
+    quiz_options = [
+        ClassroomQuizOption(id=chr(65 + i), text=_clip(text, 120), diagnosis=_clip(diagnosis, 160))
+        for i, (text, diagnosis) in enumerate(options[:4])
+    ]
+    diagnosis = {item.id: item.diagnosis for item in quiz_options}
+    return ClassroomQuizResponse(
+        id=str(uuid.uuid4()),
+        question=_clip(question, 220),
+        options=quiz_options,
+        answer_id=answer_id if answer_id in diagnosis else "A",
+        explanation=_clip(explanation, 620),
+        transfer=_clip(remedial, 360),
+        question_type="single_choice",
+        difficulty=level,
+        diagnosis=diagnosis,
+        level=level,  # type: ignore[arg-type]
+        type="single_choice",
+        target_knowledge_point=kp,
+        ability=QUIZ_LEVEL_ABILITIES.get(level, "concept_understanding"),
+        misconception=misconception,
+        remedial_explanation=_clip(remedial, 420),
+    )
+
+
+def _make_true_false(
+    question: str,
+    answer_id: str,
+    explanation: str,
+    level: str,
+    kp: str,
+    misconception: str,
+    remedial: str,
+) -> ClassroomQuizResponse:
+    options = [
+        ClassroomQuizOption(id="T", text="正确", diagnosis="选择正确说明你认为命题的条件和结论能够对应。"),
+        ClassroomQuizOption(id="F", text="错误", diagnosis="选择错误说明你认为命题遗漏了条件、方向或适用范围。"),
+    ]
+    return ClassroomQuizResponse(
+        id=str(uuid.uuid4()),
+        question=_clip(question, 220),
+        options=options,
+        answer_id=answer_id if answer_id in {"T", "F"} else "F",
+        explanation=_clip(explanation, 620),
+        transfer=_clip(remedial, 360),
+        question_type="true_false",
+        difficulty=level,
+        diagnosis={item.id: item.diagnosis for item in options},
+        level=level,  # type: ignore[arg-type]
+        type="true_false",
+        target_knowledge_point=kp,
+        ability=QUIZ_LEVEL_ABILITIES.get(level, "concept_understanding"),
+        misconception=misconception,
+        remedial_explanation=_clip(remedial, 420),
+    )
+
+
+def _fallback_classroom_quiz(req: ClassroomQuizRequest) -> ClassroomQuizResponse:
+    level = _quiz_level_from_req(req)
+    topic, body, points = _quiz_context(req)
+    core = points[req.variant % len(points)]
+    second = points[(req.variant + 1) % len(points)] if len(points) > 1 else body[:36] or topic
+    context = f"{req.course_title} {req.course_objective} {topic} {body} {' '.join(points)}"
+    if level == "basic":
+        return _make_single_choice(
+            question=f"在“{topic}”这一页中，围绕“{core}”进行判断时，最需要先确认的是哪一项？",
+            options=[
+                (f"{core}的适用条件以及它要解决的具体问题", "能把知识点和适用条件联系起来。"),
+                (f"只比较{topic}里出现的名词数量", "可能把表面关键词当成理解依据。"),
+                (f"先套用{second}，不检查问题条件", "可能忽略条件，容易把相邻知识点混用。"),
+                ("先看最终结论是否熟悉，再决定方法", "可能用记忆替代理解，无法处理变式题。"),
+            ],
+            answer_id="A",
+            explanation=f"正确答案是 A。学习“{topic}”时，先确认“{core}”解决什么问题、在什么条件下使用，再进入公式、步骤或例子。B 只看表面词，C 容易混用相邻知识点，D 依赖记忆，遇到变式会失效。",
+            level=level,
+            kp=topic,
+            misconception="把关键词记忆误当作概念理解",
+            remedial=f"回到这一页时，先用一句话写出“{core}解决的问题”和“使用它前要检查的条件”。",
+        )
+    if level == "application":
+        if _looks_math_or_code(context):
+            return _make_single_choice(
+                question=f"如果把“{topic}”用于一个新例子，已知条件发生变化但目标仍是判断“{core}”，下一步最合理的是？",
+                options=[
+                    ("重新列出输入、条件和目标，再选择对应公式或步骤", "能把方法迁移到新场景。"),
+                    ("沿用上一题的数值或代码输出", "可能把示例答案误当成通用规则。"),
+                    ("只要主题相同，就不需要重新检查条件", "忽略条件变化，容易算错或判断错。"),
+                    ("先给出结论，再回头寻找依据", "推理顺序倒置，结论缺少支撑。"),
+                ],
+                answer_id="A",
+                explanation=f"正确答案是 A。应用“{topic}”不能直接复制上一页示例，要先列出新场景的输入、约束和目标，再决定是否使用“{core}”。B/C 都忽略了条件变化，D 是先下结论后补理由。",
+                level=level,
+                kp=topic,
+                misconception="把例题流程机械套用到新条件",
+                remedial="遇到应用题时先写三行：输入是什么、条件是什么、要判断或求解什么。",
+            )
+        return _make_true_false(
+            question=f"判断：只要能说出“{topic}”的定义，就一定能在具体场景中正确使用“{core}”。",
+            answer_id="F",
+            explanation=f"该命题错误。定义只是起点，具体使用还要看场景条件、目标和边界。对“{core}”来说，至少要判断它解决的问题是否和当前场景一致。",
+            level=level,
+            kp=topic,
+            misconception="把会背定义等同于会应用",
+            remedial="把定义改写成“在什么条件下，用它解决什么问题”的句子，再做场景判断。",
+        )
+    if level == "trap":
+        return _make_true_false(
+            question=f"判断：在“{topic}”中，只要结论看起来符合“{core}”，即使没有检查适用条件，也可以认为推理成立。",
+            answer_id="F",
+            explanation=f"该命题错误。很多错误答案正是因为省略条件检查。“{core}”必须和当前页给出的条件、对象、目标相匹配，结论相似并不代表推理成立。",
+            level=level,
+            kp=topic,
+            misconception="省略适用条件，凭结论相似做判断",
+            remedial=f"做易错辨析时先问：这个结论依赖哪个条件？如果去掉这个条件，“{core}”还成立吗？",
+        )
+    if _looks_math_or_code(context):
+        return _make_single_choice(
+            question=f"应试题：围绕“{topic}”，若题目要求你根据“{core}”完成推理，哪一种答题路径最稳妥？",
+            options=[
+                ("先写条件与目标，再列关键公式/步骤，最后检查结果是否满足原条件", "具备完整的条件分析和结果检验意识。"),
+                ("先选最像的公式，算完后不再回看题设", "可能公式套用正确但条件不匹配。"),
+                ("只写最终数值或结论，省略中间推理", "无法验证过程，也难发现条件遗漏。"),
+                ("把相邻知识点的结论合并使用", "存在概念混淆，容易出现方向或前提错误。"),
+            ],
+            answer_id="A",
+            explanation=f"正确答案是 A。应试或学科考察题看重推理链：条件分析 -> 方法选择 -> 关键步骤 -> 结果检验。B 忽略适用条件，C 缺少过程，D 容易混淆“{topic}”与相邻知识点。",
+            level=level,
+            kp=topic,
+            misconception="会选公式但缺少条件分析和结果检验",
+            remedial="把答案写成四段：题设条件、使用依据、关键步骤、结果回代或解释。",
+        )
+    return _make_true_false(
+        question=f"判断：如果“{topic}”的场景换了，仍然应该先检查“{core}”是否适用，再决定能否沿用原来的结论。",
+        answer_id="T",
+        explanation=f"该命题正确。迁移应用时不能只看主题相似，要检查对象、条件、目标是否仍支持“{core}”。这一步能避免把课堂例子机械照搬。",
+        level=level,
+        kp=topic,
+        misconception="迁移时忽略场景条件",
+        remedial="做迁移题时先列出新旧场景的相同点和不同点，再判断结论是否还能使用。",
+    )
+
+
+def _normalize_quiz_option(item: Any, index: int) -> ClassroomQuizOption | None:
+    if isinstance(item, dict):
+        option_id = _clean_text(item.get("id") or item.get("key") or item.get("label")).upper()[:1] or chr(65 + index)
+        text = _clean_text(item.get("text") or item.get("content") or item.get("option") or item.get("value"))
+        diagnosis = _clean_text(item.get("diagnosis"))
+    else:
+        option_id = chr(65 + index)
+        text = _clean_text(item)
+        diagnosis = ""
+    if not text:
+        return None
+    return ClassroomQuizOption(id=option_id, text=_clip(text, 140), diagnosis=_clip(diagnosis, 180))
+
+
+def _is_low_quality_quiz(quiz: ClassroomQuizResponse, req: ClassroomQuizRequest) -> bool:
+    if quiz.type not in {"single_choice", "true_false"} or quiz.level not in QUIZ_LEVELS:
+        return True
+    if any(bad in quiz.question for bad in BAD_QUIZ_PHRASES):
+        return True
+    if any(bad in option.text for bad in BAD_OPTION_PHRASES for option in quiz.options):
+        return True
+    if quiz.type == "single_choice" and len(quiz.options) != 4:
+        return True
+    if quiz.type == "true_false" and {item.id for item in quiz.options} != {"T", "F"}:
+        return True
+    if quiz.answer_id not in {item.id for item in quiz.options}:
+        return True
+    if not quiz.remedial_explanation or not quiz.misconception:
+        return True
+    if any(not option.diagnosis for option in quiz.options):
+        return True
+    context_terms = _unique([_clean_text(req.slide_title), *_normalize_points(req.slide_board, [req.slide_body], limit=4)])
+    if context_terms and not any(term and (term in quiz.question or term in quiz.explanation) for term in context_terms[:4]):
+        return True
+    answer_text = next((item.text for item in quiz.options if item.id == quiz.answer_id), "")
+    other_lengths = [len(item.text) for item in quiz.options if item.id != quiz.answer_id]
+    if other_lengths and len(answer_text) > max(36, int(sum(other_lengths) / len(other_lengths) * 1.9)):
+        return True
+    if quiz.level == "exam" and not any(marker in quiz.explanation for marker in ["步骤", "条件", "计算", "推理", "公式", "检验", "迁移", "题设"]):
+        return True
+    return False
+
+
+def _normalize_quiz_response(data: dict[str, Any], req: ClassroomQuizRequest) -> ClassroomQuizResponse:
+    fallback = _fallback_classroom_quiz(req)
+    level = _clean_text(data.get("level") or data.get("difficulty") or req.target_level or fallback.level)
+    if level not in QUIZ_LEVELS:
+        level = fallback.level
+    quiz_type = _clean_text(data.get("type") or data.get("question_type") or fallback.type)
+    if quiz_type == "choice":
+        quiz_type = "single_choice"
+    if quiz_type not in {"single_choice", "true_false"}:
+        quiz_type = fallback.type
+    raw_options = data.get("options")
+    options: list[ClassroomQuizOption] = []
+    if isinstance(raw_options, list):
+        limit = 2 if quiz_type == "true_false" else 4
+        for i, item in enumerate(raw_options[:limit]):
+            option = _normalize_quiz_option(item, i)
+            if option:
+                options.append(option)
+    if quiz_type == "true_false":
+        normalized: list[ClassroomQuizOption] = []
+        for key, text in [("T", "正确"), ("F", "错误")]:
+            found = next((item for item in options if item.id == key or item.text == text), None)
+            normalized.append(
+                ClassroomQuizOption(
+                    id=key,
+                    text=text,
+                    diagnosis=found.diagnosis if found and found.diagnosis else fallback.diagnosis.get(key, ""),
+                )
+            )
+        options = normalized
+    if quiz_type == "single_choice" and len(options) != 4:
+        options = fallback.options
+    if quiz_type == "true_false" and len(options) != 2:
+        options = fallback.options
+    diagnosis_from_options = {item.id: item.diagnosis for item in options if item.diagnosis}
+    diagnosis_raw = data.get("diagnosis") if isinstance(data.get("diagnosis"), dict) else {}
+    for key, value in diagnosis_raw.items():
+        diagnosis_from_options[_clean_text(key).upper()[:1]] = _clip(_clean_text(value), 180)
+    options = [
+        ClassroomQuizOption(
+            id=item.id,
+            text=item.text,
+            diagnosis=item.diagnosis or diagnosis_from_options.get(item.id) or fallback.diagnosis.get(item.id, ""),
+        )
+        for item in options
+    ]
+    answer_id = _clean_text(data.get("answer_id") or data.get("answer") or fallback.answer_id).upper()[:1]
+    valid_ids = {item.id for item in options}
+    if answer_id not in valid_ids:
+        answer_id = fallback.answer_id if fallback.answer_id in valid_ids else next(iter(valid_ids), "A")
+    quiz = ClassroomQuizResponse(
+        id=_clean_text(data.get("id")) or str(uuid.uuid4()),
+        question=_clip(_clean_text(data.get("question")) or fallback.question, 220),
+        options=options,
+        answer_id=answer_id,
+        explanation=_clip(_clean_text(data.get("explanation") or data.get("analysis")) or fallback.explanation, 680),
+        transfer=_clip(_clean_text(data.get("transfer")) or fallback.transfer, 380),
+        question_type=quiz_type,
+        difficulty=level,
+        diagnosis={item.id: item.diagnosis for item in options},
+        level=level,  # type: ignore[arg-type]
+        type=quiz_type,  # type: ignore[arg-type]
+        target_knowledge_point=_clip(_clean_text(data.get("target_knowledge_point") or data.get("knowledge_point")) or fallback.target_knowledge_point, 80),
+        ability=_clip(_clean_text(data.get("ability")) or QUIZ_LEVEL_ABILITIES.get(level, "concept_understanding"), 40),
+        misconception=_clip(_clean_text(data.get("misconception")) or fallback.misconception, 160),
+        remedial_explanation=_clip(_clean_text(data.get("remedial_explanation")) or fallback.remedial_explanation, 420),
+    )
+    return fallback if _is_low_quality_quiz(quiz, req) else quiz
+
+
+async def generate_classroom_quiz(req: ClassroomQuizRequest) -> ClassroomQuizResponse:
+    fallback = _fallback_classroom_quiz(req)
+    payload = {
+        "course_title": req.course_title,
+        "course_objective": req.course_objective,
+        "slide_title": req.slide_title,
+        "slide_body": req.slide_body,
+        "slide_board": req.slide_board,
+        "teacher_note": req.teacher_note,
+        "depth_level": req.depth_level,
+        "previous_question": req.previous_question,
+        "variant": req.variant,
+        "target_level": _quiz_level_from_req(req),
+        "used_question_texts": req.used_question_texts[-10:],
+        "wrong_streak": req.wrong_streak,
+        "correct_levels": req.correct_levels,
+    }
+    system = (
+        "你是高校课程命题教师，不是普通题库生成器。请基于当前 slide、当前知识点和课堂主题生成 1 道课堂小测题。\n"
+        "题型只允许 single_choice 或 true_false。禁止填空题、简答题、多选题、主观题、开放式问答题。\n"
+        "题目必须出现具体知识点、方法、概念、公式、场景、条件或当前课堂内容。禁止生成“请复述本节课核心直觉”“本节课最重要的是什么”等通用题。\n"
+        "禁止使用“只记结论”“跳过当前知识点”“只看答案”“不解释中间步骤”这类废选项。\n"
+        "每个错误选项必须对应真实学生常见误区，例如概念混淆、条件遗漏、公式误用、方向判断错误、计算步骤错误。正确答案不能明显比其他选项更长。\n"
+        "题目层级只允许 basic、application、trap、exam。必须优先满足 target_level；wrong_streak 高时降低难度。\n"
+        "single_choice 必须有 A/B/C/D 四个选项，每个选项都要有 diagnosis。true_false 只能有 T=正确、F=错误两个选项，也要有 diagnosis。\n"
+        "trap 题要围绕常见误区设置；exam 题必须体现推理、计算、条件分析、公式应用或迁移能力，解析必须包含解题思路、关键步骤、条件分析和常见误区提醒。\n"
+        "如果 previous_question 或 used_question_texts 已出现相近题干，请换一个考查角度，不要重复模板。\n"
+        "输出合法 JSON，不要 Markdown，不要解释性废话。字段：id, level, type, target_knowledge_point, ability, question, options, answer_id, explanation, misconception, remedial_explanation。\n"
+        "options 格式：single_choice 用 [{\"key\":\"A\",\"text\":\"...\",\"diagnosis\":\"...\"}...]；true_false 用 T/F。"
+    )
+    try:
+        llm = get_primary_llm()
+        raw = await llm.chat(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            temperature=0.45,
+            task="classroom",
+        )
+        data = _extract_json_object(raw)
+        if not data:
+            return fallback
+        return _normalize_quiz_response(data, req)
+    except Exception:
+        return fallback
+
+
+def _build_fallback_mini_quizzes(session: ClassroomSessionResponse) -> list[ClassroomQuizResponse]:
+    quizzes: list[ClassroomQuizResponse] = []
+    slides = session.slides or []
+    for i, level in enumerate(["basic", "application", "trap", "exam"]):
+        slide = slides[min(i, max(len(slides) - 1, 0))] if slides else ClassroomSlide(title=session.title, body=session.objective)
+        quizzes.append(
+            _fallback_classroom_quiz(
+                ClassroomQuizRequest(
+                    course_title=session.title,
+                    course_objective=session.objective,
+                    slide_title=slide.title,
+                    slide_body=slide.body,
+                    slide_board=slide.board,
+                    teacher_note=slide.teacher_note,
+                    depth_level=session.depth_level,
+                    variant=i,
+                    target_level=level,  # type: ignore[arg-type]
+                )
+            )
+        )
+    return quizzes
+
+
+def _fallback_interaction(req: ClassroomInteractionRequest) -> ClassroomInteractionResponse:
+    kp = _clean_text(req.knowledge_point) or _clean_text(req.slide.get("title")) or "当前知识点"
+    slide_title = _clean_text(req.slide.get("title")) or kp
+    click = max(req.click_count, 1)
+    if req.action == "confused":
+        diagnosis = req.diagnosis or "概念没懂"
+        level = "更低门槛" if click >= 2 else "针对性"
+        return ClassroomInteractionResponse(
+            action="confused",
+            title=f"{level}解释：{kp}",
+            diagnosis=diagnosis,
+            knowledge_point=kp,
+            body=(
+                f"诊断结果：你现在主要卡在「{diagnosis}」。先不要看完整页面，"
+                f"我们把「{kp}」压缩成一个最小问题：它要判断什么输入、经过什么规则、得到什么结果。"
+                f"如果仍然不清楚，建议切到“讲慢点”，我会把它拆成更小步骤。"
+            ),
+            steps=[
+                f"先定位「{slide_title}」里的输入或对象。",
+                "再找规则、条件或公式真正处理了什么。",
+                "最后只检查输出或结论是否符合这个规则。",
+            ],
+        )
+    if req.action == "slow":
+        return ClassroomInteractionResponse(
+            action="slow",
+            title=f"分步讲解：{kp}",
+            knowledge_point=kp,
+            body=f"我把「{kp}」拆成几个小步，你每次只看一步。",
+            steps=[
+                f"第 1 步：先用一句话说清「{kp}」要解决的问题。",
+                "第 2 步：只看当前页最关键的条件，不急着记所有细节。",
+                "第 3 步：用一个最小例子验证这个条件会带来什么结果。",
+                "第 4 步：回到原概念，确认它和题目目标之间的关系。",
+            ][: 2 + (click % 3)],
+        )
+    example_types = ["生活类比", "专业场景例子", "数值小例子", "反例 / 易错例子"]
+    example_type = req.example_type or example_types[(click - 1) % len(example_types)]
+    return ClassroomInteractionResponse(
+        action="example",
+        title=f"{example_type}：{kp}",
+        example_type=example_type,
+        knowledge_point=kp,
+        body=(
+            f"例子描述：把「{kp}」放到「{example_type}」里看。先给一个小输入，"
+            "再观察规则怎么处理它，最后看输出是否符合目标。"
+        ),
+        helps=f"帮助理解「{kp}」里条件、规则和结论之间的对应关系。",
+        check_question=f"如果换一个输入，你还能说出规则会先检查哪一步吗？",
+    )
+
+
+def _normalize_interaction_response(data: dict[str, Any], req: ClassroomInteractionRequest) -> ClassroomInteractionResponse:
+    fallback = _fallback_interaction(req)
+    kp = _clean_text(req.knowledge_point) or _clean_text(req.slide.get("title"))
+    joined = " ".join(
+        _clean_text(data.get(key))
+        for key in ("title", "body", "knowledge_point", "helps", "check_question")
+    )
+    if kp and kp not in joined and not any(token and token in joined for token in _split_text_items(req.slide.get("title"))):
+        return fallback
+    steps = _split_text_items(data.get("steps"))[:4]
+    return ClassroomInteractionResponse(
+        action=req.action,
+        title=_clip(_clean_text(data.get("title")) or fallback.title, 80),
+        body=_clip(_clean_text(data.get("body")) or fallback.body, 900),
+        steps=steps or fallback.steps,
+        diagnosis=_clip(_clean_text(data.get("diagnosis")) or fallback.diagnosis or req.diagnosis, 60),
+        example_type=_clip(_clean_text(data.get("example_type")) or fallback.example_type or req.example_type, 40),
+        knowledge_point=_clip(_clean_text(data.get("knowledge_point")) or fallback.knowledge_point, 80),
+        helps=_clip(_clean_text(data.get("helps")) or fallback.helps, 240),
+        check_question=_clip(_clean_text(data.get("check_question")) or fallback.check_question, 180),
+    )
+
+
+async def generate_classroom_interaction(req: ClassroomInteractionRequest) -> ClassroomInteractionResponse:
+    fallback = _fallback_interaction(req)
+    llm = get_primary_llm()
+    if getattr(llm, "use_mock", False):
+        return fallback
+    payload = req.model_dump()
+    system = (
+        "你是 LearnPath AI 课堂的随堂交互生成器，只处理当前页当前知识点。"
+        "你会收到当前 slide、知识点、讲稿、学生画像、实时状态、互动历史和按钮点击次数。"
+        "重复点击时必须生成不同表达，不要复读上一次内容。"
+        "如果 action=confused：先基于 diagnosis 做卡点诊断，再给针对性解释；连续点击时降低难度并建议讲慢点。"
+        "如果 action=slow：把知识点拆成 2 到 4 个小步骤，每步很短，方便前端逐步展示。"
+        "如果 action=example：根据 example_type 生成例子，包含例子描述、对应知识点、回到原概念的解释和一个检查问题。"
+        "只输出 JSON，字段：title, body, steps, diagnosis, example_type, knowledge_point, helps, check_question。"
+    )
+    try:
+        raw = await llm.chat(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+            ],
+            temperature=0.72,
+            task="classroom",
+        )
+        data = _extract_json_object(raw)
+        if not data:
+            return fallback
+        return _normalize_interaction_response(data, req)
+    except Exception:
+        return fallback
+
+
 def _path_step_context(path: dict | None, step_key: str) -> dict[str, Any]:
     if not path:
         return {}
@@ -826,6 +1326,28 @@ def _normalize_llm_session(
 
     scripts_raw = data.get("teacher_scripts") if isinstance(data.get("teacher_scripts"), dict) else {}
     question_raw = data.get("check_question") if isinstance(data.get("check_question"), dict) else {}
+    mini_quizzes_raw = data.get("mini_quizzes") if isinstance(data.get("mini_quizzes"), list) else []
+    mini_quizzes: list[ClassroomQuizResponse] = []
+    for i, item in enumerate(mini_quizzes_raw[:8]):
+        if not isinstance(item, dict):
+            continue
+        slide = slides[min(i, len(slides) - 1)] if slides else fallback.slides[0]
+        quiz = _normalize_quiz_response(
+            item,
+            ClassroomQuizRequest(
+                course_title=_clean_text(data.get("title")) or req.title,
+                course_objective=_clean_text(data.get("objective")) or req.objective,
+                slide_title=slide.title,
+                slide_body=slide.body,
+                slide_board=slide.board,
+                teacher_note=slide.teacher_note,
+                depth_level=req.depth_level,
+                target_level=_clean_text(item.get("level")) if _clean_text(item.get("level")) in QUIZ_LEVELS else None,  # type: ignore[arg-type]
+                variant=i,
+            ),
+        )
+        if quiz.level not in {q.level for q in mini_quizzes} or len(mini_quizzes) < 3:
+            mini_quizzes.append(quiz)
     homework_raw = data.get("homework") or []
     homework = _normalize_points(homework_raw, fallback.homework, limit=6)
     handout_raw = data.get("handout") or data.get("handout_sections") or []
@@ -868,6 +1390,7 @@ def _normalize_llm_session(
             expected_answer=_clean_text(question_raw.get("expected_answer")) or fallback.check_question.expected_answer,
             hint=_clean_text(question_raw.get("hint")) or fallback.check_question.hint,
         ),
+        mini_quizzes=mini_quizzes or _build_fallback_mini_quizzes(fallback),
         homework=homework,
         source_resources=_resource_summaries(resources),
         prompt_summary=_clean_text(data.get("prompt_summary")) or fallback.prompt_summary,
@@ -875,18 +1398,36 @@ def _normalize_llm_session(
     )
 
 
-async def generate_classroom_session(req: ClassroomGenerateRequest) -> ClassroomSessionResponse:
+def _safe_report(progress_cb: ProgressCallback | None, stage: str, sub_stage: str, progress: int | None = None) -> None:
+    if not progress_cb:
+        return
+    try:
+        progress_cb(stage, sub_stage, progress)
+    except Exception:
+        pass
+
+
+async def generate_classroom_session(
+    req: ClassroomGenerateRequest,
+    progress_cb: ProgressCallback | None = None,
+) -> ClassroomSessionResponse:
+    _safe_report(progress_cb, "整理参考材料", "读取课堂生成参数", 6)
     profile = await get_profile(req.user_id)
+    _safe_report(progress_cb, "读取学习画像", "读取长期画像", 13)
     realtime = await get_realtime_state(req.user_id)
+    _safe_report(progress_cb, "读取学习画像", "读取实时课堂状态", 16)
     path = await get_path(req.user_id)
     path_step = _path_step_context(path, req.step_key)
+    _safe_report(progress_cb, "规划课堂结构", "匹配路径节点", 22)
     resources = await _resolve_selected_resources(req)
+    _safe_report(progress_cb, "整理参考材料", "整理资源与本地资料", 28)
     strategy = build_personalization_strategy(
         profile=profile,
         realtime_state=realtime,
         question_type="classroom",
         question=req.title or req.objective,
     )
+    _safe_report(progress_cb, "规划课堂结构", "生成个性化教学策略", 32)
     personalization_brief = (
         format_personalization_strategy_prompt(strategy)
         + "\n\n"
@@ -897,6 +1438,7 @@ async def generate_classroom_session(req: ClassroomGenerateRequest) -> Classroom
     fallback = _fallback_session(req, resources, personalization_brief)
     depth_policy = _depth_policy(req.depth_level)
     if getattr(llm, "use_mock", False):
+        _safe_report(progress_cb, "生成课件页面", "使用本地课堂模板", 58)
         return await _enrich_session_images(fallback)
 
     payload = {
@@ -957,6 +1499,7 @@ async def generate_classroom_session(req: ClassroomGenerateRequest) -> Classroom
     )
     system = quality_contract + system
     try:
+        _safe_report(progress_cb, "生成讲义主线", "组织提示词与课堂约束", 38)
         raw = await llm.chat(
             [
                 {"role": "system", "content": system},
@@ -965,10 +1508,16 @@ async def generate_classroom_session(req: ClassroomGenerateRequest) -> Classroom
             temperature=0.35,
             task="classroom",
         )
+        _safe_report(progress_cb, "生成课件页面", "解析课堂 JSON", 58)
         data = _extract_json_object(raw)
         if not data:
+            _safe_report(progress_cb, "生成课件页面", "模型输出不可解析，使用兜底课堂", 62)
             return await _enrich_session_images(fallback)
+        _safe_report(progress_cb, "生成课件页面", "标准化幻灯片与讲稿", 68)
         session = _normalize_llm_session(data, req, resources, personalization_brief)
+        _safe_report(progress_cb, "设计互动检查", "整理课堂小测与课后任务", 78)
+        _safe_report(progress_cb, "生成教学配图", "生成或整理教学图片", 84)
         return await _enrich_session_images(session)
     except Exception:
+        _safe_report(progress_cb, "生成课件页面", "生成失败，使用兜底课堂", 62)
         return await _enrich_session_images(fallback)

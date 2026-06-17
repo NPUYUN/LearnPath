@@ -380,6 +380,7 @@ class ClassroomCheckQuestion(BaseModel):
 class ClassroomQuizOption(BaseModel):
     id: str
     text: str
+    diagnosis: str = ""
 
 
 class ClassroomQuizRequest(BaseModel):
@@ -393,6 +394,10 @@ class ClassroomQuizRequest(BaseModel):
     depth_level: str = "标准掌握"
     previous_question: str = ""
     variant: int = 0
+    target_level: Literal["basic", "application", "trap", "exam"] | None = None
+    used_question_texts: list[str] = Field(default_factory=list)
+    wrong_streak: int = 0
+    correct_levels: list[str] = Field(default_factory=list)
 
 
 class ClassroomQuizResponse(BaseModel):
@@ -402,8 +407,44 @@ class ClassroomQuizResponse(BaseModel):
     answer_id: str
     explanation: str = ""
     transfer: str = ""
-    question_type: str = "concept"
+    question_type: str = "single_choice"
     difficulty: str = "standard"
+    diagnosis: dict[str, str] = Field(default_factory=dict)
+    level: Literal["basic", "application", "trap", "exam"] = "basic"
+    type: Literal["single_choice", "true_false"] = "single_choice"
+    target_knowledge_point: str = ""
+    ability: str = "concept_understanding"
+    misconception: str = ""
+    remedial_explanation: str = ""
+
+
+class ClassroomInteractionRequest(BaseModel):
+    user_id: str = "demo"
+    session_id: str = ""
+    action: Literal["confused", "slow", "example"]
+    diagnosis: str = ""
+    example_type: str = ""
+    click_count: int = 1
+    slide_index: int = 0
+    slide: dict[str, Any] = Field(default_factory=dict)
+    knowledge_point: str = ""
+    teacher_script: str = ""
+    long_term_profile: dict[str, Any] = Field(default_factory=dict)
+    realtime_state: dict[str, Any] = Field(default_factory=dict)
+    lesson_events: list[dict[str, Any]] = Field(default_factory=list)
+    interaction_history: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ClassroomInteractionResponse(BaseModel):
+    action: Literal["confused", "slow", "example"]
+    title: str = ""
+    body: str = ""
+    steps: list[str] = Field(default_factory=list)
+    diagnosis: str = ""
+    example_type: str = ""
+    knowledge_point: str = ""
+    helps: str = ""
+    check_question: str = ""
 
 
 class ClassroomHandoutSection(BaseModel):
@@ -429,6 +470,7 @@ class ClassroomSessionResponse(BaseModel):
     handout: list[ClassroomHandoutSection] = Field(default_factory=list)
     teacher_scripts: ClassroomTeacherScripts = Field(default_factory=ClassroomTeacherScripts)
     check_question: ClassroomCheckQuestion
+    mini_quizzes: list[ClassroomQuizResponse] = Field(default_factory=list)
     homework: list[str] = Field(default_factory=list)
     source_resources: list[ClassroomResourceSummary] = Field(default_factory=list)
     prompt_summary: str = ""
@@ -446,9 +488,12 @@ class ClassroomGenerationJob(BaseModel):
     title: str = ""
     status: Literal["queued", "running", "done", "error"] = "queued"
     stage: str = ""
+    sub_stage: str = ""
     progress: int = 0
     result: ClassroomSessionResponse | None = None
     error: str = ""
+    elapsed_seconds: int = 0
+    heartbeat_at: datetime = Field(default_factory=datetime.utcnow)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 

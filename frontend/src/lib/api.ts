@@ -151,6 +151,7 @@ export type ClassroomSession = {
     expected_answer: string;
     hint: string;
   };
+  mini_quizzes?: ClassroomQuizResponse[];
   homework: string[];
   source_resources: { id: string; type: string; title: string; topic: string }[];
   prompt_summary: string;
@@ -168,17 +169,28 @@ export type ClassroomQuizInput = {
   depth_level?: string;
   previous_question?: string;
   variant?: number;
+  target_level?: "basic" | "application" | "trap" | "exam";
+  used_question_texts?: string[];
+  wrong_streak?: number;
+  correct_levels?: string[];
 };
 
 export type ClassroomQuizResponse = {
   id: string;
   question: string;
-  options: { id: string; text: string }[];
+  options: { id: string; key?: string; text: string; diagnosis?: string }[];
   answer_id: string;
   explanation: string;
   transfer: string;
   question_type: string;
   difficulty: string;
+  diagnosis?: Record<string, string>;
+  level?: "basic" | "application" | "trap" | "exam";
+  type?: "single_choice" | "true_false";
+  target_knowledge_point?: string;
+  ability?: string;
+  misconception?: string;
+  remedial_explanation?: string;
 };
 
 export type ClassroomGenerationJob = {
@@ -187,11 +199,43 @@ export type ClassroomGenerationJob = {
   title: string;
   status: "queued" | "running" | "done" | "error";
   stage: string;
+  sub_stage?: string;
   progress: number;
   result?: ClassroomSession | null;
   error?: string;
+  elapsed_seconds?: number;
+  heartbeat_at?: string;
   created_at?: string;
   updated_at?: string;
+};
+
+export type ClassroomInteractionInput = {
+  user_id: string;
+  session_id?: string;
+  action: "confused" | "slow" | "example";
+  diagnosis?: string;
+  example_type?: string;
+  click_count?: number;
+  slide_index?: number;
+  slide?: Partial<ClassroomSlide>;
+  knowledge_point?: string;
+  teacher_script?: string;
+  long_term_profile?: Record<string, unknown>;
+  realtime_state?: Record<string, unknown>;
+  lesson_events?: Record<string, unknown>[];
+  interaction_history?: Record<string, unknown>[];
+};
+
+export type ClassroomInteractionResponse = {
+  action: "confused" | "slow" | "example";
+  title: string;
+  body: string;
+  steps: string[];
+  diagnosis?: string;
+  example_type?: string;
+  knowledge_point?: string;
+  helps?: string;
+  check_question?: string;
 };
 
 export type StreamChatCallbacks = {
@@ -1425,6 +1469,18 @@ export async function generateClassroomQuiz(input: ClassroomQuizInput) {
   );
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<ClassroomQuizResponse>;
+}
+
+export async function generateClassroomInteraction(input: ClassroomInteractionInput) {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/classroom/interaction"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(input),
+    })
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ClassroomInteractionResponse>;
 }
 
 export async function startClassroomGenerationJob(input: ClassroomGenerateInput) {

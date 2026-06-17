@@ -3398,6 +3398,63 @@ html[data-theme="dark"] .lp-path-step-bridge span {
   margin: 0 auto;
 }
 
+.lp-classroom-phase-bar {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  max-width: 1440px;
+  margin: 0 auto 14px;
+}
+
+.lp-classroom-phase-item {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 9px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #64748b;
+}
+
+.lp-classroom-phase-item span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.lp-classroom-phase-item strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lp-classroom-phase-item.is-active {
+  border-color: rgba(16, 185, 129, 0.48);
+  background: rgba(236, 253, 245, 0.92);
+  color: #0f766e;
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.12);
+}
+
+.lp-classroom-phase-item.is-active span,
+.lp-classroom-phase-item.is-done span {
+  background: #10b981;
+  color: #fff;
+}
+
+.lp-classroom-phase-item.is-done {
+  color: #0f766e;
+}
+
 .lp-classroom-outline,
 .lp-classroom-stage,
 .lp-classroom-teacher,
@@ -3964,6 +4021,164 @@ html[data-theme="dark"] .lp-path-step-bridge span {
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
 }
 
+.lp-classroom-interaction-card,
+.lp-classroom-summary-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 18px 18px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+}
+
+.lp-classroom-interaction-card.is-confused {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(255, 251, 235, 0.94);
+}
+
+.lp-classroom-interaction-card.is-slow {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(239, 246, 255, 0.94);
+}
+
+.lp-classroom-interaction-card.is-example {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(236, 253, 245, 0.94);
+}
+
+.lp-classroom-interaction-card span,
+.lp-classroom-summary-panel span,
+.lp-classroom-summary-next strong {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.lp-classroom-interaction-card strong,
+.lp-classroom-summary-panel h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.32;
+}
+
+.lp-classroom-interaction-card p,
+.lp-classroom-summary-panel p {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.68;
+  white-space: pre-wrap;
+}
+
+.lp-classroom-interaction-card ol {
+  margin: 0;
+  padding-left: 18px;
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.lp-classroom-interaction-card small {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lp-classroom-interaction-card.is-loading {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.lp-classroom-diagnosis-options,
+.lp-classroom-slow-step > div,
+.lp-classroom-quiz-submit-row,
+.lp-classroom-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.lp-classroom-slow-step {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.lp-classroom-slow-step span,
+.lp-classroom-example-check,
+.lp-classroom-quiz-submit-row span,
+.lp-classroom-progress-meta em {
+  color: #64748b;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.lp-classroom-example-check {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.lp-classroom-quiz-submit-row {
+  justify-content: flex-start;
+}
+
+.lp-classroom-progress-meta {
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.lp-classroom-background-progress small,
+.lp-classroom-float-substage {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.lp-classroom-float-substage {
+  display: grid;
+  gap: 4px;
+  margin-top: -2px;
+}
+
+.lp-classroom-float-substage em {
+  color: #0f766e;
+  font-style: normal;
+}
+
+.lp-classroom-summary-panel {
+  min-height: 520px;
+  align-content: start;
+  margin-top: 18px;
+}
+
+.lp-classroom-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lp-classroom-summary-grid article,
+.lp-classroom-summary-next {
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.86);
+}
+
+.lp-classroom-summary-grid strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #0f172a;
+  font-size: 13px;
+}
+
 .lp-classroom-quiz-head {
   display: flex;
   align-items: flex-start;
@@ -4305,13 +4520,50 @@ html[data-theme="dark"] .lp-path-step-bridge span {
 }
 
 .lp-classroom-homework {
+  display: block;
+  max-width: 1440px;
+  margin: 16px auto 0;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.76);
+  overflow: hidden;
+}
+
+.lp-classroom-homework summary {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  padding: 0 16px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 760;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lp-classroom-homework summary::-webkit-details-marker {
+  display: none;
+}
+
+.lp-classroom-homework summary::before {
+  content: "▸";
+  margin-right: 8px;
+  color: #0f766e;
+  transition: transform 0.18s ease;
+}
+
+.lp-classroom-homework[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.lp-classroom-homework-body {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(0, 210px)) auto;
   gap: 10px;
   align-items: center;
-  max-width: 1440px;
-  margin: 16px auto 0;
   padding: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .lp-classroom-handout {
@@ -4687,11 +4939,15 @@ html[data-theme="dark"] .lp-classroom-page {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
+  .lp-classroom-phase-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .lp-classroom-teacher {
     grid-column: 1 / -1;
   }
 
-  .lp-classroom-homework {
+  .lp-classroom-homework-body {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -4716,7 +4972,9 @@ html[data-theme="dark"] .lp-classroom-page {
   .lp-classroom-topbar,
   .lp-classroom-wizard-steps,
   .lp-classroom-shell,
-  .lp-classroom-homework {
+  .lp-classroom-homework-body,
+  .lp-classroom-phase-bar,
+  .lp-classroom-summary-grid {
     grid-template-columns: 1fr;
   }
 

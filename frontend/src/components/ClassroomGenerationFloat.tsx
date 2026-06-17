@@ -26,6 +26,14 @@ import { useAppStore } from "@/store/appStore";
 
 const FLOAT_POSITION_KEY = "learnpath-classroom-float-pos";
 
+function formatElapsed(seconds?: number) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  if (minutes <= 0) return `${rest} 秒`;
+  return `${minutes} 分 ${String(rest).padStart(2, "0")} 秒`;
+}
+
 function stopShellDrag(event: SyntheticEvent) {
   event.stopPropagation();
 }
@@ -174,6 +182,8 @@ export default function ClassroomGenerationFloat() {
   const done = job.status === "done";
   const error = job.status === "error";
   const progress = Math.max(0, Math.min(100, job.progress || 0));
+  const subStage = job.sub_stage || "";
+  const elapsed = job.elapsed_seconds || 0;
 
   const hidePanel = () => {
     suppressedForClassroom.current = false;
@@ -296,6 +306,13 @@ export default function ClassroomGenerationFloat() {
           </Tag>
           <span>{error ? job.error || "生成失败" : job.stage || "准备生成"}</span>
         </div>
+
+        {!done && !error && (
+          <div className="lp-classroom-float-substage">
+            <span>{subStage || "仍在生成，请稍候"}</span>
+            <em>{progress}% · 已耗时 {formatElapsed(elapsed)}</em>
+          </div>
+        )}
 
         {done ? (
           <div className="lp-classroom-float-done-banner">
