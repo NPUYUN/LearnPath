@@ -392,21 +392,65 @@ async def _resolve_selected_resources(req: ClassroomGenerateRequest) -> list[dic
     rows: list[dict[str, Any]] = []
     for rid in ids[:8]:
         row = await get_resource(req.user_id, rid)
-        if row:
-            rows.append(row)
+        if row and row.get("status") != "draft":
+            quality_score = float((row.get("metadata") or {}).get("quality_score") or 0)
+            if not quality_score or quality_score >= 7:
+                rows.append(row)
     if rows:
         return rows
 
     all_resources = await list_resources(req.user_id)
+    path = await get_path(req.user_id)
+
+    def find_step(steps: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for step in steps:
+            if req.step_key and str(step.get("id") or step.get("order") or "") == req.step_key:
+                return step
+            found = find_step(list(step.get("substeps") or []))
+            if found:
+                return found
+        return None
+
+    current_step = find_step(list((path or {}).get("steps") or [])) if req.step_key else None
+    bound_ids = set(str(value) for value in (current_step or {}).get("resource_ids") or [])
+    bound_library_ids = {
+        str(row.get("library_id") or (row.get("metadata") or {}).get("source_library_id") or "")
+        for row in all_resources
+        if str(row.get("id") or "") in bound_ids
+    }
+    bound_library_ids.discard("")
     title_blob = f"{req.title} {req.objective}"
-    scored: list[tuple[int, dict[str, Any]]] = []
+    scored: list[tuple[float, dict[str, Any]]] = []
     for row in all_resources:
+        quality_score = float((row.get("metadata") or {}).get("quality_score") or 0)
+        if row.get("status") == "draft" or (quality_score and quality_score < 7):
+            continue
         blob = f"{row.get('title', '')} {row.get('topic', '')} {row.get('content', '')[:400]}"
-        score = sum(1 for token in re.findall(r"[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}", title_blob) if token in blob)
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        meta_blob = " ".join(
+            [
+                *[str(x) for x in metadata.get("knowledge_points") or []],
+                str(metadata.get("expected_outcome") or ""),
+            ]
+        )
+        score = float(sum(1 for token in re.findall(r"[\u4e00-\u9fff]{2,}|[a-zA-Z]{3,}", title_blob) if token in f"{blob} {meta_blob}"))
+        if str(row.get("id") or "") in bound_ids:
+            score += 12
+        if req.step_key and str(metadata.get("path_step_key") or "") == req.step_key:
+            score += 8
+        source_library_id = str(row.get("library_id") or metadata.get("source_library_id") or "")
+        if source_library_id and source_library_id in bound_library_ids:
+            score += 4
+        used_for = metadata.get("used_for") or []
+        if "classroom" in used_for:
+            score += 4
+        purpose = str(metadata.get("learning_purpose") or "")
+        score += {"classroom": 3, "explain": 2, "practice": 1.5}.get(purpose, 0)
+        score += min(1.5, float(metadata.get("quality_score") or 0) / 10)
         if score > 0:
             scored.append((score, row))
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [row for _, row in scored[:4]]
+    return [row for _, row in scored[:6]]
 
 
 def _resource_summaries(resources: list[dict[str, Any]]) -> list[ClassroomResourceSummary]:
@@ -422,13 +466,14 @@ def _resource_summaries(resources: list[dict[str, Any]]) -> list[ClassroomResour
     ]
 
 
-def _resources_context(resources: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _resources_context(resources: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {
             "id": str(r.get("id", "")),
             "type": str(r.get("type", "")),
             "title": str(r.get("title", "")),
             "topic": str(r.get("topic", "")),
+            "metadata": dict(r.get("metadata") or {}),
             "content_excerpt": _clip(str(r.get("content", "")), 1600),
         }
         for r in resources[:8]
@@ -968,6 +1013,31 @@ def _fallback_interaction(req: ClassroomInteractionRequest) -> ClassroomInteract
     kp = _clean_text(req.knowledge_point) or _clean_text(req.slide.get("title")) or "当前知识点"
     slide_title = _clean_text(req.slide.get("title")) or kp
     click = max(req.click_count, 1)
+    if req.action == "qa":
+        question = _clean_text(req.question)
+        body = _clean_text(req.slide.get("body"))
+        board = _split_text_items(req.slide.get("board"))[:3]
+        if question == "这页一句话总结":
+            answer = f"「{slide_title}」这一页的核心是：{body or '先明确要解决的问题，再把条件、方法和结论对应起来。'}"
+        elif question == "给我举个更简单的例子":
+            anchor = board[0] if board else kp
+            answer = (
+                f"可以把「{kp}」想成整理书桌：先确认要找的东西（输入），再按“{anchor}”这条规则整理，"
+                "最后检查结果是否更容易找到（输出）；对应回本页，就是先认清对象，再应用规则，最后验证结论。"
+            )
+        elif question == "这页容易错在哪里":
+            first = board[0] if board else "核心条件"
+            second = board[1] if len(board) > 1 else "方法与结论的对应关系"
+            answer = f"易错点一：只记“{first}”却不检查适用条件；易错点二：把“{second}”当成固定步骤机械套用。"
+        else:
+            anchor = "；".join(board) or body or kp
+            answer = f"围绕「{slide_title}」来看，你的问题可以先用本页这条线索回答：{anchor}。再检查它是否满足当前题目的条件和目标。"
+        return ClassroomInteractionResponse(
+            action="qa",
+            title=f"当前页问答：{slide_title}",
+            body=answer,
+            knowledge_point=kp,
+        )
     if req.action == "confused":
         diagnosis = req.diagnosis or "概念没懂"
         level = "更低门槛" if click >= 2 else "针对性"
@@ -1052,6 +1122,7 @@ async def generate_classroom_interaction(req: ClassroomInteractionRequest) -> Cl
         "如果 action=confused：先基于 diagnosis 做卡点诊断，再给针对性解释；连续点击时降低难度并建议讲慢点。"
         "如果 action=slow：把知识点拆成 2 到 4 个小步骤，每步很短，方便前端逐步展示。"
         "如果 action=example：根据 example_type 生成例子，包含例子描述、对应知识点、回到原概念的解释和一个检查问题。"
+        "如果 action=qa：只回答 question，并严格围绕当前 slide；一句话总结必须只有一句，简单例子要具体，易错点只给两个；不要输出 Markdown 标题、代码块或 Mermaid。"
         "只输出 JSON，字段：title, body, steps, diagnosis, example_type, knowledge_point, helps, check_question。"
     )
     try:

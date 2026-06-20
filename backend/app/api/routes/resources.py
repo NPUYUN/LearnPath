@@ -18,6 +18,7 @@ from app.models.schemas import (
     PathResourceRegenResponse,
     PathResourceRegenStageMeta,
     ResourceRegenerateRequest,
+    ResourceGenerationJob,
     ResourceRecommendation,
 )
 from app.services.path_resource_regen_service import regen_path_resources
@@ -26,8 +27,11 @@ from app.services.resource_service import (
     generate_resources,
     get_user_resources,
     regenerate_resource,
+    remove_resource_from_manifest,
     stream_generate_resources,
 )
+from app.services.resource_metadata_service import with_resource_metadata
+from app.services.resource_job_service import create_resource_generation_job, get_resource_generation_job
 
 router = APIRouter(prefix="/resources", tags=["resources"])
 
@@ -58,6 +62,27 @@ async def generate_stream(
     return EventSourceResponse(event_generator())
 
 
+@router.post("/generate/jobs", response_model=ResourceGenerationJob)
+async def create_generation_job(
+    req: GenerateResourcesRequest,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ensure_same_user(req.user_id, current_user_id)
+    return create_resource_generation_job(req)
+
+
+@router.get("/generate/jobs/{job_id}", response_model=ResourceGenerationJob)
+async def get_generation_job(
+    job_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    job = get_resource_generation_job(job_id)
+    if not job:
+        raise HTTPException(404, "资源生成任务不存在")
+    ensure_same_user(job.user_id, current_user_id)
+    return job
+
+
 @router.get("", response_model=list[LearningResource])
 async def list_all(
     user_id: str = "demo",
@@ -86,6 +111,7 @@ async def regen_resources_for_path(
     path = result["path"]
     meta = result.get("meta") or {}
     raw_resources = result.get("resources") or []
+    raw_resources = [with_resource_metadata(row) for row in raw_resources]
     resources = [
         LearningResource(
             id=r.get("id", ""),
@@ -97,6 +123,8 @@ async def regen_resources_for_path(
             generation_mode=r.get("generation_mode", ""),
             library_id=r.get("library_id", ""),
             library_name=r.get("library_name", ""),
+            metadata=r.get("metadata", {}),
+            status=r.get("status", "published"),
         )
         for r in raw_resources
         if r.get("id")
@@ -203,6 +231,7 @@ async def download_resource(
     row = await get_resource(user_id, resource_id)
     if not row:
         raise HTTPException(404, "资源不存在")
+    row = with_resource_metadata(row)
 
     title = str(row.get("title") or "学习资源")
     topic = str(row.get("topic") or "—")
@@ -237,6 +266,8 @@ async def get_one(
         generation_mode=row.get("generation_mode", ""),
         library_id=row.get("library_id", ""),
         library_name=row.get("library_name", ""),
+        metadata=row.get("metadata", {}),
+        status=row.get("status", "published"),
     )
 
 
@@ -260,7 +291,10 @@ async def remove_one(
     current_user_id: str = Depends(get_current_user_id),
 ):
     ensure_same_user(user_id, current_user_id)
+    row = await get_resource(user_id, resource_id)
     ok = await delete_resource(user_id, resource_id)
     if not ok:
         raise HTTPException(404, "资源不存在")
+    if row:
+        await remove_resource_from_manifest(user_id, str(row.get("library_id") or ""), resource_id)
     return {"ok": True}

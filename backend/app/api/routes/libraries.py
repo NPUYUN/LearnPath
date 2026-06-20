@@ -3,11 +3,12 @@ import json
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.api.deps import ensure_same_user, get_current_user_id
-from app.db.repository import delete_library, get_library
+from app.db.repository import delete_library, get_library, list_resources, save_library
 from app.models.schemas import (
     CreateLibraryRequest,
     LibraryDetail,
     LibraryFileInfo,
+    LibraryFilePreview,
     ResourceLibrarySummary,
     UploadLibraryResponse,
 )
@@ -15,8 +16,10 @@ from app.services.file_extract_service import supported_extensions
 from app.services.library_ingest_service import process_uploaded_files
 from app.services.library_service import (
     create_user_library,
+    ensure_library_assets,
     list_all_libraries,
     list_library_files_resolved,
+    get_library_file_preview,
 )
 
 router = APIRouter(prefix="/libraries", tags=["libraries"])
@@ -69,6 +72,31 @@ async def get_lib_detail(
     lib = await get_library(library_id, user_id)
     if not lib:
         raise HTTPException(404, "资料库不存在")
+    lib = ensure_library_assets(lib)
+    synthesis = dict(lib.get("synthesis") or {})
+    if not synthesis.get("resource_manifest"):
+        related = []
+        for resource in await list_resources(user_id):
+            metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
+            source_library_id = str(resource.get("library_id") or metadata.get("source_library_id") or "")
+            if source_library_id != library_id:
+                continue
+            related.append(
+                {
+                    "id": resource.get("id", ""),
+                    "title": resource.get("title", ""),
+                    "type": resource.get("type", "doc"),
+                    "knowledge_points": list(metadata.get("knowledge_points") or []),
+                    "learning_purpose": metadata.get("learning_purpose", "explain"),
+                    "difficulty": metadata.get("difficulty", "basic"),
+                    "quality_score": metadata.get("quality_score", 0),
+                    "status": resource.get("status", "published"),
+                }
+            )
+        if related:
+            synthesis["resource_manifest"] = related[-300:]
+            lib = {**lib, "synthesis": synthesis}
+    await save_library(lib)
     files = await list_library_files_resolved(lib)
     resolved_count = len(files)
     return LibraryDetail(
@@ -107,6 +135,26 @@ async def remove_lib(
     if not ok:
         raise HTTPException(404, "无法删除该资料库")
     return {"ok": True}
+
+
+@router.get("/{library_id}/file-preview", response_model=LibraryFilePreview)
+async def preview_library_file(
+    library_id: str,
+    file_id: str,
+    user_id: str = "demo",
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ensure_same_user(user_id, current_user_id)
+    lib = await get_library(library_id, user_id)
+    if not lib:
+        raise HTTPException(404, "资料库不存在")
+    try:
+        preview = await get_library_file_preview(lib, file_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not preview:
+        raise HTTPException(404, "文件不存在或不可预览")
+    return preview
 
 
 @router.post("/{library_id}/upload", response_model=UploadLibraryResponse)

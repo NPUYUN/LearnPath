@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -188,7 +188,49 @@ class LearningResource(BaseModel):
     generation_mode: str = ""
     library_id: str = ""
     library_name: str = ""
+    metadata: "ResourceMetadata" = Field(default_factory=lambda: ResourceMetadata())
+    status: Literal["draft", "published"] = "published"
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ResourceMetadata(BaseModel):
+    knowledge_points: list[str] = Field(default_factory=list)
+    difficulty: Literal["basic", "intermediate", "advanced", "exam"] = "basic"
+    learning_purpose: Literal[
+        "preview", "explain", "practice", "review", "exam", "classroom", "project"
+    ] = "explain"
+    used_for: list[Literal["path", "classroom", "quiz", "review"]] = Field(default_factory=list)
+    recommended_stage: str = "课堂讲解"
+    estimated_minutes: int = 8
+    prerequisites: list[str] = Field(default_factory=list)
+    summary: str = ""
+    learning_before_tip: str = ""
+    learning_after_check: str = ""
+    suitable_scenarios: list[str] = Field(default_factory=list)
+    next_step: str = ""
+    expected_outcome: str = ""
+    source_library_id: str = ""
+    source_files: list[str] = Field(default_factory=list)
+    path_step_key: str = ""
+    quality_score: float = 0
+    quality_reason: str = ""
+    quality_issues: list[str] = Field(default_factory=list)
+    quality_tags: list[str] = Field(default_factory=list)
+    quality_dimensions: dict[str, float] = Field(default_factory=dict)
+    review_attempts: int = 0
+    full_rewrite_attempted: bool = False
+    classroom_ready: bool = False
+    classroom_missing: list[str] = Field(default_factory=list)
+    duplicate_of: str = ""
+    formula_issues: list[str] = Field(default_factory=list)
+    quiz_invalid_questions: list[int] = Field(default_factory=list)
+    quiz_semantic_verified: bool = False
+    quiz_semantic_review: dict[str, Any] = Field(default_factory=dict)
+    generated_context: dict[str, Any] = Field(default_factory=dict)
+    path_attachment_warning: str = ""
+
+
+LearningResource.model_rebuild()
 
 
 class ResourceRegenerateRequest(BaseModel):
@@ -421,7 +463,8 @@ class ClassroomQuizResponse(BaseModel):
 class ClassroomInteractionRequest(BaseModel):
     user_id: str = "demo"
     session_id: str = ""
-    action: Literal["confused", "slow", "example"]
+    action: Literal["confused", "slow", "example", "qa"]
+    question: str = ""
     diagnosis: str = ""
     example_type: str = ""
     click_count: int = 1
@@ -436,7 +479,7 @@ class ClassroomInteractionRequest(BaseModel):
 
 
 class ClassroomInteractionResponse(BaseModel):
-    action: Literal["confused", "slow", "example"]
+    action: Literal["confused", "slow", "example", "qa"]
     title: str = ""
     body: str = ""
     steps: list[str] = Field(default_factory=list)
@@ -574,6 +617,42 @@ class GenerateResourcesRequest(BaseModel):
     generation_source: Literal["existing_library", "uploaded", "empty", "web"] = "web"
     requirements: str = ""
     deep_thinking: bool = False
+    learning_purpose: Literal[
+        "preview", "explain", "practice", "review", "exam", "classroom", "project"
+    ] | None = None
+    path_step_key: str | None = None
+    attach_to_path: bool = False
+    path_attach_mode: Literal["none", "auto", "manual"] = "none"
+
+
+class ResourceGenerationResultSummary(BaseModel):
+    generated_count: int = 0
+    published_count: int = 0
+    draft_count: int = 0
+    rewritten_count: int = 0
+    library_resource_count: int = 0
+    path_attached_count: int = 0
+    path_unmatched_count: int = 0
+    classroom_ready_count: int = 0
+    library_id: str = ""
+    library_name: str = ""
+    resource_ids: list[str] = Field(default_factory=list)
+
+
+class ResourceGenerationJob(BaseModel):
+    id: str
+    user_id: str
+    title: str = ""
+    status: Literal["queued", "running", "done", "error"] = "queued"
+    stage: str = ""
+    sub_stage: str = ""
+    current_resource_type: str = ""
+    progress: int = 0
+    elapsed_seconds: int = 0
+    error: str = ""
+    result: ResourceGenerationResultSummary | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ResourceLibrarySummary(BaseModel):
@@ -604,6 +683,15 @@ class LibraryFileInfo(BaseModel):
     mime_type: str = ""
     size: int = 0
     status: str = "pending"
+
+
+class LibraryFilePreview(BaseModel):
+    id: str
+    filename: str
+    mime_type: str = ""
+    content: str = ""
+    preview_kind: Literal["markdown", "code", "text"] = "text"
+    source: Literal["original", "extracted", "analysis"] = "analysis"
 
 
 class LibraryDetail(ResourceLibrarySummary):

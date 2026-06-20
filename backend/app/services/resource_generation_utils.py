@@ -129,5 +129,14 @@ def resource_generation_stage_plan(
     for rt, variant in jobs:
         total = sum(1 for t, _ in jobs if t == rt)
         stages.append(progress_stage_key(rt, variant, total))
-    stages.append("reviewer")
+    stages.extend(
+        [
+            "formula_normalize",
+            "quiz_consistency",
+            "reviewer",
+            "rewrite",
+            "saving",
+            "path_sync",
+        ]
+    )
     return stages

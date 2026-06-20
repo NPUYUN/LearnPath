@@ -6,6 +6,7 @@ import type {
   LearningPath,
   LearningResource,
   PathReplanJob,
+  ResourceGenerationJob,
   StudentProfile,
   UserAccount,
 } from "@/lib/api";
@@ -96,6 +97,8 @@ interface AppState {
   pathReplanFading: boolean;
   resourceRegenTask: ResourceRegenerationTask | null;
   resourceRegenPanelMode: ResourceRegenPanelMode;
+  activeResourceGenerationJob: ResourceGenerationJob | null;
+  resourceGenerationPanelMode: ResourceRegenPanelMode;
   pendingResourcePreviewId: string | null;
   setPendingClassroomSession: (session: ClassroomSessionSeed | null) => void;
   setActiveClassroomSeed: (session: ClassroomSessionSeed | null) => void;
@@ -111,6 +114,9 @@ interface AppState {
   patchResourceRegenTask: (patch: Partial<ResourceRegenerationTask>) => void;
   setResourceRegenPanelMode: (mode: ResourceRegenPanelMode) => void;
   clearResourceRegenTask: () => void;
+  setActiveResourceGenerationJob: (job: ResourceGenerationJob | null) => void;
+  setResourceGenerationPanelMode: (mode: ResourceRegenPanelMode) => void;
+  clearResourceGenerationJob: () => void;
   setPendingResourcePreviewId: (id: string | null) => void;
   setProfile: (p: StudentProfile | null) => void;
   setEvalStats: (s: EvalStats | null) => void;
@@ -178,6 +184,8 @@ export const useAppStore = create<AppState>((set) => ({
       pathReplanFading: false,
       resourceRegenTask: null,
       resourceRegenPanelMode: "hidden",
+      activeResourceGenerationJob: null,
+      resourceGenerationPanelMode: "hidden",
       pendingResourcePreviewId: null,
     });
   },
@@ -212,6 +220,8 @@ export const useAppStore = create<AppState>((set) => ({
       pathReplanFading: false,
       resourceRegenTask: null,
       resourceRegenPanelMode: "hidden",
+      activeResourceGenerationJob: null,
+      resourceGenerationPanelMode: "hidden",
       pendingResourcePreviewId: null,
     });
   },
@@ -234,6 +244,8 @@ export const useAppStore = create<AppState>((set) => ({
   pathReplanFading: false,
   resourceRegenTask: null,
   resourceRegenPanelMode: "hidden",
+  activeResourceGenerationJob: null,
+  resourceGenerationPanelMode: "hidden",
   pendingResourcePreviewId: null,
   setPendingClassroomSession: (pendingClassroomSession) => set({ pendingClassroomSession }),
   setActiveClassroomSeed: (activeClassroomSeed) => set({ activeClassroomSeed }),
@@ -277,6 +289,10 @@ export const useAppStore = create<AppState>((set) => ({
   setResourceRegenPanelMode: (resourceRegenPanelMode) => set({ resourceRegenPanelMode }),
   clearResourceRegenTask: () =>
     set({ resourceRegenTask: null, resourceRegenPanelMode: "hidden" }),
+  setActiveResourceGenerationJob: (activeResourceGenerationJob) => set({ activeResourceGenerationJob }),
+  setResourceGenerationPanelMode: (resourceGenerationPanelMode) => set({ resourceGenerationPanelMode }),
+  clearResourceGenerationJob: () =>
+    set({ activeResourceGenerationJob: null, resourceGenerationPanelMode: "hidden" }),
   setPendingResourcePreviewId: (pendingResourcePreviewId) => set({ pendingResourcePreviewId }),
   setProfile: (profile) => set({ profile }),
   setEvalStats: (evalStats) => set({ evalStats }),

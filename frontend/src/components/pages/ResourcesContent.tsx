@@ -9,11 +9,11 @@ import {
   Input,
   Spin,
   message,
-  Radio,
   Select,
   Upload,
   Progress,
   InputNumber,
+  Checkbox,
 } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import CloudUploadOutlined from "@ant-design/icons/CloudUploadOutlined";
@@ -26,13 +26,15 @@ import {
   listResources,
   patchPreferences,
   recordResourceComplete,
-  streamGenerateResources,
+  createResourceGenerationJob,
   listLibraries,
   createLibrary,
   uploadLibraryFiles,
   type LearningResource,
   type ResourceRecommendation,
   type ResourceLibrary,
+  type PathStep,
+  type GenerateResourceOptions,
 } from "@/lib/api";
 import {
   GENERATABLE_RESOURCE_TYPES,
@@ -41,10 +43,8 @@ import {
 } from "@/lib/resourceConfig";
 import {
   allGenTypeCounts,
-  buildGenProgressStages,
   clampGenTypeCount,
   emptyGenTypeCounts,
-  formatGenStageLabel,
   MAX_RESOURCE_GEN_PER_TYPE,
   normalizeGenTypeCounts,
   standardGenTypeCounts,
@@ -82,10 +82,66 @@ import ReloadOutlined from "@ant-design/icons/ReloadOutlined";
 import ArrowRightOutlined from "@ant-design/icons/ArrowRightOutlined";
 import SettingOutlined from "@ant-design/icons/SettingOutlined";
 import StarOutlined from "@ant-design/icons/StarOutlined";
+import DatabaseOutlined from "@ant-design/icons/DatabaseOutlined";
+import FolderAddOutlined from "@ant-design/icons/FolderAddOutlined";
+import ThunderboltOutlined from "@ant-design/icons/ThunderboltOutlined";
 
 const { Text } = Typography;
 
-type GenSource = "existing_library" | "uploaded" | "empty" | "";
+type GenSource = "existing_library" | "uploaded" | "empty" | "web" | "";
+
+const GEN_SOURCE_OPTIONS: Array<{
+  value: Exclude<GenSource, "">;
+  title: string;
+  description: string;
+  result: string;
+  icon: React.ReactNode;
+}> = [
+  {
+    value: "existing_library",
+    title: "用已有资料库生成资源",
+    description: "复用资料库说明、文件与知识索引生成配套内容。",
+    result: "写回当前资料库 + 学习资源列表",
+    icon: <DatabaseOutlined />,
+  },
+  {
+    value: "uploaded",
+    title: "上传资料并新建资料库",
+    description: "先解析上传文件并建立索引，再生成学习资源。",
+    result: "新资料库 + 学习资源列表",
+    icon: <CloudUploadOutlined />,
+  },
+  {
+    value: "empty",
+    title: "按主题建库并生成资源",
+    description: "不用上传文件，围绕主题创建资料库和完整资源。",
+    result: "新资料库 + 学习资源列表",
+    icon: <FolderAddOutlined />,
+  },
+  {
+    value: "web",
+    title: "直接生成资源",
+    description: "不创建资料库，按主题快速生成通用学习资源。",
+    result: "仅保存到学习资源列表",
+    icon: <ThunderboltOutlined />,
+  },
+];
+
+const RESOURCE_TYPE_DESCRIPTIONS: Record<string, string> = {
+  doc: "概念讲解、例题与自检",
+  mindmap: "梳理知识关系与易错点",
+  quiz: "分层练习、答案与详解",
+  reading: "拓展方向与阅读任务",
+  media: "教学图、流程与分镜",
+  code: "可运行代码与实践说明",
+  ppt: "可直接讲授的课件结构",
+  design: "完整教学流程与互动设计",
+  project: "可落地的实践任务",
+};
+
+function flattenPathSteps(steps: PathStep[]): PathStep[] {
+  return steps.flatMap((step) => [step, ...flattenPathSteps(step.substeps || [])]);
+}
 
 const CATEGORY_CHIPS = [
   { key: "all", label: "全部类型" },
@@ -99,23 +155,6 @@ const CATEGORY_CHIPS = [
   { key: "design", label: "设计方案" },
   { key: "project", label: "实践项目" },
 ];
-
-const GEN_STAGE_LABELS: Record<string, string> = {
-  context: "准备资料上下文",
-  web_research: "全网检索整理",
-  doc: "讲解文档",
-  mindmap: "思维导图",
-  quiz: "练习题库",
-  reading: "拓展阅读",
-  media: "多模态讲解",
-  code: "代码案例",
-  ppt: "课件提纲",
-  design: "资源设计方案",
-  project: "实践项目",
-  reviewer: "质量复审",
-  deep_thinking: "深度生成中",
-  fast_resource: "快速生成中",
-};
 
 export default function ResourcesContent() {
   const router = useRouter();
@@ -137,6 +176,7 @@ export default function ResourcesContent() {
   const [genStage, setGenStage] = useState("");
   const [genProgress, setGenProgress] = useState(0);
   const [genModalOpen, setGenModalOpen] = useState(false);
+  const [genWizardStep, setGenWizardStep] = useState<1 | 2>(1);
   const [pageTab, setPageTab] = useState("resources");
   const [manageMode, setManageMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -160,10 +200,16 @@ export default function ResourcesContent() {
   const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
   const uploadExtensions = useSupportedUploadFormats(genModalOpen);
   const [preparingLibrary, setPreparingLibrary] = useState(false);
+  const [attachToPath, setAttachToPath] = useState(false);
+  const [pathAttachMode, setPathAttachMode] = useState<"auto" | "manual">("auto");
+  const [selectedPathStepKey, setSelectedPathStepKey] = useState<string | undefined>();
   const [previewResource, setPreviewResource] = useState<LearningResource | null>(null);
   const [regenResource, setRegenResource] = useState<LearningResource | null>(null);
   const [regenTags, setRegenTags] = useState<string[]>([]);
   const [regenRequirement, setRegenRequirement] = useState("");
+  const resourceJob = useAppStore((s) => s.activeResourceGenerationJob);
+  const setResourceJob = useAppStore((s) => s.setActiveResourceGenerationJob);
+  const setResourceJobPanelMode = useAppStore((s) => s.setResourceGenerationPanelMode);
 
   const REGEN_TAGS = [
     "难度提高",
@@ -200,9 +246,19 @@ export default function ResourcesContent() {
     setCustomTypeCounts(false);
     setPendingFiles([]);
     setGenTypeCounts(standardGenTypeCounts());
+    setAttachToPath(Boolean(learningPath?.steps?.length));
+    setPathAttachMode("auto");
+    setSelectedPathStepKey(undefined);
+    setGenWizardStep(1);
   };
 
   const openGenModal = () => {
+    if (resourceJob?.status === "queued" || resourceJob?.status === "running") {
+      setGenWizardStep(2);
+      setGenModalOpen(true);
+      return;
+    }
+    setResourceJob(null);
     resetGenForm();
     setGenModalOpen(true);
   };
@@ -558,24 +614,19 @@ export default function ResourcesContent() {
     }));
   };
 
-  const buildGenerateOptions = async (): Promise<{
-    resourceTypes: string[];
-    resourceTypeCounts?: ResourceGenTypeCounts;
-    libraryId?: string;
-    newLibraryName?: string;
-    generationSource?: "existing_library" | "uploaded" | "empty" | "web";
-    requirements?: string;
-    deepThinking?: boolean;
-  }> => {
+  const buildGenerateOptions = async (): Promise<GenerateResourceOptions> => {
     const counts = normalizeGenTypeCounts(genTypeCounts);
     const selectedTypes = Object.entries(counts)
       .filter(([, count]) => count > 0)
       .map(([type]) => type);
-    const base = {
+    const base: GenerateResourceOptions = {
       deepThinking,
       resourceTypes: selectedTypes,
       resourceTypeCounts: customTypeCounts ? counts : {},
       requirements: genRequirements.trim(),
+      attachToPath: attachToPath && Boolean(learningPath?.steps?.length),
+      pathAttachMode: attachToPath ? pathAttachMode : "none",
+      pathStepKey: attachToPath && pathAttachMode === "manual" ? selectedPathStepKey : undefined,
     };
     if (genSource === "uploaded") {
       if (!newLibraryName.trim()) {
@@ -611,16 +662,21 @@ export default function ResourcesContent() {
       return { ...base, libraryId: selectedLibraryId, generationSource: "existing_library" };
     }
     if (genSource === "empty") {
+      if (!newLibraryName.trim()) throw new Error("请输入要新建的资料库名称");
       return {
         ...base,
         newLibraryName: newLibraryName.trim() || undefined,
         generationSource: "empty",
       };
     }
-    return { ...base, generationSource: "web" };
+    return { ...base, newLibraryName: undefined, libraryId: undefined, generationSource: "web" };
   };
 
   const runStreamGenerate = async () => {
+    if (resourceJob?.status === "queued" || resourceJob?.status === "running") {
+      message.warning("已有资源生成任务正在后台执行");
+      return;
+    }
     const effectiveTopic = topic.trim() || newLibraryName.trim();
     if (!effectiveTopic) {
       message.warning("请输入复习主题或资料库名称");
@@ -646,57 +702,15 @@ export default function ResourcesContent() {
     setGenerating(true);
     setGenStage("正在准备生成…");
     setGenProgress(2);
-    const effectiveSource = genSource || "empty";
-    const webMode = effectiveSource === "empty";
     const msgKey = "resource-gen";
     message.loading({ content: "正在准备并生成资源…", key: msgKey, duration: 0 });
     try {
       const options = await buildGenerateOptions();
-      const before = items.length;
-      await streamGenerateResources(
-        userId,
-        effectiveTopic,
-        {
-          onProgress: (stage, progress, meta) => {
-            const text =
-              stage === "done"
-                ? "生成完成"
-                : formatGenStageLabel(stage, GEN_STAGE_LABELS, meta);
-            const pct =
-              typeof progress === "number"
-                ? progress
-                : (() => {
-                    const stages = buildGenProgressStages(
-                      normalizeGenTypeCounts(options.resourceTypeCounts ?? genTypeCounts),
-                      webMode,
-                      options.deepThinking ?? deepThinking
-                    );
-                    const idx = stages.indexOf(stage);
-                    if (idx < 0) return 0;
-                    return Math.min(99, Math.round(((idx + 1) / stages.length) * 99));
-                  })();
-            setGenStage(text);
-            setGenProgress((prev) => Math.max(prev, pct));
-            message.loading({ content: `生成中：${text}（${pct}%）`, key: msgKey, duration: 0 });
-          },
-          onError: (err) => {
-            throw new Error(err);
-          },
-        },
-        options
-      );
-      const list = await listResources(userId);
-      setItems(list);
-      setResources(list);
-      void loadRecommendations(true);
-      const created = Math.max(0, list.length - before);
+      const job = await createResourceGenerationJob(userId, effectiveTopic, options);
+      setResourceJob(job);
+      setResourceJobPanelMode("open");
       message.destroy(msgKey);
-      if (created > 0) {
-        message.success(`已新增 ${created} 项，资源库共 ${list.length} 项`);
-      } else {
-        message.success(`资源库已更新，共 ${list.length} 项`);
-      }
-      setGenModalOpen(false);
+      message.success("资源已转入后台生成，可以关闭弹窗继续使用其他页面");
       setPendingFiles([]);
     } catch (e: unknown) {
       message.destroy(msgKey);
@@ -708,6 +722,55 @@ export default function ResourcesContent() {
       setPreparingLibrary(false);
     }
   };
+
+  const allPathSteps = flattenPathSteps(pathSteps);
+  const resourceJobRunning = resourceJob?.status === "queued" || resourceJob?.status === "running";
+  const normalizedGenCounts = normalizeGenTypeCounts(genTypeCounts);
+  const selectedTypeCount = Object.values(normalizedGenCounts).filter((count) => count > 0).length;
+  const selectedItemCount = totalGenCount(genTypeCounts);
+  const selectedLibrary = libraries.find((library) => library.id === selectedLibraryId);
+  const selectedSource = GEN_SOURCE_OPTIONS.find((option) => option.value === genSource);
+  const destinationLabel =
+    genSource === "existing_library"
+      ? selectedLibrary?.name || "所选资料库"
+      : genSource === "uploaded" || genSource === "empty"
+        ? newLibraryName.trim() || "待创建资料库"
+        : "学习资源列表";
+  const pathUsageSummary = !pathSteps.length || !attachToPath
+    ? "仅保存资源，不同步学习路径"
+    : pathAttachMode === "manual"
+      ? `加入路径步骤「${allPathSteps.find((step) => String(step.id || step.order) === selectedPathStepKey)?.title || "待选择"}」`
+      : "自动加入当前学习路径";
+  const saveSummary = genSource === "web"
+    ? "仅保存到学习资源列表"
+    : "保存到资料库和学习资源列表";
+  const generationSummaryLines = [
+    genSource === "existing_library"
+      ? `使用「${destinationLabel}」`
+      : genSource === "web"
+        ? "不创建资料库"
+        : `将创建「${destinationLabel}」`,
+    `生成 ${selectedTypeCount} 类资源${customTypeCounts ? `，共 ${selectedItemCount} 项` : ""}`,
+    pathUsageSummary,
+    saveSummary,
+  ];
+  const validationError = (() => {
+    if (!genSource) return "请选择生成方式";
+    if (genSource === "existing_library" && !selectedLibraryId) return "请选择资料库";
+    if ((genSource === "uploaded" || genSource === "empty") && !newLibraryName.trim()) {
+      return "请填写资料库名称";
+    }
+    if (genSource === "uploaded" && pendingFiles.length === 0) return "请上传至少一个文件";
+    if (!topic.trim()) return "请填写复习主题";
+    if (selectedTypeCount === 0) return "请至少选择一种资源类型";
+    if (attachToPath && pathAttachMode === "manual" && !selectedPathStepKey) {
+      return "请选择学习路径阶段";
+    }
+    return "";
+  })();
+  const footerSummary = `将基于「${topic.trim() || "待填写主题"}」生成 ${selectedTypeCount} 类资源，${
+    genSource === "web" ? "保存到学习资源列表" : `保存到「${destinationLabel}」及学习资源列表`
+  }，${pathUsageSummary}。`;
 
   return (
     <div>
@@ -751,236 +814,357 @@ export default function ResourcesContent() {
         }
       />
       <Modal
-        title="生成资料库与学习资源"
+        title={
+          <div className="lp-resource-gen-wizard-head">
+            <div>
+              <div className="lp-resource-gen-wizard-title">生成资料库与学习资源</div>
+              <div className="lp-resource-gen-wizard-subtitle">先确定资源归属，再集中配置生成内容</div>
+            </div>
+            <div className="lp-resource-gen-steps" aria-label="生成步骤">
+              <button
+                type="button"
+                className={`lp-resource-gen-step${genWizardStep === 1 ? " is-active" : " is-done"}`}
+                onClick={() => !resourceJobRunning && setGenWizardStep(1)}
+              >
+                <span>1</span>
+                <strong>选择生成方式</strong>
+              </button>
+              <i />
+              <button
+                type="button"
+                className={`lp-resource-gen-step${genWizardStep === 2 ? " is-active" : ""}`}
+                onClick={() => genSource && setGenWizardStep(2)}
+              >
+                <span>2</span>
+                <strong>配置并生成</strong>
+              </button>
+            </div>
+          </div>
+        }
         open={genModalOpen}
         onCancel={() => {
-          if (!generating && !preparingLibrary) {
+          if (!preparingLibrary) {
             setGenModalOpen(false);
-            resetGenForm();
+            if (!resourceJobRunning) resetGenForm();
           }
         }}
-        maskClosable={!generating && !preparingLibrary}
-        width={520}
-        destroyOnClose={false}
-        className="lp-resource-gen-modal"
+        maskClosable
+        width={1080}
+        destroyOnHidden={false}
+        className="lp-resource-gen-modal lp-resource-gen-wizard-modal"
         footer={
-          <div className="lp-resource-gen-footer">
-            <Button
-              onClick={() => {
-                setGenModalOpen(false);
-                setPendingFiles([]);
-              }}
-              disabled={generating || preparingLibrary}
-            >
-              取消
-            </Button>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              loading={generating || preparingLibrary}
-              onClick={() => void runStreamGenerate()}
-            >
-              开始生成
-            </Button>
+          <div className="lp-resource-gen-footer lp-resource-gen-wizard-footer">
+            <div className="lp-resource-gen-footer-copy">
+              <strong>{genWizardStep === 1 ? selectedSource?.title || "请选择生成方式" : footerSummary}</strong>
+              <span className={genWizardStep === 2 && validationError ? "is-error" : ""}>
+                {genWizardStep === 1
+                  ? selectedSource
+                    ? `结果：${selectedSource.result}`
+                    : "选择后即可继续配置资源类型与保存方式"
+                  : validationError || `已配置 ${selectedTypeCount} 类资源，可以开始生成`}
+              </span>
+            </div>
+            <div className="lp-resource-gen-footer-actions">
+              {genWizardStep === 2 && !resourceJobRunning && (
+                <Button type="text" onClick={() => setGenWizardStep(1)}>上一步</Button>
+              )}
+              <Button
+                onClick={() => {
+                  setGenModalOpen(false);
+                  setPendingFiles([]);
+                }}
+                disabled={preparingLibrary}
+              >
+                {resourceJobRunning ? "后台继续" : "取消"}
+              </Button>
+              {genWizardStep === 1 ? (
+                <Button type="primary" disabled={!genSource} onClick={() => setGenWizardStep(2)}>
+                  下一步：配置资源
+                </Button>
+              ) : (
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  loading={generating || preparingLibrary}
+                  disabled={resourceJobRunning || Boolean(validationError)}
+                  onClick={() => void runStreamGenerate()}
+                >
+                  开始生成（预计 {selectedTypeCount} 类）
+                </Button>
+              )}
+            </div>
           </div>
         }
       >
-        <div className="lp-resource-gen-form">
-          {(generating || preparingLibrary) && (
+        <div className="lp-resource-gen-wizard-body">
+          {(generating || preparingLibrary || resourceJob) && (
             <div className="lp-resource-gen-progress">
               <div className="lp-resource-gen-progress-head">
-                <Spin size="small" />
+                {resourceJob?.status === "done" ? (
+                  <CheckCircleOutlined style={{ color: "#16a34a" }} />
+                ) : resourceJob?.status === "error" ? (
+                  <CloseOutlined style={{ color: "#dc2626" }} />
+                ) : (
+                  <Spin size="small" />
+                )}
                 <Text type="secondary">
                   {preparingLibrary
                     ? genStage || "正在创建资料库并上传文件…"
-                    : genStage || "正在生成资源…"}
+                    : resourceJob
+                      ? `${resourceJob.stage}${resourceJob.sub_stage ? ` · ${resourceJob.sub_stage}` : ""}`
+                      : genStage || "正在生成资源…"}
                 </Text>
-                <span className="lp-resource-gen-progress-pct">{genProgress}%</span>
+                <span className="lp-resource-gen-progress-pct">{resourceJob?.progress ?? genProgress}%</span>
               </div>
               <Progress
-                percent={genProgress}
+                percent={resourceJob?.progress ?? genProgress}
                 showInfo={false}
-                status="active"
+                status={resourceJob?.status === "error" ? "exception" : resourceJob?.status === "done" ? "success" : "active"}
                 strokeColor={{ "0%": "#1677ff", "100%": "#36cfc9" }}
                 trailColor="rgba(22,119,255,0.12)"
                 size={6}
               />
-            </div>
-          )}
-          <div className="lp-resource-gen-field">
-            <Text className="lp-resource-gen-label">资料来源</Text>
-            <Radio.Group
-              value={genSource || undefined}
-              onChange={(e) => setGenSource(e.target.value as GenSource)}
-              className="lp-resource-gen-source"
-            >
-              <Radio value="existing_library">依据已有资料库</Radio>
-              <Radio value="uploaded">依据上传资料</Radio>
-              <Radio value="empty">无资料建立资料库</Radio>
-            </Radio.Group>
-          </div>
-          {genSource === "existing_library" && (
-            <div className="lp-resource-gen-field">
-              <Text className="lp-resource-gen-label">选择资料库</Text>
-              <Select
-                style={{ width: "100%" }}
-                placeholder="选择用于生成的资料库"
-                value={selectedLibraryId ?? undefined}
-                onChange={(v) => {
-                  setSelectedLibraryId(v);
-                  setReplanLibraryId(v ?? null);
-                }}
-                options={libraries.map((l) => ({
-                  value: l.id,
-                  label: `${l.name}${l.chunk_count ? ` (${l.chunk_count} 片段)` : " (空)"}`,
-                }))}
-                allowClear
-              />
-            </div>
-          )}
-          <div className="lp-resource-gen-field">
-            <Text className="lp-resource-gen-label">资料库名称</Text>
-            <Input
-              placeholder="例如：机器学习期末复习库"
-              value={newLibraryName}
-              onChange={(e) => setNewLibraryName(e.target.value)}
-            />
-          </div>
-          <div className="lp-resource-gen-field">
-            <Text className="lp-resource-gen-label">复习主题</Text>
-            <Input
-              placeholder="例如：线性回归、梯度下降；不填时使用资料库名称"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-            />
-          </div>
-          <div className="lp-resource-gen-field">
-            <Text className="lp-resource-gen-label">诉求</Text>
-            <Input.TextArea
-              rows={3}
-              placeholder="可为空。例如：按期末复习组织，重点补充公式推导和代码练习。"
-              value={genRequirements}
-              onChange={(e) => setGenRequirements(e.target.value)}
-            />
-          </div>
-          {genSource === "uploaded" && (
-            <>
-              <div className="lp-resource-gen-field">
-                <Text className="lp-resource-gen-label">上传文件（可多选）</Text>
-                <Upload
-                  multiple
-                  fileList={pendingFiles}
-                  beforeUpload={() => false}
-                  onChange={({ fileList }) => {
-                    const rejected = fileList.filter(
-                      (f) =>
-                        f.name &&
-                        uploadExtensions.length > 0 &&
-                        !isAllowedUploadFile(f.name, uploadExtensions)
-                    );
-                    if (rejected.length) {
-                      message.warning(
-                        `不支持 ${rejected.map((f) => f.name).join("、")}，请选择 PDF、PPT、Word 等格式`
-                      );
-                    }
-                    setPendingFiles(
-                      fileList.filter(
-                        (f) =>
-                          !f.name ||
-                          !uploadExtensions.length ||
-                          isAllowedUploadFile(f.name, uploadExtensions)
-                      )
-                    );
-                  }}
-                  accept={buildUploadAccept(uploadExtensions)}
-                  className="lp-resource-gen-upload"
-                >
-                  <Button icon={<CloudUploadOutlined />} disabled={generating || preparingLibrary}>
-                    选择文件
-                  </Button>
-                </Upload>
-                <Text type="secondary" className="lp-resource-gen-upload-hint">
-                  {pendingFiles.length > 0
-                    ? `已选择 ${pendingFiles.length} 个文件，将先生成说明与索引，再生成学习资源`
-                    : `支持 ${formatExtensionsHint(uploadExtensions)}，请至少选择 1 个文件`}
+              {resourceJob && (
+                <Text type="secondary" className="lp-resource-gen-hint">
+                  {resourceJob.status === "error"
+                    ? `失败原因：${resourceJob.error || resourceJob.sub_stage}`
+                    : `${resourceJob.current_resource_type ? `当前类型：${resourceJob.current_resource_type} · ` : ""}已耗时 ${Math.floor((resourceJob.elapsed_seconds || 0) / 60)} 分 ${String((resourceJob.elapsed_seconds || 0) % 60).padStart(2, "0")} 秒`}
                 </Text>
-              </div>
-            </>
-          )}
-          <div className="lp-resource-gen-field">
-            <div className="lp-resource-gen-type-head">
-              <Text className="lp-resource-gen-label">资源类型</Text>
-              <div className="lp-resource-gen-type-presets">
-                <button
-                  type="button"
-                  className="lp-resource-gen-preset"
-                  onClick={() => setGenTypeCounts(standardGenTypeCounts())}
-                >
-                  标准选择
-                </button>
-                <button
-                  type="button"
-                  className="lp-resource-gen-preset"
-                  onClick={() => setGenTypeCounts(allGenTypeCounts(1))}
-                >
-                  全选
-                </button>
-                <button
-                  type="button"
-                  className="lp-resource-gen-preset"
-                  onClick={() => setGenTypeCounts(emptyGenTypeCounts())}
-                >
-                  全不选
-                </button>
-                <button
-                  type="button"
-                  className={`lp-resource-gen-preset${customTypeCounts ? " lp-resource-gen-preset--active" : ""}`}
-                  onClick={() => setCustomTypeCounts((v) => !v)}
-                >
-                  自定义数量
-                </button>
-              </div>
+              )}
             </div>
-            <div className="lp-resource-gen-types">
-              {GENERATABLE_RESOURCE_TYPES.map(({ api, ui }) => {
-                const cfg = RESOURCE_CONFIG[ui];
-                const count = clampGenTypeCount(genTypeCounts[api]);
-                const active = count > 0;
-                return (
-                  <div
-                    key={api}
-                    className={`lp-resource-gen-type-row${active ? " lp-resource-gen-type-row--active" : ""}`}
-                    style={{ "--type-color": cfg.color } as React.CSSProperties}
-                  >
+          )}
+
+          {genWizardStep === 1 ? (
+            <section className="lp-resource-gen-source-step">
+              <div className="lp-resource-gen-section-intro">
+                <strong>资源从哪里来，最后保存到哪里？</strong>
+                <span>选择最符合当前任务的方式，下一步再配置主题与资源类型。</span>
+              </div>
+              <div className="lp-resource-gen-source-grid">
+                {GEN_SOURCE_OPTIONS.map((option) => {
+                  const active = genSource === option.value;
+                  return (
                     <button
                       type="button"
-                      className="lp-resource-gen-type"
-                      onClick={() => setGenTypeCount(api, active ? 0 : 1)}
+                      key={option.value}
+                      className={`lp-resource-gen-source-card${active ? " is-active" : ""}`}
+                      onClick={() => setGenSource(option.value)}
                     >
-                      <span className="lp-resource-gen-type-icon">{cfg.icon}</span>
-                      <span>{cfg.label}</span>
+                      <span className="lp-resource-gen-source-card-icon">{option.icon}</span>
+                      <span className="lp-resource-gen-source-card-copy">
+                        <strong>{option.title}</strong>
+                        <small>{option.description}</small>
+                        <em>结果：{option.result}</em>
+                      </span>
+                      <CheckCircleOutlined className="lp-resource-gen-source-check" />
                     </button>
-                    {customTypeCounts && (
-                      <InputNumber
-                        min={0}
-                        max={MAX_RESOURCE_GEN_PER_TYPE}
-                        value={count}
-                        size="small"
-                        controls
-                        className="lp-resource-gen-type-count"
-                        onChange={(value) => setGenTypeCount(api, value)}
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <div className="lp-resource-gen-config-layout">
+              <div className="lp-resource-gen-config-left">
+                <section className="lp-resource-gen-group-card">
+                  <div className="lp-resource-gen-group-title">
+                    <span>01</span><strong>基础信息</strong>
+                  </div>
+                  <div className="lp-resource-gen-group-fields">
+                    {genSource === "existing_library" && (
+                      <div className="lp-resource-gen-field">
+                        <Text className="lp-resource-gen-label">选择资料库</Text>
+                        <Select
+                          style={{ width: "100%" }}
+                          placeholder="选择用于生成的资料库"
+                          value={selectedLibraryId ?? undefined}
+                          onChange={(value) => {
+                            setSelectedLibraryId(value);
+                            setReplanLibraryId(value ?? null);
+                          }}
+                          options={libraries.map((library) => ({
+                            value: library.id,
+                            label: `${library.name}${library.chunk_count ? ` (${library.chunk_count} 片段)` : " (空)"}`,
+                          }))}
+                          allowClear
+                        />
+                      </div>
+                    )}
+                    {(genSource === "uploaded" || genSource === "empty") && (
+                      <div className="lp-resource-gen-field">
+                        <Text className="lp-resource-gen-label">资料库名称</Text>
+                        <Input
+                          placeholder="例如：机器学习期末复习库"
+                          value={newLibraryName}
+                          onChange={(event) => setNewLibraryName(event.target.value)}
+                        />
+                      </div>
+                    )}
+                    {genSource === "uploaded" && (
+                      <div className="lp-resource-gen-field">
+                        <Text className="lp-resource-gen-label">上传文件</Text>
+                        <Upload
+                          multiple
+                          fileList={pendingFiles}
+                          beforeUpload={() => false}
+                          onChange={({ fileList }) => {
+                            const rejected = fileList.filter(
+                              (file) => file.name && uploadExtensions.length > 0 && !isAllowedUploadFile(file.name, uploadExtensions)
+                            );
+                            if (rejected.length) message.warning(`不支持 ${rejected.map((file) => file.name).join("、")}`);
+                            setPendingFiles(fileList.filter(
+                              (file) => !file.name || !uploadExtensions.length || isAllowedUploadFile(file.name, uploadExtensions)
+                            ));
+                          }}
+                          accept={buildUploadAccept(uploadExtensions)}
+                          className="lp-resource-gen-upload"
+                        >
+                          <Button icon={<CloudUploadOutlined />} disabled={generating || preparingLibrary}>选择文件</Button>
+                        </Upload>
+                        <Text type="secondary" className="lp-resource-gen-upload-hint">
+                          {pendingFiles.length
+                            ? `已选择 ${pendingFiles.length} 个文件`
+                            : `支持 ${formatExtensionsHint(uploadExtensions)}，请至少选择 1 个文件`}
+                        </Text>
+                      </div>
+                    )}
+                    <div className="lp-resource-gen-field">
+                      <Text className="lp-resource-gen-label">复习主题</Text>
+                      <Input
+                        placeholder="例如：线性回归、梯度下降"
+                        value={topic}
+                        onChange={(event) => setTopic(event.target.value)}
                       />
+                    </div>
+                    <div className="lp-resource-gen-field">
+                      <Text className="lp-resource-gen-label">诉求（可选）</Text>
+                      <Input.TextArea
+                        rows={2}
+                        placeholder="例如：重点补充公式推导和代码练习"
+                        value={genRequirements}
+                        onChange={(event) => setGenRequirements(event.target.value)}
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="lp-resource-gen-group-card">
+                  <div className="lp-resource-gen-group-title">
+                    <span>02</span><strong>保存与使用</strong>
+                  </div>
+                  <div className="lp-resource-gen-path-option">
+                    <Checkbox
+                      checked={attachToPath}
+                      disabled={!pathSteps.length}
+                      onChange={(event) => {
+                        setAttachToPath(event.target.checked);
+                        if (event.target.checked) setPathAttachMode("auto");
+                      }}
+                    >
+                      生成后加入当前学习路径
+                    </Checkbox>
+                    {!pathSteps.length ? (
+                      <Text type="secondary">当前暂无学习路径，生成后仅保存资源</Text>
+                    ) : attachToPath ? (
+                      <>
+                        <div className="lp-resource-gen-path-modes">
+                          <button
+                            type="button"
+                            className={pathAttachMode === "auto" ? "is-active" : ""}
+                            onClick={() => { setPathAttachMode("auto"); setSelectedPathStepKey(undefined); }}
+                          >自动匹配路径步骤</button>
+                          <button
+                            type="button"
+                            className={pathAttachMode === "manual" ? "is-active" : ""}
+                            onClick={() => setPathAttachMode("manual")}
+                          >手动选择路径阶段</button>
+                          <button type="button" onClick={() => setAttachToPath(false)}>仅生成资源</button>
+                        </div>
+                        {pathAttachMode === "manual" && (
+                          <Select
+                            style={{ width: "100%" }}
+                            placeholder="选择要挂载的路径阶段"
+                            value={selectedPathStepKey}
+                            onChange={setSelectedPathStepKey}
+                            options={allPathSteps.map((step) => ({
+                              value: String(step.id || step.order),
+                              label: step.title,
+                            }))}
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <Text type="secondary">仅保存资源，不更新路径</Text>
                     )}
                   </div>
-                );
-              })}
+                </section>
+
+                <section className="lp-resource-gen-group-card lp-resource-gen-summary-card">
+                  <div className="lp-resource-gen-group-title">
+                    <span>03</span><strong>生成摘要</strong>
+                  </div>
+                  <ul>
+                    {generationSummaryLines.map((line) => <li key={line}>{line}</li>)}
+                  </ul>
+                </section>
+              </div>
+
+              <section className="lp-resource-gen-types-panel">
+                <div className="lp-resource-gen-type-head">
+                  <div>
+                    <strong>资源类型</strong>
+                    <span>选择要生成的学习资产，默认每类生成 1 份</span>
+                  </div>
+                  <div className="lp-resource-gen-type-presets">
+                    <button type="button" className="lp-resource-gen-preset" onClick={() => setGenTypeCounts(standardGenTypeCounts())}>标准套件</button>
+                    <button type="button" className="lp-resource-gen-preset" onClick={() => setGenTypeCounts(allGenTypeCounts(1))}>全选</button>
+                    <button type="button" className="lp-resource-gen-preset" onClick={() => setGenTypeCounts(emptyGenTypeCounts())}>清空</button>
+                    <button
+                      type="button"
+                      className={`lp-resource-gen-preset${customTypeCounts ? " lp-resource-gen-preset--active" : ""}`}
+                      onClick={() => setCustomTypeCounts((value) => !value)}
+                    >自定义数量</button>
+                  </div>
+                </div>
+                <div className="lp-resource-gen-types">
+                  {GENERATABLE_RESOURCE_TYPES.map(({ api, ui }) => {
+                    const config = RESOURCE_CONFIG[ui];
+                    const count = clampGenTypeCount(genTypeCounts[api]);
+                    const active = count > 0;
+                    return (
+                      <div
+                        key={api}
+                        className={`lp-resource-gen-type-card${active ? " is-active" : ""}`}
+                        style={{ "--type-color": config.color } as React.CSSProperties}
+                      >
+                        <button type="button" onClick={() => setGenTypeCount(api, active ? 0 : 1)}>
+                          <span className="lp-resource-gen-type-icon">{config.icon}</span>
+                          <strong>{config.label}</strong>
+                          <small>{RESOURCE_TYPE_DESCRIPTIONS[api]}</small>
+                          <CheckCircleOutlined className="lp-resource-gen-type-check" />
+                        </button>
+                        {customTypeCounts && (
+                          <InputNumber
+                            min={0}
+                            max={MAX_RESOURCE_GEN_PER_TYPE}
+                            value={count}
+                            size="small"
+                            controls
+                            className="lp-resource-gen-type-count"
+                            onChange={(value) => setGenTypeCount(api, value)}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <Text type="secondary" className="lp-resource-gen-hint">
+                  {customTypeCounts
+                    ? `共 ${selectedItemCount} 项，每种类型最多 ${MAX_RESOURCE_GEN_PER_TYPE} 个`
+                    : `已选择 ${selectedTypeCount} 类资源`}
+                </Text>
+              </section>
             </div>
-            <Text type="secondary" className="lp-resource-gen-hint">
-              {customTypeCounts
-                ? `已自定义 ${totalGenCount(genTypeCounts)} 项，每种类型最多 ${MAX_RESOURCE_GEN_PER_TYPE} 个。`
-                : `已选 ${Object.values(normalizeGenTypeCounts(genTypeCounts)).filter((n) => n > 0).length} 种类型，数量由后台动态生成。`}
-            </Text>
-          </div>
+          )}
         </div>
       </Modal>
       <Modal

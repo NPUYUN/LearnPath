@@ -23,6 +23,16 @@ import { STAGE_STATUS_META } from "@/lib/resourceGrouping";
 
 const { Text } = Typography;
 
+const PURPOSE_LABELS: Record<string, string> = {
+  preview: "课前预习",
+  explain: "讲解",
+  practice: "练习",
+  review: "复习",
+  exam: "应试训练",
+  classroom: "AI课堂",
+  project: "项目实践",
+};
+
 function defaultExpandedIds(stages: ResourceStageGroup[]): Set<string> {
   const inProgress = stages.filter((s) => s.status === "in_progress");
   if (inProgress.length) return new Set(inProgress.map((s) => s.id));
@@ -62,6 +72,14 @@ function ResourceCard({
   const uiType = mapApiType(resource.type) as UiResourceType;
   const cfg = RESOURCE_CONFIG[uiType];
   const sourceMeta = generationSourceMeta(resource);
+  const metadata = resource.metadata;
+  const qualityTags = (metadata?.quality_tags || []).slice(0, compact ? 0 : 2);
+  const compactMetaTags = [
+    metadata?.knowledge_points?.[0],
+    metadata?.learning_purpose ? PURPOSE_LABELS[metadata.learning_purpose] : "",
+    metadata?.source_library_id ? "资料库" : "",
+    ...qualityTags,
+  ].filter(Boolean).slice(0, compact ? 2 : 4);
 
   return (
     <article
@@ -103,9 +121,17 @@ function ResourceCard({
               {relationLabel}
             </Tag>
           )}
-          <Tag className="lp-resource-source-tag" color={sourceMeta.color}>
-            {sourceMeta.short}
-          </Tag>
+          {compactMetaTags.map((label) => (
+            <Tag key={label} className="lp-resource-asset-tag">
+              {label}
+            </Tag>
+          ))}
+          {!compact && (
+            <Tag className="lp-resource-source-tag" color={sourceMeta.color}>
+              {sourceMeta.short}
+            </Tag>
+          )}
+          {resource.status === "draft" && <Tag color="gold">待完善</Tag>}
         </div>
         {!compact && resource.topic && (
           <Text type="secondary" className="lp-resource-card-topic">

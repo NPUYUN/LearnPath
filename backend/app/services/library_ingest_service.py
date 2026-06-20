@@ -281,6 +281,38 @@ def _attach_library_docs(
                 *(obj_lines or ["- 理解资料覆盖的核心概念并完成配套练习。"]),
             ]
         ).strip()
+    knowledge_index: list[dict[str, Any]] = []
+    seen_points: set[str] = set()
+    for item in parsed:
+        analysis = item.get("analysis") or {}
+        chapter = str(analysis.get("chapter") or analysis.get("title") or item.get("filename") or "资料章节")
+        difficulty = str(analysis.get("difficulty") or "intermediate")
+        for point in _analysis_topics(analysis):
+            if point in seen_points:
+                continue
+            seen_points.add(point)
+            knowledge_index.append(
+                {
+                    "id": f"kp_{len(knowledge_index) + 1}",
+                    "name": point,
+                    "chapter": chapter[:120],
+                    "prerequisites": [],
+                    "next_points": [],
+                    "difficulty": difficulty,
+                    "importance": "core" if len(knowledge_index) < 8 else "supporting",
+                    "source_files": [str(item.get("filename") or "")],
+                }
+            )
+    knowledge_relations = [
+        {
+            "from": knowledge_index[index - 1]["name"],
+            "to": knowledge_index[index]["name"],
+            "relation": "prerequisite",
+        }
+        for index in range(1, len(knowledge_index))
+        if knowledge_index[index - 1]["name"] != knowledge_index[index]["name"]
+    ]
+    main_points = [row["name"] for row in knowledge_index[:12]]
     return {
         **synthesis,
         "requirements": requirements.strip(),
@@ -291,6 +323,18 @@ def _attach_library_docs(
         "relationship_doc": str(synthesis.get("relationship_doc") or "").strip()
         or _build_relationship_doc(library_name, parsed),
         "resource_index": synthesis.get("resource_index") or {},
+        "library_profile": synthesis.get("library_profile")
+        or {
+            "name": library_name,
+            "course": str(synthesis.get("course") or library_name),
+            "suitable_for": str(synthesis.get("suitable_for") or "依据学生画像动态匹配"),
+            "coverage": description,
+            "main_knowledge_points": main_points,
+            "recommended_usage": "按知识索引定位内容，用于路径规划、AI 课堂、练习和复习。",
+        },
+        "knowledge_index": synthesis.get("knowledge_index") or knowledge_index,
+        "knowledge_relations": synthesis.get("knowledge_relations") or knowledge_relations,
+        "resource_manifest": synthesis.get("resource_manifest") or [],
     }
 
 
@@ -400,6 +444,7 @@ async def process_uploaded_files(
                 "size": len(data),
                 "status": "ready",
                 "text_length": len(text),
+                "preview_text": text[:120000],
                 "analysis": analysis,
             }
             await save_library_file(record)

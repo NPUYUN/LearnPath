@@ -19,7 +19,6 @@ import SwapOutlined from "@ant-design/icons/SwapOutlined";
 import VideoCameraOutlined from "@ant-design/icons/VideoCameraOutlined";
 import {
   apiUrl,
-  chat,
   exportClassroomPptx,
   generateClassroomInteraction,
   generateClassroomQuiz,
@@ -66,6 +65,7 @@ type LessonEvent = {
 };
 type QuizHistoryItem = {
   id: string;
+  quizId?: string;
   question: string;
   selectedId: string;
   answerId: string;
@@ -76,6 +76,7 @@ type QuizHistoryItem = {
   type?: QuizType;
   diagnosis?: string;
   misconception?: string;
+  remedialExplanation?: string;
   at: string;
 };
 type InteractionCard =
@@ -802,6 +803,59 @@ function buildAdaptiveGuidance(signals: {
   return "当前节奏可以保持，先讲核心直觉，再用一个最小例题收口。";
 }
 
+function buildSlideOutcomes(slide: ClassroomSlide): string[] {
+  const learningGoals = Array.isArray(slide.learning_goal)
+    ? slide.learning_goal
+    : slide.learning_goal
+      ? [slide.learning_goal]
+      : [];
+  const candidates = unique([
+    ...learningGoals,
+    ...(slide.key_points || []),
+    ...(slide.bullets || []),
+    ...(slide.board || []),
+  ]).map((item) => item.trim()).filter((item) => item.length >= 4);
+  if (candidates.length >= 2) return candidates.slice(0, 3);
+  return unique([
+    ...candidates,
+    `用自己的话说明「${slide.title}」的核心含义`,
+    `判断「${slide.title}」在什么条件下适用`,
+    "知道下一步该用例题还是小测检查理解",
+  ]).slice(0, 3);
+}
+
+function buildTeacherRecommendation(args: {
+  phase: ClassroomPhase;
+  mode: ClassroomMode;
+  confusedCount: number;
+  wrongStreak: number;
+  hasPassedCurrentQuiz: boolean;
+}) {
+  if (args.phase === "summary") return "先看课后复习卡，再决定回看薄弱页还是进入评估。";
+  if (args.phase === "feedback" && args.wrongStreak > 0) return "先对照错因看解析，再用“讲慢点”或“换个例子”补上缺口。";
+  if (args.phase === "mini_quiz") return "先独立完成当前小题；答错时重点看错因，不要只记答案。";
+  if (args.hasPassedCurrentQuiz) return "本页确认题已通过，可以点击“已掌握”进入下一页。";
+  if (args.wrongStreak >= 2) return "连续答错，建议回到讲慢点模式，把条件和步骤逐项对齐。";
+  if (args.mode === "slow") return "一次只看一个步骤，能复述后再进入下一小步。";
+  if (args.mode === "example") return "把新例子和原概念逐项对应，再判断哪些条件没有变化。";
+  if (args.mode === "confused" || args.confusedCount >= 2) return "先说出具体卡点，再换一种讲法，不急着继续翻页。";
+  return "先理解本页核心直觉，再用一道最小确认题检查是否真的会了。";
+}
+
+function buildNaturalClassroomStatus(args: {
+  confusion: number;
+  load: number;
+  wrongStreak: number;
+  phase: ClassroomPhase;
+}) {
+  if (args.phase === "summary") return "当前状态：本节已完成，正在整理复习重点。";
+  if (args.wrongStreak >= 2) return "当前状态：连续答错，建议回到讲慢点模式。";
+  if (args.confusion >= 62 || args.load >= 70) return "当前状态：对本页仍有困惑，建议换个例子或分步讲解。";
+  if (args.phase === "feedback") return "当前状态：正在消化反馈，先弄清错因再继续。";
+  if (args.phase === "mini_quiz") return "当前状态：正在确认掌握，先独立作答。";
+  return "当前状态：节奏正常，可以继续推进。";
+}
+
 function buildDurationRecommendations(
   baseMinutes: number,
   profile: { knowledge_level?: string; pace_and_time?: string; cognitive_style?: string } | null,
@@ -868,6 +922,8 @@ export default function ClassroomContent() {
   const [wrongStreak, setWrongStreak] = useState(0);
   const [masteredKnowledgePoints, setMasteredKnowledgePoints] = useState<string[]>([]);
   const [stuckKnowledgePoints, setStuckKnowledgePoints] = useState<string[]>([]);
+  const [masteredSlideIndexes, setMasteredSlideIndexes] = useState<number[]>([]);
+  const [masteryCheckSlideIndex, setMasteryCheckSlideIndex] = useState<number | null>(null);
   const [quizHistory, setQuizHistory] = useState<QuizHistoryItem[]>([]);
   const [lessonEvents, setLessonEvents] = useState<LessonEvent[]>([]);
   const [interactionCard, setInteractionCard] = useState<InteractionCard | null>(null);
@@ -947,7 +1003,13 @@ export default function ClassroomContent() {
     setWrongStreak(0);
     setMasteredKnowledgePoints([]);
     setStuckKnowledgePoints([]);
+    setMasteredSlideIndexes([]);
+    setMasteryCheckSlideIndex(null);
     setQuizHistory([]);
+    setUsedQuestionIds([]);
+    setUsedQuestionTexts([]);
+    setPassedQuizLevels({});
+    setHighMasteryPoints([]);
     setLessonEvents([]);
     setInteractionCard(null);
     setInteractionLoading(null);
@@ -1007,7 +1069,13 @@ export default function ClassroomContent() {
     setWrongStreak(0);
     setMasteredKnowledgePoints([]);
     setStuckKnowledgePoints([]);
+    setMasteredSlideIndexes([]);
+    setMasteryCheckSlideIndex(null);
     setQuizHistory([]);
+    setUsedQuestionIds([]);
+    setUsedQuestionTexts([]);
+    setPassedQuizLevels({});
+    setHighMasteryPoints([]);
     setLessonEvents([]);
     setInteractionCard(null);
     setInteractionLoading(null);
@@ -1146,9 +1214,11 @@ export default function ClassroomContent() {
     return nextQuizLevel;
   };
   const hasPassedCurrentQuiz = quizHistory.some(
-    (item) => item.knowledgePoint === currentKnowledgePoint && item.correct
+    (item) => item.slideIndex === currentSlideIndex && item.correct
   );
-  const hasMasteredCurrentKnowledgePoint = masteredKnowledgePoints.includes(currentKnowledgePoint);
+  const hasMasteredCurrentSlide = masteredSlideIndexes.includes(currentSlideIndex);
+  const hasMasteredCurrentKnowledgePoint =
+    hasMasteredCurrentSlide || masteredKnowledgePoints.includes(currentKnowledgePoint);
   const lessonSummarySuggestion = buildSummarySuggestion({
     stuckKnowledgePoints,
     wrongStreak,
@@ -1172,9 +1242,39 @@ export default function ClassroomContent() {
     (mode !== "normal" ? generated?.slides?.[slideIndex]?.teacher_note : "") ||
     FALLBACK_SCRIPT[mode];
   const adaptiveGuidance = buildAdaptiveGuidance(classroomSignals);
+  const slideOutcomes = buildSlideOutcomes(slide);
+  const teacherRecommendation = buildTeacherRecommendation({
+    phase: currentPhase,
+    mode,
+    confusedCount,
+    wrongStreak,
+    hasPassedCurrentQuiz,
+  });
+  const naturalClassroomStatus = buildNaturalClassroomStatus({
+    confusion: classroomSignals.confusion,
+    load: classroomSignals.load,
+    wrongStreak,
+    phase: currentPhase,
+  });
   const adaptiveTeacherScript =
     mode === "normal" ? teacherScript : `${teacherScript}\n\n${adaptiveGuidance}`;
   const latestFeedback = feedbackEvents[0];
+  const weakSlideIndexes = Array.from(new Set([
+    ...wrongQuizItems.map((item) => item.slideIndex),
+    ...lessonEvents.filter((item) => item.type === "knowledge_point_stuck").map((item) => item.slideIndex),
+  ])).filter((index) => index >= 0 && index < slides.length);
+  const stuckSlideIndexes = weakSlideIndexes.filter((index) => !masteredSlideIndexes.includes(index));
+  const reviewCorePoints = unique([
+    ...masteredKnowledgePoints,
+    ...knowledgePoints,
+    ...slideOutcomes,
+  ]).slice(0, 3);
+  const reviewMistakes = unique([
+    ...wrongQuizItems.map((item) => item.diagnosis || item.misconception || "条件与结论没有对齐"),
+    "只记结论，没有同时检查适用条件",
+    "会跟着例题做，但换一个场景就机械套用",
+  ]).slice(0, 2);
+  const representativeQuestion = wrongQuizItems[0]?.question || generated?.check_question?.question || "请用自己的话说明本节课最核心的判断依据。";
   const homework = generated?.homework?.length
     ? generated.homework
     : ["用一句话复述本节核心直觉", "完成 1 道最小检查题", "标记仍然卡住的一个概念"];
@@ -1241,6 +1341,7 @@ export default function ClassroomContent() {
 
   useEffect(() => {
     setActiveQuiz(null);
+    setMasteryCheckSlideIndex(null);
     setQuizAnswer("");
     setQuizFeedback(null);
     setShowQuizAnalysis(false);
@@ -1356,6 +1457,7 @@ export default function ClassroomContent() {
 
   const startMiniQuiz = (source: "button" | "mastered" = "button") => {
     changePhase("mini_quiz", source === "mastered" ? "掌握前检查" : "进入课中小测");
+    setMasteryCheckSlideIndex(source === "mastered" ? currentSlideIndex : null);
     setMode("practice");
     setInteractionCard(null);
     setQuizAnswer("");
@@ -1382,6 +1484,7 @@ export default function ClassroomContent() {
     setQuizFeedback(isCorrect ? "correct" : "wrong");
     const record: QuizHistoryItem = {
       id: `${activeQuiz.id}-${Date.now()}`,
+      quizId: activeQuiz.id,
       question: activeQuiz.question,
       selectedId: quizAnswer,
       answerId: activeQuiz.answerId,
@@ -1392,6 +1495,7 @@ export default function ClassroomContent() {
       type: activeQuiz.type,
       diagnosis: activeQuiz.diagnosis?.[quizAnswer] || activeQuiz.options.find((item) => item.id === quizAnswer)?.diagnosis,
       misconception: activeQuiz.misconception,
+      remedialExplanation: activeQuiz.remedialExplanation || activeQuiz.transfer,
       at: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }),
     };
     setQuizHistory((prev) => [record, ...prev].slice(0, 30));
@@ -1412,6 +1516,12 @@ export default function ClassroomContent() {
       }));
       logLessonEvent("quiz_correct", activeQuiz.question);
       changePhase("feedback", "小测正确");
+      if (masteryCheckSlideIndex === currentSlideIndex) {
+        setMasteredSlideIndexes((prev) => Array.from(new Set([...prev, currentSlideIndex])));
+        setMasteredKnowledgePoints((prev) => unique([...prev, currentKnowledgePoint]));
+        setStuckKnowledgePoints((prev) => prev.filter((item) => item !== currentKnowledgePoint));
+        logLessonEvent("knowledge_point_mastered", `确认题通过:${activeQuiz.id}`);
+      }
       if (activeQuiz.level === "exam") {
         setHighMasteryPoints((prev) => unique([...prev, currentKnowledgePoint]));
         setMasteredKnowledgePoints((prev) => unique([...prev, currentKnowledgePoint]));
@@ -1419,41 +1529,55 @@ export default function ClassroomContent() {
       } else if (activeQuiz.level === "trap" || correctStreak + 1 >= 2) {
         setMasteredKnowledgePoints((prev) => unique([...prev, currentKnowledgePoint]));
       }
-      message.success("答对了，掌握度已上调");
+      message.success(
+        masteryCheckSlideIndex === currentSlideIndex
+          ? "确认通过，本页已标记掌握；再次点击“已掌握”继续"
+          : "答对了，这次结果可作为本页掌握确认"
+      );
     } else {
       setWrongStreak((prev) => prev + 1);
       setCorrectStreak(0);
       setStuckKnowledgePoints((prev) => unique([...prev, currentKnowledgePoint]));
-      logLessonEvent("quiz_wrong", activeQuiz.question);
+      logLessonEvent("quiz_wrong", JSON.stringify({
+        quiz_id: activeQuiz.id,
+        knowledge_point: currentKnowledgePoint,
+        selected: quizAnswer,
+        correct_answer: activeQuiz.answerId,
+        diagnosis: record.diagnosis || activeQuiz.misconception,
+        remedial_explanation: activeQuiz.remedialExplanation || activeQuiz.transfer,
+        slide_index: currentSlideIndex,
+      }));
       logLessonEvent("knowledge_point_stuck", currentKnowledgePoint);
       changePhase("feedback", "小测错误");
-      setMode(wrongStreak + 1 >= 2 ? "slow" : "confused");
+      setMode("practice");
       message.info("这题先看解析，再换一个同类题");
       setShowQuizAnalysis(true);
     }
   };
 
-  const askClassroomQuestion = async () => {
-    const question = classroomQuestion.trim();
+  const askClassroomQuestion = async (quickQuestion?: string) => {
+    const question = (quickQuestion || classroomQuestion).trim();
     if (!question || classroomAnswering) return;
+    setClassroomQuestion(question);
     setClassroomAnswering(true);
     setClassroomAnswer("");
     setMode("normal");
     try {
-      const context = [
-        "你现在是 AI 课堂里的随堂老师，请只围绕当前这节课回答学生问题。",
-        `课程：${generated?.title || session.title}`,
-        `学习目标：${generated?.objective || session.objective}`,
-        `当前页：${slide.title}`,
-        `当前页说明：${slide.body}`,
-        `当前页要点：${(slide.board || []).join("；") || "暂无"}`,
-        `教师讲稿：${slide.teacher_note || teacherScript || "暂无"}`,
-        `实时状态：困惑 ${classroomSignals.confusion}%，负荷 ${classroomSignals.load}%，好奇 ${classroomSignals.curiosity}%，掌握 ${classroomSignals.mastery}%`,
-        "回答要求：先直接回答问题，再给一个最小例子或判断方法；不要泛泛鼓励，不要跑到其他章节；如果学生问题不清楚，先按当前页最可能的卡点回答。",
-        `学生问题：${question}`,
-      ].join("\n");
-      const result = await chat(userId, context, false);
-      setClassroomAnswer(result.reply || "我先把这个问题压缩一下：它和当前页的核心要点有关，但还需要再补一个具体例子。");
+      const result = await generateClassroomInteraction({
+        user_id: userId,
+        session_id: generated?.id || session.stepKey,
+        action: "qa",
+        question,
+        slide_index: currentSlideIndex,
+        slide,
+        knowledge_point: currentKnowledgePoint,
+        teacher_script: slide.teacher_note || teacherScript,
+        long_term_profile: (profile || {}) as Record<string, unknown>,
+        realtime_state: classroomSignals,
+        lesson_events: lessonEvents.slice(0, 12) as unknown as Record<string, unknown>[],
+        interaction_history: feedbackEvents.slice(0, 8) as unknown as Record<string, unknown>[],
+      });
+      setClassroomAnswer(result.body || `围绕「${slide.title}」，先看本页的条件、方法和结论是否一一对应。`);
       setClassroomSignals((prev) => ({
         confusion: clampPercent(prev.confusion - 4),
         load: clampPercent(prev.load - 2),
@@ -1690,20 +1814,13 @@ export default function ClassroomContent() {
   };
 
   const nextSlide = () => {
-    logLessonEvent("knowledge_point_mastered", `clicked:${currentKnowledgePoint}`);
-    if (currentPhase === "intro") {
-      changePhase("explain", "目标导入完成");
-      message.success("已进入核心讲解");
-      return;
-    }
-    if (!hasPassedCurrentQuiz && !hasMasteredCurrentKnowledgePoint) {
+    if (currentPhase === "summary") return;
+    if (!hasPassedCurrentQuiz && !hasMasteredCurrentSlide) {
       const quiz =
         findSpecificMiniQuiz(generated, currentKnowledgePoint, currentSlideIndex, nextQuizLevel, usedQuestionIds, usedQuestionTexts) ||
         buildSpecificCheckQuestionQuiz(generated?.check_question, currentKnowledgePoint, currentSlideIndex, slide, nextQuizLevel);
       if (!quiz) {
-        setMasteredKnowledgePoints((prev) => unique([...prev, currentKnowledgePoint]));
-        adjustClassroomSignals({ confusion: -7, load: -5, mastery: 8, pace: 4 });
-        message.success("已根据你的反馈标记为掌握");
+        message.warning("当前页缺少可用确认题，暂不能标记掌握；请先换个例子或来道题。");
         return;
       }
       startMiniQuiz("mastered");
@@ -1711,7 +1828,9 @@ export default function ClassroomContent() {
       return;
     }
     setMode("normal");
+    setMasteryCheckSlideIndex(null);
     setInteractionCard(null);
+    setMasteredSlideIndexes((prev) => Array.from(new Set([...prev, currentSlideIndex])));
     setMasteredKnowledgePoints((prev) => unique([...prev, currentKnowledgePoint]));
     logLessonEvent("knowledge_point_mastered", currentKnowledgePoint);
     adjustClassroomSignals({ confusion: -10, load: -7, mastery: 12, pace: 5 });
@@ -1725,6 +1844,31 @@ export default function ClassroomContent() {
     setSlideIndex((prev) => Math.min(prev + 1, slides.length - 1));
     changePhase("explain", "进入下一知识点");
     message.success("已掌握，进入下一知识点");
+  };
+
+  const getOutlineStatus = (index: number) => {
+    if (index === currentSlideIndex && currentPhase !== "summary") return { key: "current", label: "当前" };
+    if (masteredSlideIndexes.includes(index)) return { key: "mastered", label: "已掌握" };
+    if (
+      wrongQuizItems.some((item) => item.slideIndex === index) ||
+      lessonEvents.some((item) => item.type === "knowledge_point_stuck" && item.slideIndex === index)
+    ) return { key: "stuck", label: "卡住" };
+    if (
+      index < currentSlideIndex ||
+      lessonEvents.some((item) => item.type === "slide_viewed" && item.slideIndex === index)
+    ) return { key: "learned", label: "已学" };
+    return { key: "pending", label: "待学" };
+  };
+
+  const restartWeakSlides = () => {
+    const targetIndex = weakSlideIndexes[0] ?? Math.max(0, currentSlideIndex - 1);
+    setSlideIndex(targetIndex);
+    setMode("slow");
+    setCurrentPhase("explain");
+    setMasteryCheckSlideIndex(null);
+    setQuizFeedback(null);
+    setQuizAnswer("");
+    message.info(`已回到第 ${targetIndex + 1} 页，建议先用“讲慢点”补齐卡点`);
   };
 
   const handleGenerate = async () => {
@@ -2170,17 +2314,21 @@ export default function ClassroomContent() {
                 <BookOutlined />
                 <span>本节目录</span>
               </div>
-              {slides.map((item, index) => (
-                <button
-                  key={`${item.kicker}-${item.title}`}
-                  type="button"
-                  className={`lp-classroom-outline-item${index === slideIndex ? " is-active" : ""}`}
-                  onClick={() => setSlideIndex(index)}
-                >
-                  <em>{item.kicker}</em>
-                  <strong>{item.title}</strong>
-                </button>
-              ))}
+              {slides.map((item, index) => {
+                const status = getOutlineStatus(index);
+                return (
+                  <button
+                    key={`${item.kicker}-${item.title}`}
+                    type="button"
+                    className={`lp-classroom-outline-item${index === slideIndex ? " is-active" : ""} is-${status.key}`}
+                    onClick={() => setSlideIndex(index)}
+                  >
+                    <em>{item.kicker}</em>
+                    <strong>{item.title}</strong>
+                    <small>{status.label}</small>
+                  </button>
+                );
+              })}
               <div className="lp-classroom-resource-box">
                 <span>参考资源</span>
                 <strong>{sourceResources.length || 0}</strong>
@@ -2211,12 +2359,24 @@ export default function ClassroomContent() {
                   <p>{generated.objective || session.objective}</p>
                   <div className="lp-classroom-summary-grid">
                     <article>
-                      <strong>已掌握知识点</strong>
-                      <p>{masteredKnowledgePoints.length ? masteredKnowledgePoints.join(" / ") : "暂无明确掌握点"}</p>
+                      <strong>已掌握页面 / 知识点</strong>
+                      <p>
+                        {masteredSlideIndexes.length
+                          ? masteredSlideIndexes.map((index) => `第 ${index + 1} 页 ${slides[index]?.title || ""}`).join(" / ")
+                          : masteredKnowledgePoints.length
+                            ? masteredKnowledgePoints.join(" / ")
+                            : "暂无明确掌握点"}
+                      </p>
                     </article>
                     <article>
-                      <strong>仍然卡住</strong>
-                      <p>{stuckKnowledgePoints.length ? stuckKnowledgePoints.join(" / ") : "暂无明显卡点"}</p>
+                      <strong>卡住页面 / 知识点</strong>
+                      <p>
+                        {stuckSlideIndexes.length
+                          ? stuckSlideIndexes.map((index) => `第 ${index + 1} 页 ${slides[index]?.title || ""}`).join(" / ")
+                          : stuckKnowledgePoints.length
+                            ? stuckKnowledgePoints.join(" / ")
+                            : "暂无明显卡点"}
+                      </p>
                     </article>
                     <article>
                       <strong>互动次数</strong>
@@ -2242,9 +2402,38 @@ export default function ClassroomContent() {
                     <strong>下一步建议</strong>
                     <p>{lessonSummarySuggestion}</p>
                   </div>
-                  <Button icon={<FileTextOutlined />} onClick={() => clientNavigate("/evaluation")}>
-                    去评估页
-                  </Button>
+                  <div className="lp-classroom-review-card">
+                    <div className="lp-classroom-review-head">
+                      <span>课后复习卡</span>
+                      <strong>3 个核心点 · 2 个易错点 · 1 道代表题</strong>
+                    </div>
+                    <div className="lp-classroom-review-columns">
+                      <article>
+                        <strong>核心点</strong>
+                        <ol>{reviewCorePoints.map((item) => <li key={item}>{item}</li>)}</ol>
+                      </article>
+                      <article>
+                        <strong>易错点</strong>
+                        <ol>{reviewMistakes.map((item) => <li key={item}>{item}</li>)}</ol>
+                      </article>
+                    </div>
+                    <div className="lp-classroom-review-question">
+                      <strong>代表题</strong>
+                      <p>{representativeQuestion}</p>
+                    </div>
+                  </div>
+                  <div className="lp-classroom-summary-actions">
+                    <Button onClick={() => clientNavigate("/path")}>返回学习路径</Button>
+                    <Button disabled={!weakSlideIndexes.length && !stuckKnowledgePoints.length} onClick={restartWeakSlides}>
+                      重新学习薄弱页
+                    </Button>
+                    <Button icon={<FileTextOutlined />} onClick={() => clientNavigate("/evaluation")}>
+                      去评估页
+                    </Button>
+                    <Button disabled={!generated} loading={exportingPptx} onClick={handleExportPptx}>
+                      导出 PPT
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div
@@ -2308,6 +2497,14 @@ export default function ClassroomContent() {
                   {hasMasteredCurrentKnowledgePoint ? "当前知识点已掌握" : `当前进度：第 ${slideIndex + 1} 页 / 共 ${slides.length} 页`}
                 </Tag>
               </div>
+              {currentPhase !== "summary" && (
+                <div className="lp-classroom-outcomes">
+                  <strong>学完本页你应该能：</strong>
+                  <div>
+                    {slideOutcomes.map((item) => <span key={item}>{item}</span>)}
+                  </div>
+                </div>
+              )}
               {diagnosisOpen && mode !== "practice" && (
                 <div className="lp-classroom-interaction-card is-confused">
                   <span>卡点诊断</span>
@@ -2511,9 +2708,11 @@ export default function ClassroomContent() {
                         <Button size="small" onClick={() => recordClassroomSignal("example")}>
                           换个例子
                         </Button>
-                        <Button size="small" type="primary" onClick={nextSlide}>
-                          进入下一知识点
-                        </Button>
+                        {quizFeedback === "correct" && (
+                          <Button size="small" type="primary" onClick={nextSlide}>
+                            已掌握，进入下一页
+                          </Button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2527,13 +2726,20 @@ export default function ClassroomContent() {
                   )}
                 </div>
               )}
-              {mode !== "practice" && (
+              {mode !== "practice" && currentPhase !== "summary" && (
                 <div className="lp-classroom-qa-card">
                   <div className="lp-classroom-qa-head">
                     <div>
                       <span>课堂问答</span>
                       <strong>围绕当前页提问，AI 会结合课堂内容回答</strong>
                     </div>
+                  </div>
+                  <div className="lp-classroom-qa-prompts" aria-label="快捷提问">
+                    {["这页一句话总结", "给我举个更简单的例子", "这页容易错在哪里"].map((prompt) => (
+                      <Button key={prompt} size="small" disabled={classroomAnswering} onClick={() => void askClassroomQuestion(prompt)}>
+                        {prompt}
+                      </Button>
+                    ))}
                   </div>
                   <div className="lp-classroom-qa-input">
                     <Input.TextArea
@@ -2575,15 +2781,21 @@ export default function ClassroomContent() {
                   <PlayCircleOutlined />
                 </div>
               </div>
+              <div className="lp-classroom-current-advice">
+                <span>当前建议</span>
+                <strong>{teacherRecommendation}</strong>
+              </div>
               <div className="lp-classroom-teacher-bubble">
+                <span>讲解 / 反馈</span>
                 <p>{adaptiveTeacherScript}</p>
               </div>
               <div className="lp-classroom-realtime-panel">
                 <div className="lp-classroom-realtime-head">
-                  <span>实时课堂状态</span>
-                  <strong>{adaptiveGuidance}</strong>
+                  <span>学习状态</span>
+                  <strong>{naturalClassroomStatus}</strong>
+                  <small>{adaptiveGuidance}</small>
                 </div>
-                <div className="lp-classroom-realtime-grid">
+                <div className="lp-classroom-realtime-grid is-secondary">
                   {[
                     ["困惑", classroomSignals.confusion],
                     ["负荷", classroomSignals.load],
@@ -2603,23 +2815,24 @@ export default function ClassroomContent() {
                   </div>
                 )}
               </div>
+              <div className="lp-classroom-next-label">下一步操作</div>
               <div className="lp-classroom-controls">
                 <Tooltip title="降低讲解密度，回到最小概念">
-                  <Button icon={<QuestionCircleOutlined />} loading={interactionLoading === "confused"} onClick={() => recordClassroomSignal("confused")}>
+                  <Button disabled={currentPhase === "summary"} icon={<QuestionCircleOutlined />} loading={interactionLoading === "confused"} onClick={() => recordClassroomSignal("confused")}>
                     听不懂
                   </Button>
                 </Tooltip>
-                <Button icon={<PauseCircleOutlined />} loading={interactionLoading === "slow"} onClick={() => recordClassroomSignal("slow")}>
+                <Button disabled={currentPhase === "summary"} icon={<PauseCircleOutlined />} loading={interactionLoading === "slow"} onClick={() => recordClassroomSignal("slow")}>
                   讲慢点
                 </Button>
-                <Button icon={<SwapOutlined />} loading={interactionLoading === "example"} onClick={() => recordClassroomSignal("example")}>
+                <Button disabled={currentPhase === "summary"} icon={<SwapOutlined />} loading={interactionLoading === "example"} onClick={() => recordClassroomSignal("example")}>
                   换个例子
                 </Button>
-                <Button icon={<ExperimentOutlined />} onClick={() => recordClassroomSignal("practice")}>
+                <Button disabled={currentPhase === "summary"} icon={<ExperimentOutlined />} onClick={() => recordClassroomSignal("practice")}>
                   来道题
                 </Button>
                 <Button type="primary" onClick={nextSlide} disabled={currentPhase === "summary"}>
-                  已掌握
+                  {hasPassedCurrentQuiz || hasMasteredCurrentSlide ? "已掌握，继续" : "已掌握"}
                 </Button>
               </div>
             </aside>

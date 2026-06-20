@@ -65,7 +65,7 @@ async def generate_router_node(state: AgentState) -> dict:
 
     all_resources = merged["resources"]
     new_resources = [r for r in all_resources if r.get("id") and r.get("id") not in prior_ids]
-    new_resources = await review_resources(new_resources)
+    new_resources = await review_resources(new_resources, existing_resources=prior)
     for i, r in enumerate(all_resources):
         if r.get("id") in {n.get("id") for n in new_resources}:
             for nr in new_resources:

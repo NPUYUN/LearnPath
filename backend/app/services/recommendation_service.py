@@ -57,11 +57,14 @@ def _num(value: object, default: float = 0.0) -> float:
 
 
 def _resource_text(resource: dict) -> str:
+    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
     return " ".join(
         [
             str(resource.get("title") or ""),
             str(resource.get("topic") or ""),
             str(resource.get("content") or "")[:600],
+            " ".join(str(x) for x in metadata.get("knowledge_points") or []),
+            str(metadata.get("expected_outcome") or ""),
         ]
     ).lower()
 
@@ -123,14 +126,20 @@ def _score_resource(
     resource_type = str(resource.get("type") or "")
     text = _resource_text(resource)
     state = realtime_state or {}
+    metadata = resource.get("metadata") if isinstance(resource.get("metadata"), dict) else {}
 
     active_ids, active_terms = _active_path_context(path)
     if resource_id in active_ids:
-        score += 2.0
-        _add_reason(reasons, "贴合当前路径")
+        score += 4.5
+        _add_reason(reasons, "支撑当前路径步骤")
     elif _first_match(active_terms, text):
         score += 0.9
         _add_reason(reasons, "靠近当前阶段")
+
+    path_step_key = str(metadata.get("path_step_key") or "")
+    if path_step_key and any(path_step_key == str(step.get("id") or step.get("order") or "") for step in (path or {}).get("steps") or []):
+        score += 1.5
+        _add_reason(reasons, "已挂载到学习路径")
 
     stuck_topics = _as_list(state.get("stuck_topics"))
     curiosity_topics = _as_list(state.get("curiosity_topics"))
@@ -150,6 +159,21 @@ def _score_resource(
     if curious and curious != stuck:
         score += 2.1
         _add_reason(reasons, f"回应好奇点：{curious[:12]}")
+
+    used_for = set(_as_list(metadata.get("used_for")))
+    purpose = str(metadata.get("learning_purpose") or "")
+    if "classroom" in used_for or purpose == "classroom":
+        score += 1.1
+        _add_reason(reasons, "适合进入 AI 课堂前使用")
+    if "quiz" in used_for and (stuck or _first_match(weak_topics, text)):
+        score += 1.0
+        _add_reason(reasons, "适合针对薄弱点练习")
+    quality_score = _num(metadata.get("quality_score"))
+    score += min(1.4, quality_score / 7)
+    if quality_score >= 8.5:
+        _add_reason(reasons, "内容质量较高")
+    if resource.get("status") == "draft":
+        score -= 4.0
 
     strategy = strategy or build_personalization_strategy(
         profile=profile,
@@ -427,7 +451,15 @@ async def get_recommendations(
 ) -> list[ResourceRecommendation]:
     limit = max(1, min(limit, 10))
     profile = await get_profile(user_id) or {}
-    resources = await list_resources(user_id)
+    resources = [
+        resource
+        for resource in await list_resources(user_id)
+        if resource.get("status") != "draft"
+        and (
+            not float((resource.get("metadata") or {}).get("quality_score") or 0)
+            or float((resource.get("metadata") or {}).get("quality_score") or 0) >= 7
+        )
+    ]
     if not resources:
         return []
 

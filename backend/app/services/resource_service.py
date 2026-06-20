@@ -6,11 +6,19 @@ from collections.abc import AsyncIterator
 from app.agents.graph import build_graph
 from app.agents.nodes.generate_router import RESOURCE_NODE_MAP
 from app.agents.state import AgentState
-from app.db.repository import get_path, get_resource, save_library, save_resources
+from app.db.repository import (
+    get_path,
+    get_profile,
+    get_realtime_state,
+    get_resource,
+    save_library,
+    save_path,
+    save_resources,
+)
 from app.models.schemas import GenerateResourcesRequest, LearningResource, ResourceRegenerateRequest
 from app.services.graph_state import build_graph_state
 from app.db.repository import get_library
-from app.services.library_service import get_or_create_library
+from app.services.library_service import ensure_library_assets, get_or_create_library
 from app.services.resource_context_service import build_generation_context
 from app.services.resource_generation_utils import (
     expand_resource_jobs,
@@ -19,6 +27,7 @@ from app.services.resource_generation_utils import (
     resource_generation_stage_plan,
     resource_jobs_to_types,
 )
+from app.services.resource_metadata_service import with_resource_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +51,7 @@ async def _update_library_resource_index(user_id: str, library_id: str, resource
         return
     synthesis = dict(lib.get("synthesis") or {})
     resource_index = dict(synthesis.get("resource_index") or {})
+    manifest = list(synthesis.get("resource_manifest") or [])
     for item in resources:
         rid = str(item.get("id") or "")
         if not rid:
@@ -53,16 +63,59 @@ async def _update_library_resource_index(user_id: str, library_id: str, resource
             "title": str(item.get("title") or ""),
             "topic": str(item.get("topic") or ""),
             "type": rtype,
+            "metadata": dict(item.get("metadata") or {}),
+            "status": str(item.get("status") or "published"),
         }
         bucket = [old for old in bucket if old.get("id") != rid]
         bucket.append(row)
         resource_index[rtype] = bucket[-50:]
+        metadata = dict(item.get("metadata") or {})
+        manifest_row = {
+            "id": rid,
+            "title": row["title"],
+            "type": rtype,
+            "knowledge_points": list(metadata.get("knowledge_points") or []),
+            "learning_purpose": metadata.get("learning_purpose", "explain"),
+            "difficulty": metadata.get("difficulty", "basic"),
+            "used_for": list(metadata.get("used_for") or []),
+            "path_step_key": metadata.get("path_step_key", ""),
+            "quality_score": metadata.get("quality_score", 0),
+            "expected_outcome": metadata.get("expected_outcome", ""),
+            "summary": metadata.get("summary", ""),
+            "suitable_scenarios": list(metadata.get("suitable_scenarios") or []),
+            "classroom_ready": bool(metadata.get("classroom_ready", False)),
+            "status": item.get("status", "published"),
+        }
+        manifest = [old for old in manifest if old.get("id") != rid]
+        manifest.append(manifest_row)
     synthesis["resource_index"] = resource_index
+    synthesis["resource_manifest"] = manifest[-300:]
     synthesis["index_doc"] = _render_resource_index_doc(
         str(lib.get("name") or "资料库"),
         str(synthesis.get("index_doc") or ""),
         resource_index,
     )
+    await save_library({**lib, "synthesis": synthesis})
+
+
+async def update_library_resource_manifest(user_id: str, library_id: str, resources: list[dict]) -> None:
+    await _update_library_resource_index(user_id, library_id, resources)
+
+
+async def remove_resource_from_manifest(user_id: str, library_id: str, resource_id: str) -> None:
+    if not library_id or not resource_id:
+        return
+    lib = await get_library(library_id, user_id)
+    if not lib:
+        return
+    synthesis = dict(lib.get("synthesis") or {})
+    resource_index = dict(synthesis.get("resource_index") or {})
+    for key, rows in list(resource_index.items()):
+        resource_index[key] = [row for row in list(rows or []) if row.get("id") != resource_id]
+    synthesis["resource_index"] = resource_index
+    synthesis["resource_manifest"] = [
+        row for row in list(synthesis.get("resource_manifest") or []) if row.get("id") != resource_id
+    ]
     await save_library({**lib, "synthesis": synthesis})
 
 
@@ -139,7 +192,7 @@ def _fallback_resource(req: GenerateResourcesRequest, resource_type: str, reason
     }
     label = title_map.get(resource_type, "学习资源")
     reason_line = f"\n\n> 降级原因：{reason}" if reason else ""
-    return {
+    return with_resource_metadata({
         "id": str(uuid.uuid4()),
         "type": resource_type,
         "title": f"{req.topic} · {label}",
@@ -161,7 +214,90 @@ def _fallback_resource(req: GenerateResourcesRequest, resource_type: str, reason
         ),
         "sources": ["本地降级生成"],
         "generation_mode": "fallback",
-    }
+    }, generation_context={
+        "requirements": req.requirements,
+        "learning_purpose": req.learning_purpose,
+        "path_step_key": req.path_step_key,
+    })
+
+
+def _walk_path_steps(steps: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for step in steps:
+        out.append(step)
+        out.extend(_walk_path_steps(list(step.get("substeps") or [])))
+    return out
+
+
+def _active_path_step(path: dict | None) -> dict:
+    steps = _walk_path_steps(list((path or {}).get("steps") or []))
+    return (
+        next((step for step in steps if step.get("status") == "in_progress"), None)
+        or next((step for step in steps if step.get("status") == "pending"), None)
+        or (steps[0] if steps else {})
+    )
+
+
+async def _attach_resources_to_path(user_id: str, resources: list[dict]) -> list[dict]:
+    path = await get_path(user_id)
+    if not path or not path.get("steps") or not resources:
+        return resources
+    steps = _walk_path_steps(list(path.get("steps") or []))
+    changed = False
+    for resource in resources:
+        if resource.get("status") == "draft":
+            resource_id = resource.get("id")
+            for step in steps:
+                ids = list(step.get("resource_ids") or [])
+                if resource_id in ids:
+                    step["resource_ids"] = [rid for rid in ids if rid != resource_id]
+                    changed = True
+            continue
+        metadata = dict(resource.get("metadata") or {})
+        step_key = str(metadata.get("path_step_key") or "")
+        target = next(
+            (step for step in steps if str(step.get("id") or step.get("order") or "") == step_key),
+            None,
+        )
+        if target is None:
+            needles = [
+                *[str(x) for x in metadata.get("knowledge_points") or []],
+                str(resource.get("topic") or ""),
+            ]
+            ranked = [
+                (
+                    sum(
+                        bool(
+                            needle
+                            and (
+                                needle in f"{step.get('title', '')} {step.get('objective', '')}"
+                                or str(step.get("title") or "") in needle
+                            )
+                        )
+                        for needle in needles
+                    ),
+                    step,
+                )
+                for step in steps
+            ]
+            best_score, best_step = max(ranked, key=lambda row: row[0], default=(0, None))
+            target = best_step if best_score > 0 else None
+        if not target:
+            metadata["path_attachment_warning"] = "未找到匹配的学习路径步骤"
+            resource["metadata"] = metadata
+            continue
+        ids = list(target.get("resource_ids") or [])
+        if resource.get("id") not in ids:
+            ids.append(resource.get("id"))
+            target["resource_ids"] = ids
+            changed = True
+        resolved_key = str(target.get("id") or target.get("order") or "")
+        if resolved_key and metadata.get("path_step_key") != resolved_key:
+            metadata["path_step_key"] = resolved_key
+            resource["metadata"] = metadata
+    if changed:
+        await save_path(path)
+    return resources
 
 
 def _find_resource_path_context(path: dict | None, resource_id: str) -> dict:
@@ -274,7 +410,12 @@ async def regenerate_resource(
     if note:
         merged["content"] = f"{merged.get('content', '')}\n\n> 本次重生成要求：{note}".strip()
 
+    from app.agents.nodes.reviewer_agent import review_resources
+
+    merged = (await review_resources([merged]))[0]
+    merged = (await _attach_resources_to_path(req.user_id, [merged]))[0]
     await save_resources(req.user_id, [merged])
+    await _update_library_resource_index(req.user_id, merged.get("library_id", ""), [merged])
     return LearningResource(
         id=merged.get("id", resource_id),
         type=merged.get("type", resource_type),
@@ -285,27 +426,56 @@ async def regenerate_resource(
         generation_mode=merged.get("generation_mode", ""),
         library_id=merged.get("library_id", ""),
         library_name=merged.get("library_name", ""),
+        metadata=merged.get("metadata", {}),
+        status=merged.get("status", "published"),
     )
 
 
 async def _resolve_generation_context(req: GenerateResourcesRequest) -> dict:
-    lib = await get_or_create_library(
-        req.user_id,
-        library_id=req.library_id,
-        new_library_name=req.new_library_name,
-        requirements=req.requirements,
-        source_mode="empty" if req.generation_source in {"empty", "web"} else "upload",
-        source_library_id=req.library_id,
-    )
+    lib = None
+    if req.generation_source != "web":
+        lib = await get_or_create_library(
+            req.user_id,
+            library_id=req.library_id,
+            new_library_name=req.new_library_name,
+            requirements=req.requirements,
+            source_mode="empty" if req.generation_source == "empty" else "upload",
+            source_library_id=req.library_id,
+        )
     if lib and req.requirements:
         synthesis = dict(lib.get("synthesis") or {})
         synthesis["requirements"] = req.requirements.strip()
         lib = {**lib, "synthesis": synthesis}
         await save_library(lib)
+    if lib:
+        lib = ensure_library_assets(lib)
+        synthesis = dict(lib.get("synthesis") or {})
+        knowledge_index = list(synthesis.get("knowledge_index") or [])
+        if not knowledge_index and req.topic.strip():
+            knowledge_index.append(
+                {
+                    "id": "kp_generated_1",
+                    "name": req.topic.strip()[:120],
+                    "chapter": "生成主题",
+                    "prerequisites": [],
+                    "next_points": [],
+                    "difficulty": "intermediate",
+                    "importance": "core",
+                    "source_files": [],
+                    "source": "generated_context",
+                }
+            )
+            synthesis["knowledge_index"] = knowledge_index
+            profile = dict(synthesis.get("library_profile") or {})
+            profile["main_knowledge_points"] = [req.topic.strip()[:120]]
+            profile["coverage"] = profile.get("coverage") or req.requirements.strip() or req.topic.strip()
+            synthesis["library_profile"] = profile
+            lib = {**lib, "synthesis": synthesis, "status": "ready"}
+            await save_library(lib)
     library_id_for_ctx: str | None = None
-    if req.generation_source in {"empty", "web"}:
+    if req.generation_source == "web":
         library_id_for_ctx = None
-    elif lib and lib.get("status") == "ready":
+    elif lib:
         library_id_for_ctx = lib["id"]
     elif req.library_id:
         check = await get_library(req.library_id, req.user_id)
@@ -317,6 +487,31 @@ async def _resolve_generation_context(req: GenerateResourcesRequest) -> dict:
         library_id=library_id_for_ctx,
         user_id=req.user_id,
         requirements=req.requirements,
+    )
+    path = await get_path(req.user_id)
+    active_step = _active_path_step(path)
+    profile = await get_profile(req.user_id) or {}
+    realtime = await get_realtime_state(req.user_id) or {}
+    gen_ctx.update(
+        {
+            "learning_purpose": req.learning_purpose or "",
+            "attach_to_path": bool(req.attach_to_path and path and path.get("steps")),
+            "path_attach_mode": req.path_attach_mode if req.attach_to_path else "none",
+            "path_step_key": (
+                str(req.path_step_key or "")
+                if req.attach_to_path and req.path_attach_mode == "manual"
+                else ""
+            ),
+            "stage_title": str(active_step.get("title") or ""),
+            "stage_objective": str(active_step.get("objective") or ""),
+            "target_knowledge_points": [
+                value
+                for value in [str(active_step.get("title") or ""), req.topic]
+                if value
+            ],
+            "student_profile": profile,
+            "realtime_state": realtime,
+        }
     )
     if lib:
         gen_ctx["library_id"] = lib["id"]
@@ -354,8 +549,16 @@ async def generate_resources(req: GenerateResourcesRequest) -> list[LearningReso
 
     new_items = _extract_new_resources(result, prior_ids)
     if new_items:
-        await save_resources(req.user_id, new_items)
-        await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), new_items)
+        from app.agents.nodes.reviewer_agent import review_resources
+
+        reviewed = await review_resources(
+            new_items,
+            existing_resources=list(base.get("resources") or []),
+        )
+        if req.attach_to_path:
+            reviewed = await _attach_resources_to_path(req.user_id, reviewed)
+        await save_resources(req.user_id, reviewed)
+        await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), reviewed)
 
     return await get_user_resources(req.user_id)
 
@@ -455,19 +658,50 @@ async def stream_generate_resources(
                     fallback,
                 ]
 
+    yield _resource_progress_event("formula_normalize", stage_index, stage_total)
+    stage_index += 1
+    yield _resource_progress_event("quiz_consistency", stage_index, stage_total)
+    stage_index += 1
     yield _resource_progress_event("reviewer", stage_index, stage_total)
+    stage_index += 1
     from app.agents.nodes.reviewer_agent import review_resources
 
     all_res = current.get("resources") or []
     new_items = [r for r in all_res if r.get("id") and r.get("id") not in prior_ids]
     try:
-        reviewed = await review_resources(new_items)
+        reviewed = await review_resources(
+            new_items,
+            existing_resources=[
+                row
+                for row in list(base.get("resources") or [])
+                if row.get("id") in prior_ids
+            ],
+        )
     except Exception as exc:
         logger.warning("resource review failed topic=%s: %s", req.topic, exc)
         reviewed = new_items
+    rewritten_count = sum(
+        bool((row.get("metadata") or {}).get("review_attempts"))
+        for row in reviewed
+    )
+    yield _resource_progress_event(
+        "rewrite",
+        stage_index,
+        stage_total,
+        {"rewritten_count": rewritten_count},
+    )
+    stage_index += 1
     if reviewed:
+        yield _resource_progress_event("saving", stage_index, stage_total)
+        stage_index += 1
         await save_resources(req.user_id, reviewed)
         await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), reviewed)
+        yield _resource_progress_event("path_sync", stage_index, stage_total)
+        stage_index += 1
+        if req.attach_to_path:
+            reviewed = await _attach_resources_to_path(req.user_id, reviewed)
+            await save_resources(req.user_id, reviewed)
+            await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), reviewed)
         summaries = [
             {"id": r.get("id", ""), "type": r.get("type", ""), "title": r.get("title", "")}
             for r in reviewed
@@ -483,6 +717,14 @@ async def stream_generate_resources(
                 "count": len(new_items),
                 "total": len(full),
                 "mode": gen_ctx.get("mode"),
+                "library_id": gen_ctx.get("library_id", ""),
+                "library_name": gen_ctx.get("library_name", ""),
+                "published_count": sum(row.get("status") != "draft" for row in reviewed),
+                "draft_count": sum(row.get("status") == "draft" for row in reviewed),
+                "rewritten_count": rewritten_count,
+                "path_attached_count": sum(bool((row.get("metadata") or {}).get("path_step_key")) for row in reviewed),
+                "path_unmatched_count": sum(bool((row.get("metadata") or {}).get("path_attachment_warning")) for row in reviewed),
+                "classroom_ready_count": sum(bool((row.get("metadata") or {}).get("classroom_ready")) for row in reviewed),
                 "progress": 100,
             },
             ensure_ascii=False,
@@ -496,6 +738,7 @@ async def get_user_resources(user_id: str) -> list[LearningResource]:
     raw = await list_resources(user_id)
     if not raw:
         return []
+    raw = [with_resource_metadata(row) for row in raw]
     return [
         LearningResource(
             id=r.get("id", ""),
@@ -507,6 +750,8 @@ async def get_user_resources(user_id: str) -> list[LearningResource]:
             generation_mode=r.get("generation_mode", ""),
             library_id=r.get("library_id", ""),
             library_name=r.get("library_name", ""),
+            metadata=r.get("metadata", {}),
+            status=r.get("status", "published"),
         )
         for r in raw
     ]

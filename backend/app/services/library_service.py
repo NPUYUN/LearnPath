@@ -17,6 +17,52 @@ def _manifest_path() -> Path:
     return ROOT_DIR / "data" / "knowledge_base" / "manifest.json"
 
 
+def ensure_library_assets(lib: dict) -> dict:
+    """Backfill structured library assets without breaking legacy synthesis fields."""
+    synthesis = dict(lib.get("synthesis") or {})
+    knowledge_index = synthesis.get("knowledge_index")
+    if not isinstance(knowledge_index, list):
+        knowledge_index = []
+    if not knowledge_index:
+        raw_map = synthesis.get("knowledge_map") or []
+        for index, item in enumerate(raw_map if isinstance(raw_map, list) else []):
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("title") or item.get("topic") or "").strip()
+                chapter = str(item.get("chapter") or item.get("group") or "资料库索引").strip()
+            else:
+                name = str(item or "").strip()
+                chapter = "资料库索引"
+            if name:
+                knowledge_index.append(
+                    {
+                        "id": f"kp_{index + 1}",
+                        "name": name,
+                        "chapter": chapter,
+                        "prerequisites": [],
+                        "next_points": [],
+                        "difficulty": "intermediate",
+                        "importance": "core",
+                        "source_files": [],
+                    }
+                )
+    synthesis.setdefault(
+        "library_profile",
+        {
+            "name": str(lib.get("name") or "资料库"),
+            "course": str(lib.get("course") or lib.get("name") or ""),
+            "suitable_for": "依据学生画像动态匹配",
+            "coverage": str(lib.get("description") or ""),
+            "main_knowledge_points": [str(row.get("name") or "") for row in knowledge_index[:12]],
+            "recommended_usage": "先查知识索引，再按当前目标读取相关资料和学习资源。",
+        },
+    )
+    synthesis["knowledge_index"] = knowledge_index
+    synthesis.setdefault("knowledge_relations", [])
+    synthesis.setdefault("resource_manifest", [])
+    synthesis.setdefault("resource_index", {})
+    return {**lib, "synthesis": synthesis}
+
+
 async def ensure_builtin_libraries() -> int:
     path = _manifest_path()
     if not path.exists():
@@ -84,6 +130,17 @@ async def create_user_library(
         "file_docs": [],
         "relationship_doc": "",
         "resource_index": {},
+        "library_profile": {
+            "name": clean_name,
+            "course": clean_name,
+            "suitable_for": "依据学生画像动态匹配",
+            "coverage": description.strip() or clean_requirements or clean_name,
+            "main_knowledge_points": [],
+            "recommended_usage": "先读索引定位知识点，再生成讲解、练习或课堂素材。",
+        },
+        "knowledge_index": [],
+        "knowledge_relations": [],
+        "resource_manifest": [],
     }
     payload = {
         "id": lib_id,
@@ -201,3 +258,55 @@ async def list_library_files_resolved(lib: dict) -> list[dict]:
             return disk
     files = await list_library_files(lib["id"])
     return [f for f in files if f.get("status") != "skipped"]
+
+
+async def get_library_file_preview(lib: dict, file_id: str) -> dict | None:
+    files = await list_library_files_resolved(lib)
+    item = next((row for row in files if str(row.get("id")) == file_id), None)
+    if not item:
+        return None
+    filename = str(item.get("filename") or "")
+    ext = Path(filename).suffix.lower()
+    code_exts = {".py", ".java", ".c", ".cpp", ".h", ".hpp", ".go", ".rs", ".js", ".ts", ".tsx", ".jsx", ".json", ".html", ".css"}
+    preview_kind = "markdown" if ext in {".md", ".markdown"} else "code" if ext in code_exts else "text"
+
+    if lib.get("source_type") == "builtin" and lib.get("kb_path"):
+        root = (builtin_kb_root() / str(lib["kb_path"])).resolve()
+        candidate = (root / filename).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+        if candidate.is_file():
+            data = candidate.read_bytes()
+            if len(data) > 12 * 1024 * 1024:
+                raise ValueError("文件过大，暂不支持在线预览")
+            from app.services.file_extract_service import extract_text_from_bytes
+
+            text = extract_text_from_bytes(filename, data)
+            return {
+                "id": file_id,
+                "filename": filename,
+                "mime_type": item.get("mime_type", ""),
+                "content": text[:120000],
+                "preview_kind": preview_kind,
+                "source": "original" if preview_kind in {"markdown", "code"} else "extracted",
+            }
+
+    preview_text = str(item.get("preview_text") or "").strip()
+    if preview_text:
+        content = preview_text
+        source = "extracted"
+    else:
+        analysis = item.get("analysis") if isinstance(item.get("analysis"), dict) else {}
+        content = str(analysis.get("description_doc") or analysis.get("summary") or "").strip()
+        source = "analysis"
+        preview_kind = "markdown"
+    return {
+        "id": file_id,
+        "filename": filename,
+        "mime_type": item.get("mime_type", ""),
+        "content": content[:120000] or "该文件已入库，但暂无可展示的文本预览。",
+        "preview_kind": preview_kind,
+        "source": source,
+    }

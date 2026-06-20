@@ -13,6 +13,7 @@ import {
   Upload,
   message,
   Progress,
+  Modal,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { UploadFile } from "antd/es/upload/interface";
@@ -27,12 +28,16 @@ import FilePptOutlined from "@ant-design/icons/FilePptOutlined";
 import FileMarkdownOutlined from "@ant-design/icons/FileMarkdownOutlined";
 import FileTextOutlined from "@ant-design/icons/FileTextOutlined";
 import FileImageOutlined from "@ant-design/icons/FileImageOutlined";
+import EyeOutlined from "@ant-design/icons/EyeOutlined";
 import {
   getLibraryDetail,
+  getLibraryFilePreview,
   uploadLibraryFiles,
   type LibraryDetail,
   type LibraryFileItem,
+  type LibraryFilePreview,
 } from "@/lib/api";
+import MarkdownPreview from "@/components/MarkdownPreview";
 import { useAppStore } from "@/store/appStore";
 import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
 import {
@@ -101,6 +106,16 @@ function categorizeFile(filename: string): FileCategoryKey {
   return "other";
 }
 
+function formatFilePreviewContent(preview: LibraryFilePreview): string {
+  if (preview.preview_kind === "code") {
+    return `\`\`\`${fileExtension(preview.filename) || "text"}\n${preview.content}\n\`\`\``;
+  }
+  if (preview.preview_kind === "markdown") {
+    return preview.content.replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "");
+  }
+  return preview.content;
+}
+
 function FileTypeIcon({ filename }: { filename: string }) {
   const ext = fileExtension(filename);
   const cls = "lp-library-file-icon";
@@ -129,6 +144,9 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
   const [uploadProgress, setUploadProgress] = useState(0);
   const uploadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [activeCategory, setActiveCategory] = useState<FileCategoryKey>("all");
+  const [previewFile, setPreviewFile] = useState<LibraryFileItem | null>(null);
+  const [filePreview, setFilePreview] = useState<LibraryFilePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const uploadExtensions = useSupportedUploadFormats(true);
 
   useEffect(() => {
@@ -200,6 +218,12 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
     if (activeCategory === "all") return detail.files;
     return detail.files.filter((f) => categorizeFile(f.filename) === activeCategory);
   }, [detail?.files, activeCategory]);
+  const generatedResources = useMemo(() => {
+    const manifest = detail?.synthesis?.resource_manifest;
+    return Array.isArray(manifest)
+      ? (manifest as Array<Record<string, unknown>>).filter((row) => row?.id)
+      : [];
+  }, [detail?.synthesis]);
 
   const handleBack = () => {
     if (typeof sessionStorage !== "undefined") {
@@ -244,16 +268,48 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
     }
   };
 
+  const openFilePreview = async (file: LibraryFileItem) => {
+    setPreviewFile(file);
+    setFilePreview(null);
+    setPreviewLoading(true);
+    try {
+      const preview = await getLibraryFilePreview(userId, libraryId, file.id);
+      setFilePreview(preview);
+    } catch (error: unknown) {
+      message.error(error instanceof Error ? error.message : "文件预览失败");
+      setPreviewFile(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const closeFilePreview = () => {
+    setPreviewFile(null);
+    setFilePreview(null);
+    setPreviewLoading(false);
+  };
+
   const fileColumns: ColumnsType<LibraryFileItem> = [
     {
       title: "文件名",
       dataIndex: "filename",
       key: "filename",
-      render: (name: string) => (
-        <Space size={8}>
-          <FileTypeIcon filename={name} />
-          <Text className="lp-library-file-name">{name}</Text>
-        </Space>
+      render: (name: string, row: LibraryFileItem) => (
+        <button
+          type="button"
+          className="lp-library-file-open"
+          aria-label={`打开 ${name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            void openFilePreview(row);
+          }}
+        >
+          <Space size={8}>
+            <FileTypeIcon filename={name} />
+            <Text className="lp-library-file-name">{name}</Text>
+          </Space>
+          <EyeOutlined />
+        </button>
       ),
     },
     {
@@ -310,6 +366,40 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
 
   return (
     <div className="lp-library-detail-page">
+      <Modal
+        title={
+          <Space size={8}>
+            {previewFile && <FileTypeIcon filename={previewFile.filename} />}
+            <span>{previewFile?.filename || "文件预览"}</span>
+          </Space>
+        }
+        open={Boolean(previewFile)}
+        onCancel={closeFilePreview}
+        footer={<Button onClick={closeFilePreview}>关闭</Button>}
+        width={880}
+        destroyOnHidden
+        className="lp-library-file-preview-modal"
+      >
+        {previewLoading ? (
+          <div className="lp-library-file-preview-loading"><Spin tip="正在读取文件…" /></div>
+        ) : filePreview ? (
+          <div className="lp-library-file-preview-content">
+            <div className="lp-library-file-preview-meta">
+              <Tag>{fileExtension(filePreview.filename).toUpperCase() || "文件"}</Tag>
+              <Text type="secondary">
+                {filePreview.source === "original"
+                  ? "原文件内容"
+                  : filePreview.source === "extracted"
+                    ? "已提取文本"
+                    : "入库分析预览"}
+              </Text>
+            </div>
+            <MarkdownPreview
+              content={formatFilePreviewContent(filePreview)}
+            />
+          </div>
+        ) : null}
+      </Modal>
       <div className="lp-library-detail-page-head">
         <Button
           type="text"
@@ -367,6 +457,34 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
         </div>
       </div>
 
+      {generatedResources.length > 0 && (
+        <section className="lp-library-generated-resources">
+          <div className="lp-library-detail-page-section-title">
+            <Text strong>由本资料库生成的学习资源</Text>
+            <Text type="secondary">（{generatedResources.length} 项）</Text>
+          </div>
+          <div className="lp-library-generated-resource-list">
+            {generatedResources.slice(-12).reverse().map((row) => (
+              <button
+                key={String(row.id)}
+                type="button"
+                className="lp-library-generated-resource"
+                onClick={() => router.push(`/resources/view/${encodeURIComponent(String(row.id))}`)}
+              >
+                <FileTextOutlined />
+                <span>{String(row.title || row.id)}</span>
+                <Tag>{String(row.type || "doc")}</Tag>
+                {Number(row.quality_score || 0) > 0 && (
+                  <Tag color={Number(row.quality_score) >= 7 ? "green" : "gold"}>
+                    {Number(row.quality_score).toFixed(1)} 分
+                  </Tag>
+                )}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
       <div className="lp-library-type-bar">
         <Text className="lp-library-type-bar-label">按类型浏览</Text>
         <div className="lp-library-type-chips">
@@ -419,6 +537,19 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
             }
             columns={fileColumns}
             dataSource={filteredFiles}
+            onRow={(row) => ({
+              className: "lp-library-file-row",
+              tabIndex: 0,
+              role: "button",
+              "aria-label": `打开 ${row.filename}`,
+              onClick: () => void openFilePreview(row),
+              onKeyDown: (event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  void openFilePreview(row);
+                }
+              },
+            })}
           />
         )}
       </div>

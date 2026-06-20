@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from typing import Any
 
 from app.db.repository import get_library
 from app.rag.library_retriever import builtin_kb_root, retrieve_from_library
 from app.services.web_research_service import full_web_research, supplement_library_context
+from app.services.library_service import ensure_library_assets
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,7 @@ def _profile_summary(profile: dict | None) -> str:
 def _library_docs_context(lib: dict | None, *, query: str = "", max_chars: int = 4200) -> str:
     if not lib:
         return ""
+    lib = ensure_library_assets(lib)
     synthesis = lib.get("synthesis") or {}
     if not isinstance(synthesis, dict):
         return ""
@@ -68,6 +72,39 @@ def _library_docs_context(lib: dict | None, *, query: str = "", max_chars: int =
     requirements = str(synthesis.get("requirements") or "").strip()
     if requirements:
         parts.append(f"【建库诉求】\n{requirements}")
+    query_tokens = [t for t in re.split(r"[\s、，,：:]+", query) if len(t) >= 2]
+    profile = synthesis.get("library_profile") if isinstance(synthesis.get("library_profile"), dict) else {}
+    if profile:
+        parts.insert(0, "【资料库画像】\n" + json.dumps(profile, ensure_ascii=False))
+    knowledge_rows = synthesis.get("knowledge_index") if isinstance(synthesis.get("knowledge_index"), list) else []
+    if knowledge_rows:
+        ranked = sorted(
+            [row for row in knowledge_rows if isinstance(row, dict)],
+            key=lambda row: sum(token in json.dumps(row, ensure_ascii=False) for token in query_tokens),
+            reverse=True,
+        )[:12]
+        parts.insert(1, "【相关知识索引】\n" + json.dumps(ranked, ensure_ascii=False))
+    relations = synthesis.get("knowledge_relations") if isinstance(synthesis.get("knowledge_relations"), list) else []
+    if relations:
+        relevant = [
+            row for row in relations
+            if isinstance(row, dict)
+            and (not query_tokens or any(token in json.dumps(row, ensure_ascii=False) for token in query_tokens))
+        ][:12]
+        if relevant:
+            parts.append("【相关知识关系】\n" + json.dumps(relevant, ensure_ascii=False))
+    manifest = synthesis.get("resource_manifest") if isinstance(synthesis.get("resource_manifest"), list) else []
+    if manifest:
+        ranked_manifest = sorted(
+            [row for row in manifest if isinstance(row, dict) and row.get("status") != "draft"],
+            key=lambda row: (
+                sum(token in json.dumps(row, ensure_ascii=False) for token in query_tokens),
+                float(row.get("quality_score") or 0),
+            ),
+            reverse=True,
+        )[:10]
+        if ranked_manifest:
+            parts.append("【相关学习资源清单】\n" + json.dumps(ranked_manifest, ensure_ascii=False))
     text = "\n\n---\n\n".join(parts)
     return text[:max_chars]
 
@@ -100,6 +137,8 @@ async def build_generation_context(
     lib = None
     if library_id:
         lib = await get_library(library_id, user_id)
+        if lib:
+            lib = ensure_library_assets(lib)
 
     library_docs = _library_docs_context(lib, query=topic)
 
@@ -172,6 +211,10 @@ async def build_generation_context(
         "library_name": library_name,
         "library_id": library_id or "",
         "requirements": requirements,
+        "library_profile": (lib.get("synthesis") or {}).get("library_profile", {}) if lib else {},
+        "knowledge_index": (lib.get("synthesis") or {}).get("knowledge_index", []) if lib else [],
+        "knowledge_relations": (lib.get("synthesis") or {}).get("knowledge_relations", []) if lib else [],
+        "resource_manifest": (lib.get("synthesis") or {}).get("resource_manifest", []) if lib else [],
     }
 
 

@@ -9,8 +9,101 @@ from app.core.llm.router import get_primary_llm
 from app.core.prompts import resource_generation_system, resource_generation_user, resource_temperature
 from app.rag.retriever import retrieve
 from app.services.resource_context_service import _profile_summary
+from app.services.resource_metadata_service import PURPOSE_STAGE, TYPE_PURPOSE, with_resource_metadata
 
 logger = logging.getLogger(__name__)
+
+_LATEX_COMMAND_RE = re.compile(
+    r"\\(?:frac|dfrac|tfrac|partial|theta|alpha|beta|gamma|delta|sigma|lambda|mu|"
+    r"sum|prod|int|lim|sqrt|sin|cos|tan|log|ln|cdot|times|left|right|infty|to)(?![A-Za-z])"
+)
+
+
+def _repair_inline_latex(line: str) -> str:
+    if not _LATEX_COMMAND_RE.search(line):
+        return line
+    line = re.sub(
+        r"([A-Za-z][A-Za-z0-9_]*)\s*\$([^$\n]+)\$+",
+        lambda match: f"{match.group(1)}({match.group(2).strip()})",
+        line,
+    )
+    protected: list[str] = []
+
+    def protect(match: re.Match[str]) -> str:
+        protected.append(match.group(0))
+        return f"\x00MATH{len(protected) - 1}\x00"
+
+    out = re.sub(r"\$\$[^$\n]+\$\$|\$[^$\n]+\$", protect, line)
+    segment_re = re.compile(
+        r"(\\(?:frac|dfrac|tfrac|partial|theta|alpha|beta|gamma|delta|sigma|lambda|mu|"
+        r"sum|prod|int|lim|sqrt|sin|cos|tan|log|ln|nabla|cdot|times|left|right|infty|to)(?![A-Za-z])"
+        r"[^\u4e00-\u9fff，。；\n\x00]{0,240})"
+    )
+
+    def wrap(match: re.Match[str]) -> str:
+        expression = match.group(1).strip().replace("$$", "").replace("$", "")
+        return f"${expression}$" if expression else match.group(0)
+
+    out = segment_re.sub(wrap, out)
+    return re.sub(
+        r"\x00MATH(\d+)\x00",
+        lambda match: protected[int(match.group(1))],
+        out,
+    )
+
+
+def _repair_malformed_latex_lines(content: str) -> str:
+    """Repair standalone formula lines whose math delimiters cover only a fragment."""
+    repaired: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        markdown_formula = re.match(
+            r"^(\s*(?:[-*+]\s+)?(?:\*\*[A-Za-z0-9]+[.)]?\*\*\s*)?)(.*)$",
+            line,
+        )
+        if markdown_formula:
+            prefix, body = markdown_formula.groups()
+            expression = body.replace("$$", "").replace("$", "").strip()
+            if (
+                re.match(r"^\\[A-Za-z]+", expression)
+                and not re.search(r"[\u4e00-\u9fff]", expression)
+                and _LATEX_COMMAND_RE.search(expression)
+                and re.search(r"(?::=|(?<![<>])=|\\frac|\\partial|\\sum|\\int|\\lim)", expression)
+            ):
+                repaired.append(f"{prefix}${expression}$")
+                continue
+        if (
+            not stripped
+            or len(stripped) > 500
+            or stripped.startswith(("```", "#", ">", "- ", "* "))
+            or re.search(r"[\u4e00-\u9fff]", stripped)
+            or not _LATEX_COMMAND_RE.search(stripped)
+        ):
+            repaired.append(_repair_inline_latex(line))
+            continue
+
+        if (
+            (stripped.startswith("$$") and stripped.endswith("$$"))
+            or (stripped.startswith("$") and stripped.endswith("$") and not stripped.startswith("$$"))
+        ):
+            repaired.append(_repair_inline_latex(line))
+            continue
+
+        command_count = len(_LATEX_COMMAND_RE.findall(stripped))
+        formula_signal = bool(re.search(r"(?::=|(?<![<>])=|\\frac|\\partial|\\sum|\\int|\\lim)", stripped))
+        if command_count < 2 and not formula_signal:
+            repaired.append(_repair_inline_latex(line))
+            continue
+
+        expression = re.sub(
+            r"([A-Za-z][A-Za-z0-9_]*)\s*\$([^$\n]+)\$",
+            lambda match: f"{match.group(1)}({match.group(2).strip()})",
+            stripped,
+        )
+        expression = expression.replace("$$", "").replace("$", "").strip()
+        repaired.append(f"$${expression}$$")
+
+    return "\n".join(repaired)
 
 _PROMPT_ECHO_MARKERS = (
     "学习主题：",
@@ -120,6 +213,21 @@ async def _generate_with_llm(
 
     library_context = str(gen_ctx.get("library_context") or "")
     web_context = str(gen_ctx.get("web_context") or "")
+    purpose = str(gen_ctx.get("learning_purpose") or TYPE_PURPOSE.get(resource_type, "explain"))
+    target_points = list(gen_ctx.get("target_knowledge_points") or [state.get("stage_title") or topic])
+    expected_outcome = str(gen_ctx.get("expected_outcome") or "").strip()
+    if not expected_outcome:
+        expected_outcome = f"能够解释{'、'.join(str(x) for x in target_points[:2])}并完成一个对应任务。"
+    realtime = gen_ctx.get("realtime_state") if isinstance(gen_ctx.get("realtime_state"), dict) else {}
+    realtime_summary = "；".join(
+        part
+        for part in (
+            f"困惑度={realtime.get('confusion_level')}" if realtime.get("confusion_level") is not None else "",
+            f"认知负荷={realtime.get('cognitive_load')}" if realtime.get("cognitive_load") else "",
+            f"当前卡点={'、'.join(str(x) for x in realtime.get('stuck_topics') or [])}" if realtime.get("stuck_topics") else "",
+        )
+        if part
+    )
 
     messages = [
         {"role": "system", "content": resource_generation_system(resource_type, deep)},
@@ -132,12 +240,22 @@ async def _generate_with_llm(
                 library_context=library_context,
                 web_context=web_context,
                 profile_summary=_profile_summary(profile),
+                realtime_summary=realtime_summary,
                 generation_mode=gen_ctx.get("mode", "web"),
                 stage_objective=str(gen_ctx.get("stage_objective") or ""),
                 learner_analysis_brief=str(gen_ctx.get("learner_analysis_brief") or ""),
                 variant_index=int(state.get("resource_variant_index") or 1),
                 variant_total=int(state.get("resource_variant_total") or 1),
                 requirements=str(gen_ctx.get("requirements") or ""),
+                learning_purpose=purpose,
+                target_knowledge_points=[str(x) for x in target_points if str(x).strip()],
+                recommended_stage=PURPOSE_STAGE.get(purpose, "课堂讲解"),
+                expected_outcome=expected_outcome,
+                existing_resource_summaries=[
+                    row
+                    for row in list(gen_ctx.get("resource_manifest") or [])
+                    if isinstance(row, dict) and row.get("status") != "draft"
+                ],
             ),
         },
     ]
@@ -268,9 +386,8 @@ async def _build_resource(
         if generation_source != "mock":
             generation_source = "template"
 
-    content = filter_sensitive(
-        "【学术讲义风格】条理清晰、术语准确、适合高校自学阅读。\n\n" + body
-    )
+    body = _repair_malformed_latex_lines(body)
+    content = filter_sensitive(body)
 
     pseudo_chunks = [
         {"text": combined_context[:800], "metadata": {"title": label, "chapter": label}}
@@ -291,7 +408,7 @@ async def _build_resource(
     if generation_warning:
         content += f"\n\n> ⚠ 生成说明：{generation_warning}"
 
-    return {
+    resource = {
         "id": str(uuid.uuid4()).replace("-", "")[:12],
         "type": resource_type,
         "title": resolved_title,
@@ -304,3 +421,8 @@ async def _build_resource(
         "generation_source": generation_source,
         "generation_warning": generation_warning,
     }
+    return with_resource_metadata(
+        resource,
+        generation_context=gen_ctx,
+        state=dict(state),
+    )

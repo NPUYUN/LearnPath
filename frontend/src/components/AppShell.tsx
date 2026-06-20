@@ -46,6 +46,7 @@ import { PageScope } from "@/contexts/PageScopeContext";
 import ThemeProvider from "@/components/ThemeProvider";
 import ClassroomGenerationFloat from "@/components/ClassroomGenerationFloat";
 import ResourceRegenerationFloat from "@/components/ResourceRegenerationFloat";
+import ResourceGenerationFloat from "@/components/ResourceGenerationFloat";
 import PathReplanJobManager from "@/components/PathReplanJobManager";
 import { preloadAdminConsole, preloadLoggedInExtras, preloadStandaloneRoute } from "@/lib/routePreload";
 
@@ -548,6 +549,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
         <ClassroomGenerationFloat />
         <ResourceRegenerationFloat />
+        <ResourceGenerationFloat />
         <PathReplanJobManager />
       </ThemeProvider>
     );
@@ -606,6 +608,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <ClassroomGenerationFloat />
       <ResourceRegenerationFloat />
+      <ResourceGenerationFloat />
       <PathReplanJobManager />
     </ThemeProvider>
   );

@@ -65,6 +65,43 @@ export type LearningResource = {
   generation_mode?: string;
   library_id?: string;
   library_name?: string;
+  metadata?: ResourceMetadata;
+  status?: "draft" | "published";
+};
+
+export type ResourceMetadata = {
+  knowledge_points: string[];
+  difficulty: "basic" | "intermediate" | "advanced" | "exam";
+  learning_purpose: "preview" | "explain" | "practice" | "review" | "exam" | "classroom" | "project";
+  used_for: ("path" | "classroom" | "quiz" | "review")[];
+  recommended_stage: string;
+  estimated_minutes: number;
+  prerequisites: string[];
+  summary: string;
+  learning_before_tip: string;
+  learning_after_check: string;
+  suitable_scenarios: string[];
+  next_step: string;
+  expected_outcome: string;
+  source_library_id: string;
+  source_files: string[];
+  path_step_key: string;
+  quality_score: number;
+  quality_reason: string;
+  quality_issues: string[];
+  quality_tags: string[];
+  quality_dimensions: Record<string, number>;
+  review_attempts: number;
+  full_rewrite_attempted: boolean;
+  classroom_ready: boolean;
+  classroom_missing: string[];
+  duplicate_of: string;
+  formula_issues: string[];
+  quiz_invalid_questions: number[];
+  quiz_semantic_verified: boolean;
+  quiz_semantic_review: Record<string, unknown>;
+  generated_context: Record<string, unknown>;
+  path_attachment_warning: string;
 };
 
 export type PathStep = {
@@ -114,6 +151,9 @@ export type ClassroomSlide = {
   title: string;
   body: string;
   board: string[];
+  learning_goal?: string | string[];
+  key_points?: string[];
+  bullets?: string[];
   teacher_note?: string;
   layout?: "cover" | "problem" | "concept" | "timeline" | "example" | "mistake" | "quiz" | "summary" | string;
   visual_theme?: string;
@@ -212,7 +252,8 @@ export type ClassroomGenerationJob = {
 export type ClassroomInteractionInput = {
   user_id: string;
   session_id?: string;
-  action: "confused" | "slow" | "example";
+  action: "confused" | "slow" | "example" | "qa";
+  question?: string;
   diagnosis?: string;
   example_type?: string;
   click_count?: number;
@@ -227,7 +268,7 @@ export type ClassroomInteractionInput = {
 };
 
 export type ClassroomInteractionResponse = {
-  action: "confused" | "slow" | "example";
+  action: "confused" | "slow" | "example" | "qa";
   title: string;
   body: string;
   steps: string[];
@@ -644,6 +685,15 @@ export type LibraryDetail = ResourceLibrary & {
   synthesis?: Record<string, unknown>;
 };
 
+export type LibraryFilePreview = {
+  id: string;
+  filename: string;
+  mime_type: string;
+  content: string;
+  preview_kind: "markdown" | "code" | "text";
+  source: "original" | "extracted" | "analysis";
+};
+
 export type GenerateResourceOptions = {
   resourceTypes?: string[];
   resourceTypeCounts?: Record<string, number>;
@@ -652,7 +702,59 @@ export type GenerateResourceOptions = {
   generationSource?: "existing_library" | "uploaded" | "empty" | "web";
   requirements?: string;
   deepThinking?: boolean;
+  learningPurpose?: ResourceMetadata["learning_purpose"];
+  pathStepKey?: string;
+  attachToPath?: boolean;
+  pathAttachMode?: "none" | "auto" | "manual";
 };
+
+export type ResourceGenerationResultSummary = {
+  generated_count: number;
+  published_count: number;
+  draft_count: number;
+  rewritten_count: number;
+  library_resource_count: number;
+  path_attached_count: number;
+  path_unmatched_count: number;
+  classroom_ready_count: number;
+  library_id: string;
+  library_name: string;
+  resource_ids: string[];
+};
+
+export type ResourceGenerationJob = {
+  id: string;
+  user_id: string;
+  title: string;
+  status: "queued" | "running" | "done" | "error";
+  stage: string;
+  sub_stage: string;
+  current_resource_type: string;
+  progress: number;
+  elapsed_seconds: number;
+  error: string;
+  result?: ResourceGenerationResultSummary | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function generateResourcePayload(userId: string, topic: string, options?: GenerateResourceOptions) {
+  return {
+    user_id: userId,
+    topic,
+    resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
+    resource_type_counts: options?.resourceTypeCounts ?? {},
+    library_id: options?.libraryId || null,
+    new_library_name: options?.newLibraryName || null,
+    generation_source: options?.generationSource ?? "web",
+    requirements: options?.requirements ?? "",
+    deep_thinking: options?.deepThinking ?? false,
+    learning_purpose: options?.learningPurpose ?? null,
+    path_step_key: options?.pathStepKey ?? null,
+    attach_to_path: options?.attachToPath ?? false,
+    path_attach_mode: options?.pathAttachMode ?? "none",
+  };
+}
 
 export async function listLibraries(userId: string) {
   const res = await handleResponse(
@@ -744,6 +846,21 @@ export async function getLibraryDetail(
   return res.json() as Promise<LibraryDetail>;
 }
 
+export async function getLibraryFilePreview(
+  userId: string,
+  libraryId: string,
+  fileId: string,
+): Promise<LibraryFilePreview> {
+  const res = await handleResponse(
+    await fetch(
+      apiUrl(`/api/libraries/${libraryId}/file-preview?user_id=${encodeURIComponent(userId)}&file_id=${encodeURIComponent(fileId)}`),
+      { headers: authHeaders() },
+    ),
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<LibraryFilePreview>;
+}
+
 export async function deleteLibrary(userId: string, libraryId: string) {
   const res = await handleResponse(
     await fetch(
@@ -764,21 +881,37 @@ export async function generateResources(
     await fetch(apiUrl("/api/resources/generate"), {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({
-        user_id: userId,
-        topic,
-        resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
-        resource_type_counts: options?.resourceTypeCounts ?? {},
-        library_id: options?.libraryId || null,
-        new_library_name: options?.newLibraryName || null,
-        generation_source: options?.generationSource ?? "web",
-        requirements: options?.requirements ?? "",
-        deep_thinking: options?.deepThinking ?? false,
-      }),
+      body: JSON.stringify(generateResourcePayload(userId, topic, options)),
     })
   );
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<LearningResource[]>;
+}
+
+export async function createResourceGenerationJob(
+  userId: string,
+  topic: string,
+  options?: GenerateResourceOptions,
+) {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/resources/generate/jobs"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(generateResourcePayload(userId, topic, options)),
+    }),
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ResourceGenerationJob>;
+}
+
+export async function getResourceGenerationJob(jobId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/resources/generate/jobs/${encodeURIComponent(jobId)}`), {
+      headers: authHeaders(),
+    }),
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ResourceGenerationJob>;
 }
 
 export type ResourceRecommendation = {
@@ -838,17 +971,7 @@ export async function streamGenerateResources(
     await fetch(apiUrl("/api/resources/generate/stream"), {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({
-        user_id: userId,
-        topic,
-        resource_types: options?.resourceTypes ?? ["doc", "mindmap", "quiz", "reading", "media", "code"],
-        resource_type_counts: options?.resourceTypeCounts ?? {},
-        library_id: options?.libraryId || null,
-        new_library_name: options?.newLibraryName || null,
-        generation_source: options?.generationSource ?? "web",
-        requirements: options?.requirements ?? "",
-        deep_thinking: options?.deepThinking ?? false,
-      }),
+      body: JSON.stringify(generateResourcePayload(userId, topic, options)),
     })
   );
   if (!res.ok || !res.body) throw new Error("流式生成失败");

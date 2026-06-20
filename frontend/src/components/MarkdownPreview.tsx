@@ -239,8 +239,13 @@ function buildMarkdownComponents(streaming: boolean, inChat?: boolean): Componen
   };
 }
 
-const REMARK_PLUGINS = [remarkGfm, remarkBreaks, remarkMath];
-const REHYPE_PLUGINS = [rehypeKatex];
+const REMARK_PLUGINS = [remarkMath, remarkGfm, remarkBreaks];
+const REHYPE_PLUGINS = [
+  [rehypeKatex, { strict: false, throwOnError: false, errorColor: "#b42318" }] as [
+    typeof rehypeKatex,
+    { strict: boolean; throwOnError: boolean; errorColor: string },
+  ],
+];
 
 function MarkdownPreviewInner({
   content,

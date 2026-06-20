@@ -256,6 +256,16 @@ export function normalizeLatexDelimiters(text: string): string {
     fenced.push(inline);
     return `\0FENCE${fenced.length - 1}\0`;
   });
+  // JSON/数据库字符串可能把 TeX 命令和定界符重复转义为两个以上反斜杠。
+  out = out.replace(/\\{2,}(?=[()[\]])/g, "\\");
+  out = out.replace(
+    /\\{2,}(?=(?:frac|dfrac|tfrac|sum|prod|int|lim|sqrt|sin|cos|tan|log|ln|cdot|times|left|right|infty|partial|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|vec|overline|underline|text|mathrm|mathbf|displaystyle|to|quad|qquad|nabla)(?![A-Za-z]))/g,
+    "\\",
+  );
+  out = out.replace(/\$\$[^$\n]+\$\$|\$[^$\n]+\$/g, (math) => {
+    fenced.push(math);
+    return `\0FENCE${fenced.length - 1}\0`;
+  });
 
   out = out.replace(/\\\(([\s\S]*?)\\\)/g, (_, tex: string) => `$${tex.trim()}$`);
   out = out.replace(/\\\[([\s\S]*?)\\\]/g, (_, tex: string) => `$$${tex.trim()}$$`);
@@ -267,6 +277,80 @@ export function normalizeLatexDelimiters(text: string): string {
 
   out = out.replace(/\0FENCE(\d+)\0/g, (_, i) => fenced[Number(i)] ?? "");
   return out;
+}
+
+/** 修复公式命令落在数学定界符外、仅局部被 $...$ 包裹的独立公式行。 */
+export function repairMalformedLatexLines(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      const stripped = line.trim();
+      const markdownFormula = line.match(
+        /^(\s*(?:[-*+]\s+)?(?:\*\*[A-Za-z0-9]+[.)]?\*\*\s*)?)(.*)$/,
+      );
+      if (markdownFormula) {
+        const prefix = markdownFormula[1];
+        const body = markdownFormula[2].trim();
+        const expression = body.replace(/\$\$/g, "").replace(/\$/g, "").trim();
+        if (
+          /^\\[A-Za-z]+/.test(expression) &&
+          !/[\u4e00-\u9fff]/.test(expression) &&
+          LATEX_COMMAND_HINT.test(expression) &&
+          /(?::=|(?<![<>])=|\\frac|\\partial|\\sum|\\int|\\lim)/.test(expression)
+        ) {
+          return `${prefix}$${expression}$`;
+        }
+      }
+      const repairInline = (value: string) => {
+        if (!LATEX_COMMAND_HINT.test(value)) return value;
+        const merged = value.replace(
+          /([A-Za-z][A-Za-z0-9_]*)\s*\$([^$\n]+)\$+/g,
+          (_, fn: string, inner: string) => `${fn}(${inner.trim()})`,
+        );
+        const protectedMath: string[] = [];
+        let output = merged.replace(/\$\$[^$\n]+\$\$|\$[^$\n]+\$/g, (math) => {
+          protectedMath.push(math);
+          return `\0MATH${protectedMath.length - 1}\0`;
+        });
+        output = output.replace(
+          /(\\(?:frac|dfrac|tfrac|partial|theta|alpha|beta|gamma|delta|sigma|lambda|mu|sum|prod|int|lim|sqrt|sin|cos|tan|log|ln|nabla|cdot|times|left|right|infty|to)(?![A-Za-z])[^\u4e00-\u9fff，。；\n\0]{0,240})/g,
+          (segment) => {
+            const expression = segment.replace(/\$\$/g, "").replace(/\$/g, "").trim();
+            return expression ? `$${expression}$` : segment;
+          },
+        );
+        return output.replace(/\0MATH(\d+)\0/g, (_, index: string) => protectedMath[Number(index)] || "");
+      };
+      if (
+        !stripped ||
+        stripped.length > 500 ||
+        /^(?:```|#|>|-\s|\*\s)/.test(stripped) ||
+        /[\u4e00-\u9fff]/.test(stripped) ||
+        !LATEX_COMMAND_HINT.test(stripped)
+      ) {
+        return repairInline(line);
+      }
+
+      const isCompleteDisplay = stripped.startsWith("$$") && stripped.endsWith("$$");
+      const isCompleteInline =
+        stripped.startsWith("$") && stripped.endsWith("$") && !stripped.startsWith("$$");
+      if (isCompleteDisplay || isCompleteInline) return repairInline(line);
+
+      const commandCount = (stripped.match(new RegExp(LATEX_COMMAND_HINT.source, "g")) || []).length;
+      const hasFormulaSignal = /(?::=|(?<![<>])=|\\frac|\\partial|\\sum|\\int|\\lim)/.test(stripped);
+      if (commandCount < 2 && !hasFormulaSignal) return repairInline(line);
+
+      const expression = stripped
+        .replace(/([A-Za-z][A-Za-z0-9_]*)\s*\$([^$\n]+)\$/g, (_, fn: string, inner: string) => {
+          return `${fn}(${inner.trim()})`;
+        })
+        .replace(/\$\$/g, "")
+        .replace(/\$/g, "")
+        .trim();
+
+      return `$$${expression}$$`;
+    })
+    .join("\n");
 }
 
 export function normalizeMarkdownForDisplay(raw: string): string {
@@ -296,6 +380,9 @@ export function normalizeMarkdownForDisplay(raw: string): string {
 
   text = fixMarkdownStructure(text);
   text = normalizeLatexDelimiters(text);
+  // 先把 \(...\) / \[...\] 变成标准数学块，再修复无定界符公式。
+  // 否则混合正文中的 TeX 命令会被提前包裹，造成嵌套数学块和 KaTeX ParseError。
+  text = repairMalformedLatexLines(text);
 
   // mermaidgraph 粘连
   text = text.replace(

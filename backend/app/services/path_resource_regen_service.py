@@ -188,6 +188,7 @@ async def _generate_types_for_stage(
     *,
     stage_title: str,
     stage_objective: str,
+    step_key: str,
     types_to_gen: list[str],
     resource_titles: dict[str, str],
     gen_ctx: dict[str, Any],
@@ -197,6 +198,9 @@ async def _generate_types_for_stage(
     gen_ctx = {
         **gen_ctx,
         "stage_objective": stage_objective,
+        "stage_title": stage_title,
+        "path_step_key": step_key,
+        "target_knowledge_points": [stage_title],
         "learner_analysis_brief": learner_brief,
     }
 
@@ -290,6 +294,7 @@ async def regen_path_resources(
     )
 
     generated_total = 0
+    generated_rows: list[dict[str, Any]] = []
     stages_processed: list[dict[str, Any]] = []
     type_counter: dict[str, int] = {}
     fallback_warnings: list[str] = []
@@ -323,6 +328,7 @@ async def regen_path_resources(
             base,
             stage_title=title,
             stage_objective=objective,
+            step_key=step_id,
             types_to_gen=types_to_gen,
             resource_titles=resource_titles,
             gen_ctx=gen_ctx,
@@ -330,8 +336,15 @@ async def regen_path_resources(
             prior_ids=prior_ids,
         )
         fallback_warnings.extend(stage_warnings)
+        generated_rows.extend(new_items)
+        publishable_items = [item for item in new_items if item.get("status") != "draft"]
+        for item in new_items:
+            if item.get("status") == "draft":
+                fallback_warnings.append(
+                    f"{title} · {item.get('title', '')} 质检低于 7 分，已保存为草稿且未挂载到路径"
+                )
 
-        new_ids = [r.get("id", "") for r in new_items if r.get("id")]
+        new_ids = [r.get("id", "") for r in publishable_items if r.get("id")]
         for rid in new_ids:
             prior_ids.add(rid)
             row = next((r for r in new_items if r.get("id") == rid), None)
@@ -341,7 +354,7 @@ async def regen_path_resources(
 
         assignments: list[dict[str, Any]] = []
         if new_ids:
-            ensure_substeps_for_resources(stage, new_items)
+            ensure_substeps_for_resources(stage, publishable_items)
             assignments = assign_resources_to_stage(stage, new_ids)
             generated_total += len(new_ids)
 
@@ -359,6 +372,10 @@ async def regen_path_resources(
 
     path_data["steps"] = steps
     await save_path(path_data)
+    if library_id and generated_rows:
+        from app.services.resource_service import update_library_resource_manifest
+
+        await update_library_resource_manifest(user_id, library_id, generated_rows)
 
     all_resources = await list_resources(user_id)
     logger.info(
