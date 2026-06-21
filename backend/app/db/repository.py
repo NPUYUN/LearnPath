@@ -436,6 +436,7 @@ def _default_preferences(user_id: str) -> dict:
         "starred_resource_ids": [],
         "account_patch": {},
         "daily_plan": {"date": "", "tasks": []},
+        "mastery_records": {},
     }
 
 
@@ -449,6 +450,7 @@ async def get_preferences(user_id: str) -> dict:
         data.setdefault("starred_resource_ids", [])
         data.setdefault("account_patch", {})
         data.setdefault("daily_plan", {"date": "", "tasks": []})
+        data.setdefault("mastery_records", {})
         return data
 
 
@@ -460,6 +462,8 @@ async def set_preferences(user_id: str, patch: dict) -> dict:
         current["account_patch"] = {**current.get("account_patch", {}), **patch["account_patch"]}
     if "daily_plan" in patch and patch["daily_plan"] is not None:
         current["daily_plan"] = patch["daily_plan"]
+    if "mastery_records" in patch and patch["mastery_records"] is not None:
+        current["mastery_records"] = patch["mastery_records"]
     with SessionLocal() as db:
         row = db.get(UserPreferencesRecord, user_id)
         if row is None:

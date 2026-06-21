@@ -9,6 +9,7 @@ import { getResource, recordResourceView } from "@/lib/api";
 import { RESOURCE_CONFIG, mapApiType } from "@/lib/resourceConfig";
 import { generationSourceMeta } from "@/lib/resourceSource";
 import { formatResourceContentForDisplay } from "@/lib/resourceContent";
+import { isRegenerationArtifact } from "@/lib/resourceDisplay";
 import { useAppStore } from "@/store/appStore";
 
 const MarkdownPreview = dynamic(() => import("@/components/MarkdownPreview"), {
@@ -122,10 +123,13 @@ export default function ResourcePreviewDrawer({
             <Space size={6} wrap style={{ marginTop: 6 }}>
               <Tag color={cfg.color}>{cfg.label}</Tag>
               <Tag color={sourceMeta.color}>{sourceMeta.label}</Tag>
-              {row.topic ? <Tag>{row.topic}</Tag> : null}
+              {row.topic && !isRegenerationArtifact(row.topic) ? <Tag>{row.topic}</Tag> : null}
               {metadata ? <Tag>{purposeLabel}</Tag> : null}
               {metadata ? <Tag>难度：{difficultyLabel}</Tag> : null}
-              {(metadata?.quality_tags || []).slice(0, 3).map((tag) => (
+              {(metadata?.quality_tags || [])
+                .filter((tag) => !isRegenerationArtifact(tag))
+                .slice(0, 3)
+                .map((tag) => (
                 <Tag key={tag} color={tag === "可进课堂" ? "cyan" : undefined}>{tag}</Tag>
               ))}
               {row.status === "draft" ? <Tag color="gold">待完善</Tag> : null}

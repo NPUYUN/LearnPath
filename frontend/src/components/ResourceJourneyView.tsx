@@ -18,6 +18,7 @@ import {
   mapApiType,
   type UiResourceType,
 } from "@/lib/resourceConfig";
+import { cleanResourceDisplayLabels, isRegenerationArtifact } from "@/lib/resourceDisplay";
 import type { ResourceCategoryGroup, ResourceStageGroup } from "@/lib/resourceGrouping";
 import { STAGE_STATUS_META } from "@/lib/resourceGrouping";
 
@@ -73,13 +74,16 @@ function ResourceCard({
   const cfg = RESOURCE_CONFIG[uiType];
   const sourceMeta = generationSourceMeta(resource);
   const metadata = resource.metadata;
-  const qualityTags = (metadata?.quality_tags || []).slice(0, compact ? 0 : 2);
-  const compactMetaTags = [
+  const qualityTags = cleanResourceDisplayLabels(metadata?.quality_tags || []).slice(
+    0,
+    compact ? 0 : 2
+  );
+  const compactMetaTags = cleanResourceDisplayLabels([
     metadata?.knowledge_points?.[0],
     metadata?.learning_purpose ? PURPOSE_LABELS[metadata.learning_purpose] : "",
     metadata?.source_library_id ? "资料库" : "",
     ...qualityTags,
-  ].filter(Boolean).slice(0, compact ? 2 : 4);
+  ]).slice(0, compact ? 2 : 4);
 
   return (
     <article
@@ -133,7 +137,7 @@ function ResourceCard({
           )}
           {resource.status === "draft" && <Tag color="gold">待完善</Tag>}
         </div>
-        {!compact && resource.topic && (
+        {!compact && resource.topic && !isRegenerationArtifact(resource.topic) && (
           <Text type="secondary" className="lp-resource-card-topic">
             {resource.topic}
           </Text>

@@ -56,6 +56,8 @@ import {
 } from "@/lib/pathUtils";
 import { displayCourseName, useAppStore } from "@/store/appStore";
 import { useStartClassroom } from "@/hooks/useStartClassroom";
+import MasteryFeedbackBar from "@/components/MasteryFeedbackBar";
+import PathDailyMinimumCard from "@/components/PathDailyMinimumCard";
 import ApartmentOutlined from "@ant-design/icons/ApartmentOutlined";
 
 const { Text, Paragraph } = Typography;
@@ -121,6 +123,7 @@ function getStepIconStyle(depth: number, status: keyof typeof STATUS_CONFIG) {
 }
 
 type PathStepCardProps = {
+  userId: string;
   step: PathStep;
   depth?: number;
   resourceTitles: Record<string, string>;
@@ -133,6 +136,7 @@ type PathStepCardProps = {
 };
 
 function PathStepCard({
+  userId,
   step,
   depth = 0,
   resourceTitles,
@@ -166,6 +170,7 @@ function PathStepCard({
 
   return (
     <div
+      id={`path-step-${stepKey}`}
       className={depth > 0 ? "lp-path-substep-wrap" : undefined}
       style={depth > 0 ? { marginLeft: depth * 20, marginTop: 10 } : undefined}
     >
@@ -302,7 +307,16 @@ function PathStepCard({
                 </div>
               </>
             )}
-            <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ marginTop: 14 }}>
+              <MasteryFeedbackBar
+                userId={userId}
+                stepKey={stepKey}
+                resourceId={ownResourceIds.find((id) => resourceTitles[id])}
+                title={step.title}
+                compact
+              />
+            </div>
+            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
               {mapStatus(step.status) !== "done" && (
                 <Button
                   size="small"
@@ -331,6 +345,7 @@ function PathStepCard({
       {substeps.map((sub) => (
         <PathStepCard
           key={getStepKey(sub)}
+          userId={userId}
           step={sub}
           depth={depth + 1}
           resourceTitles={resourceTitles}
@@ -881,6 +896,20 @@ export default function PathContent() {
         }
       />
       <div className="lp-page-body lp-path-page">
+        <PathDailyMinimumCard
+          path={path}
+          resources={cachedResources}
+          userId={userId}
+          onFocusStep={(stepKey) => {
+            setExpanded(stepKey);
+            window.setTimeout(() => {
+              document.getElementById(`path-step-${stepKey}`)?.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+              });
+            }, 80);
+          }}
+        />
         <Card className="lp-path-progress-card" style={{ marginBottom: 20 }}>
           <div className="lp-path-progress-head">
             <div className="lp-path-progress-copy">
@@ -937,6 +966,7 @@ export default function PathContent() {
           {steps.map((step) => (
             <PathStepCard
               key={getStepKey(step)}
+              userId={userId}
               step={step}
               resourceTitles={resourceTitles}
               expanded={expanded}

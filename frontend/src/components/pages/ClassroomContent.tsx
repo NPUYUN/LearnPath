@@ -33,7 +33,6 @@ import {
 import { clientNavigate } from "@/lib/clientNav";
 import { classroomResultMatchesSession, getActiveClassroomSnapshot, persistActiveClassroom } from "@/lib/classroomActive";
 import { displayCourseName, useAppStore, type ClassroomSessionSeed } from "@/store/appStore";
-
 type ClassroomMode = "normal" | "slow" | "example" | "practice" | "confused";
 type WizardStep = 1 | 2 | 3;
 type TeachingMode = "直觉优先" | "例题驱动" | "慢速拆解" | "项目实践" | "挑战拔高";

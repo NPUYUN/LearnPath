@@ -25,6 +25,8 @@ import { generationSourceMeta } from "@/lib/resourceSource";
 import { useAppStore } from "@/store/appStore";
 import { downloadResourceMarkdown } from "@/lib/downloadResource";
 import { formatResourceContentForDisplay } from "@/lib/resourceContent";
+import { isRegenerationArtifact } from "@/lib/resourceDisplay";
+import { resolveResourceLocally } from "@/lib/resourceViewCache";
 
 const MarkdownPreview = dynamic(() => import("@/components/MarkdownPreview"), {
   loading: () => <Spin />,
@@ -49,13 +51,14 @@ export default function ResourceDetailPage({ resourceId }: ResourceDetailPagePro
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const cached = useAppStore
-      .getState()
-      .resources.find((r) => r.id === resourceId);
+    const cached = resolveResourceLocally(userId, resourceId);
     if (cached?.content?.trim()) {
       setResource(cached);
       setLoading(false);
       void recordResourceView(userId, resourceId).catch(() => {});
+    } else if (cached) {
+      setResource(cached);
+      setLoading(false);
     } else {
       setLoading(true);
     }
@@ -138,13 +141,16 @@ export default function ResourceDetailPage({ resourceId }: ResourceDetailPagePro
             <Space size={6} wrap>
               <Tag color={cfg.color}>{cfg.label}</Tag>
               <Tag color={sourceMeta.color}>{sourceMeta.label}</Tag>
-              {resource.topic && <Tag>{resource.topic}</Tag>}
-              {(metadata?.quality_tags || []).slice(0, 3).map((tag) => (
+              {resource.topic && !isRegenerationArtifact(resource.topic) && <Tag>{resource.topic}</Tag>}
+              {(metadata?.quality_tags || [])
+                .filter((tag) => !isRegenerationArtifact(tag))
+                .slice(0, 3)
+                .map((tag) => (
                 <Tag key={tag} color={tag === "可进课堂" ? "cyan" : undefined}>{tag}</Tag>
               ))}
               {resource.status === "draft" && <Tag color="gold">待完善</Tag>}
             </Space>
-            {resource.topic && (
+            {resource.topic && !isRegenerationArtifact(resource.topic) && (
               <Paragraph type="secondary" className="lp-resource-view-sub">
                 学习主题：{resource.topic}
               </Paragraph>

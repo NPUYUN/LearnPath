@@ -13,6 +13,7 @@ ResourceType = Literal[
     "ppt",
     "design",
     "project",
+    "review_card",
 ]
 
 EXTENDED_RESOURCE_TYPES: list[ResourceType] = [
@@ -25,6 +26,7 @@ EXTENDED_RESOURCE_TYPES: list[ResourceType] = [
     "ppt",
     "design",
     "project",
+    "review_card",
 ]
 
 IntentType = Literal[
@@ -237,6 +239,34 @@ class ResourceRegenerateRequest(BaseModel):
     user_id: str = "demo"
     requirements: str = ""
     tags: list[str] = Field(default_factory=list)
+
+
+class ResourceTemplateInfo(BaseModel):
+    id: str
+    title: str
+    subtitle: str = ""
+    topic: str = ""
+    tags: list[str] = Field(default_factory=list)
+    resource_count: int = 0
+    estimated_minutes: int = 0
+    icon: str = "book"
+    color: str = "#1677ff"
+
+
+class CreateFromTemplateRequest(BaseModel):
+    user_id: str = "demo"
+    template_id: str
+
+
+class CreateFromTemplateResponse(BaseModel):
+    template_id: str
+    resources: list[LearningResource]
+    message: str = ""
+
+
+class GenerateReviewCardRequest(BaseModel):
+    user_id: str = "demo"
+    topic: str = ""
 
 
 class PathResourceRegenRequest(BaseModel):
@@ -793,13 +823,53 @@ class EvalStats(BaseModel):
     resources_by_type: dict[str, int]
     profile_completeness: int
     study_days: int
+    study_streak: int = 0
+    studied_today: bool = False
     has_path: bool
     radar: RadarData
     recent_events: list[EvalEvent]
+    ai_advice: str = ""
+    strengths: str = ""
+    improvements: str = ""
+    advice_updated_at: str = ""
+
+
+MasteryLevel = Literal["forgot", "fuzzy", "mastered"]
 
 
 class PathStepStatusUpdate(BaseModel):
-    status: Literal["pending", "in_progress", "done"]
+    status: Literal["pending", "in_progress", "done"] | None = None
+    mastery_level: MasteryLevel | None = None
+    resource_id: str = ""
+
+
+class MasteryFeedbackRequest(BaseModel):
+    user_id: str = "demo"
+    mastery_level: MasteryLevel
+    resource_id: str = ""
+    step_key: str = ""
+
+
+class MasteryRecord(BaseModel):
+    level: MasteryLevel
+    next_review_at: str
+    interval_days: int = 0
+    streak: int = 0
+    step_key: str = ""
+    resource_id: str = ""
+    title: str = ""
+    updated_at: str = ""
+
+
+class MasteryFeedbackResponse(BaseModel):
+    ok: bool = True
+    record: MasteryRecord
+    path_updated: bool = False
+    next_review_label: str = ""
+
+
+class ResourceCompleteRequest(BaseModel):
+    mastery_level: MasteryLevel | None = None
 
 
 class ResourceRecommendation(BaseModel):
@@ -829,12 +899,14 @@ class UserPreferences(BaseModel):
     starred_resource_ids: list[str] = Field(default_factory=list)
     account_patch: dict = Field(default_factory=dict)
     daily_plan: DailyPlanState = Field(default_factory=DailyPlanState)
+    mastery_records: dict[str, Any] = Field(default_factory=dict)
 
 
 class UserPreferencesUpdate(BaseModel):
     starred_resource_ids: list[str] | None = None
     account_patch: dict | None = None
     daily_plan: DailyPlanState | None = None
+    mastery_records: dict[str, Any] | None = None
 
 
 class ChatConversationSummary(BaseModel):

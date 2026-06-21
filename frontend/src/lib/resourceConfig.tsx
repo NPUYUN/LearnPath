@@ -8,6 +8,7 @@ import {
   ReadOutlined,
   SolutionOutlined,
   VideoCameraOutlined,
+  ContainerOutlined,
 } from "@ant-design/icons";
 import type { ReactNode } from "react";
 
@@ -20,7 +21,8 @@ export type UiResourceType =
   | "reading"
   | "ppt"
   | "design"
-  | "project";
+  | "project"
+  | "review_card";
 
 export function mapApiType(type: string): UiResourceType {
   const m: Record<string, UiResourceType> = {
@@ -35,6 +37,7 @@ export function mapApiType(type: string): UiResourceType {
     ppt: "ppt",
     design: "design",
     project: "project",
+    review_card: "review_card",
   };
   return m[type] || "document";
 }
@@ -52,6 +55,7 @@ export const RESOURCE_CONFIG: Record<
   ppt: { color: "#2f54eb", icon: <FilePptOutlined />, label: "课件提纲" },
   design: { color: "#fa541c", icon: <SolutionOutlined />, label: "资源设计方案" },
   project: { color: "#389e0d", icon: <ProjectOutlined />, label: "实践项目" },
+  review_card: { color: "#9254de", icon: <ContainerOutlined />, label: "专属复习卡" },
 };
 
 export const STANDARD_RESOURCE_TYPES = ["doc", "mindmap", "quiz", "reading", "media", "code"] as const;

@@ -55,6 +55,7 @@ import { RESOURCE_CONFIG, mapApiType } from "@/lib/resourceConfig";
 import { playAssistantSpeech } from "@/lib/tts";
 import { getStreamSpeedConfig } from "@/lib/streamSpeed";
 import { isDemoUser, useAppStore } from "@/store/appStore";
+import { openResourceView } from "@/lib/resourceViewCache";
 import { useSettingsStore } from "@/store/settingsStore";
 import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
 import {
@@ -514,9 +515,9 @@ export default function ChatContent() {
 
   const handleResourceClick = useCallback(
     (id: string) => {
-      router.push(`/resources/view/${encodeURIComponent(id)}`);
+      openResourceView(router, id, userId);
     },
-    [router]
+    [router, userId]
   );
 
   const syncAfterChat = useCallback(async () => {

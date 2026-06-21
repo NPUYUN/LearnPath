@@ -26,7 +26,23 @@ if not defined PS_EXE (
     exit /b 1
 )
 
-echo Starting LearnPath...
+echo.
+echo ========================================
+echo   LearnPath - Start
+echo ========================================
+echo.
+
+echo [1/2] Cleaning old processes ^(including orphan uvicorn workers^)...
+"%PS_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop.ps1"
+if not "%ERRORLEVEL%"=="0" (
+    echo.
+    echo WARNING: Cleanup reported busy ports. Continuing start anyway...
+    echo          If API behaves oddly, run stop.bat again first.
+    echo.
+    timeout /t 2 >nul
+)
+
+echo [2/2] Starting backend and frontend...
 echo.
 
 "%PS_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start.ps1" -NoBrowser -KeepOpen
@@ -38,8 +54,11 @@ if not "%EXITCODE%"=="0" (
     echo Check storage\logs\backend.log.err and frontend.log.err
 ) else (
     echo Services are running in the background.
-    echo   App:  http://127.0.0.1:3000/chat
-    echo   Stop: stop.bat
+    echo   App:    http://127.0.0.1:3000/chat
+    echo   API:    http://127.0.0.1:8000/api/health
+    echo   Stop:   stop.bat
+    echo.
+    echo Tip: health should show features.review_cards = true
 )
 echo.
 echo Press any key to close this window...

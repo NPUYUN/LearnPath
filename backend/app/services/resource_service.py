@@ -320,6 +320,67 @@ def _find_resource_path_context(path: dict | None, resource_id: str) -> dict:
     return walk(path.get("steps") or []) or {}
 
 
+def _is_regeneration_artifact(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    markers = (
+        "请原地重新生成",
+        "用户选择的修改方向",
+        "用户补充要求",
+        "保持资源类型不变",
+        "本次重生成要求",
+    )
+    return any(marker in value for marker in markers)
+
+
+def _clean_regeneration_metadata(merged: dict, original: dict) -> dict:
+    """重生成后移除写入 metadata / topic 的提示词痕迹，避免卡片展示脏标签。"""
+    original_meta = original.get("metadata") if isinstance(original.get("metadata"), dict) else {}
+    clean_topic = str(original.get("topic") or "").strip()
+    if _is_regeneration_artifact(clean_topic):
+        clean_topic = ""
+
+    title = str(merged.get("title") or original.get("title") or "").strip()
+    if not clean_topic and title:
+        clean_topic = title.split("·")[0].split("-")[0].strip()[:80]
+
+    merged["topic"] = clean_topic
+
+    meta = dict(merged.get("metadata") or {}) if isinstance(merged.get("metadata"), dict) else {}
+    points = [str(x).strip() for x in (meta.get("knowledge_points") or []) if str(x).strip()]
+    points = [p for p in points if not _is_regeneration_artifact(p)]
+    if not points:
+        orig_points = [
+            str(x).strip()
+            for x in (original_meta.get("knowledge_points") or [])
+            if str(x).strip() and not _is_regeneration_artifact(str(x))
+        ]
+        points = orig_points[:5]
+    if not points and clean_topic:
+        points = [clean_topic[:80]]
+
+    meta["knowledge_points"] = points[:8]
+
+    generated_context = dict(meta.get("generated_context") or {})
+    ctx_topic = str(generated_context.get("topic") or "").strip()
+    if _is_regeneration_artifact(ctx_topic):
+        generated_context["topic"] = clean_topic or title[:80]
+    target_points = [
+        str(x).strip()
+        for x in (generated_context.get("target_knowledge_points") or [])
+        if str(x).strip() and not _is_regeneration_artifact(str(x))
+    ]
+    if target_points:
+        generated_context["target_knowledge_points"] = target_points[:8]
+    elif points:
+        generated_context["target_knowledge_points"] = points[:8]
+    meta["generated_context"] = generated_context
+
+    merged["metadata"] = meta
+    return merged
+
+
 def _regenerate_topic(resource: dict, req: ResourceRegenerateRequest, path_ctx: dict) -> str:
     tags = "、".join(t.strip() for t in req.tags if t.strip())
     requirements = (req.requirements or "").strip()
@@ -413,6 +474,7 @@ async def regenerate_resource(
     from app.agents.nodes.reviewer_agent import review_resources
 
     merged = (await review_resources([merged]))[0]
+    merged = _clean_regeneration_metadata(merged, original)
     merged = (await _attach_resources_to_path(req.user_id, [merged]))[0]
     await save_resources(req.user_id, [merged])
     await _update_library_resource_index(req.user_id, merged.get("library_id", ""), [merged])

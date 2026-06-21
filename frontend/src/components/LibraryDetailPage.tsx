@@ -46,6 +46,7 @@ import {
   isAllowedUploadFile,
 } from "@/lib/uploadFormats";
 import { formatLibraryDescription } from "@/lib/libraryDescription";
+import { openResourceView } from "@/lib/resourceViewCache";
 
 const { Text, Paragraph, Title } = Typography;
 
@@ -469,7 +470,7 @@ export default function LibraryDetailPage({ libraryId }: LibraryDetailPageProps)
                 key={String(row.id)}
                 type="button"
                 className="lp-library-generated-resource"
-                onClick={() => router.push(`/resources/view/${encodeURIComponent(String(row.id))}`)}
+                onClick={() => openResourceView(router, String(row.id), userId)}
               >
                 <FileTextOutlined />
                 <span>{String(row.title || row.id)}</span>

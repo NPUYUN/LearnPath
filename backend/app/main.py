@@ -46,6 +46,8 @@ from app.api.routes import (
     account,
     tts,
     media,
+    mastery,
+    review_cards,
 )
 from app.core.config import ROOT_DIR, get_settings
 from app.db.session import init_db
@@ -89,6 +91,7 @@ app.include_router(chat.router, prefix="/api")
 app.include_router(classroom.router, prefix="/api")
 app.include_router(profile.router, prefix="/api")
 app.include_router(resources.router, prefix="/api")
+app.include_router(review_cards.router, prefix="/api")
 app.include_router(libraries.router, prefix="/api")
 app.include_router(path.router, prefix="/api")
 app.include_router(tutor.router, prefix="/api")
@@ -103,3 +106,4 @@ app.include_router(admin.router, prefix="/api")
 app.include_router(demo.router, prefix="/api")
 app.include_router(tts.router, prefix="/api")
 app.include_router(media.router, prefix="/api")
+app.include_router(mastery.router, prefix="/api")

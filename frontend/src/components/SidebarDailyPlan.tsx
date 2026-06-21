@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Checkbox, Input, Tooltip, Typography, message } from "antd";
 import CalendarOutlined from "@ant-design/icons/CalendarOutlined";
 import PlusOutlined from "@ant-design/icons/PlusOutlined";
@@ -19,9 +19,10 @@ const { Text } = Typography;
 
 type SidebarDailyPlanProps = {
   collapsed: boolean;
+  onStatsChange?: (done: number, total: number) => void;
 };
 
-export default function SidebarDailyPlan({ collapsed }: SidebarDailyPlanProps) {
+export default function SidebarDailyPlan({ collapsed, onStatsChange }: SidebarDailyPlanProps) {
   const userId = useAppStore((s) => s.userId);
   const [plan, setPlan] = useState<DailyPlan>(() => normalizeDailyPlan(null));
   const [draft, setDraft] = useState("");
@@ -80,6 +81,13 @@ export default function SidebarDailyPlan({ collapsed }: SidebarDailyPlanProps) {
   );
 
   const doneCount = useMemo(() => plan.tasks.filter((t) => t.done).length, [plan.tasks]);
+
+  const onStatsChangeRef = useRef(onStatsChange);
+  onStatsChangeRef.current = onStatsChange;
+
+  useEffect(() => {
+    onStatsChangeRef.current?.(doneCount, plan.tasks.length);
+  }, [doneCount, plan.tasks.length]);
 
   const addTask = () => {
     const text = draft.trim();

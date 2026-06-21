@@ -15,6 +15,7 @@ import {
   Tag,
   Timeline,
   Typography,
+  message,
 } from "antd";
 import {
   BookOutlined,
@@ -28,11 +29,21 @@ import type { EChartsOption } from "echarts";
 import { useEcharts } from "@/lib/useEcharts";
 import { getChartPalette, isDarkTheme } from "@/lib/chartTheme";
 import PageHeader from "@/components/PageHeader";
-import { getEvalStats, type EvalStats } from "@/lib/api";
+import { getEvalStats, refreshEvalStats, type EvalStats } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
 import BarChartOutlined from "@ant-design/icons/BarChartOutlined";
 
 const { Text, Paragraph } = Typography;
+
+function _formatAdviceTime(iso: string): string {
+  try {
+    const dt = new Date(iso);
+    if (Number.isNaN(dt.getTime())) return iso.slice(0, 10);
+    return `${dt.getMonth() + 1}月${dt.getDate()}日 ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
 
 const RESOURCE_TYPE_LABELS: Record<string, string> = {
   doc: "文档",
@@ -56,6 +67,7 @@ export default function EvaluationContent() {
   const setEvalStats = useAppStore((s) => s.setEvalStats);
   const [stats, setStats] = useState<EvalStats | null>(storeStats);
   const [loading, setLoading] = useState(!storeStats);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
 
@@ -77,6 +89,24 @@ export default function EvaluationContent() {
       setError(err instanceof Error ? err.message : "加载失败");
     } finally {
       setLoading(false);
+    }
+  }, [userId, setEvalStats]);
+
+  const handleRefreshEval = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const data = await refreshEvalStats(userId);
+      setStats(data);
+      setEvalStats(data);
+      setError(null);
+      message.success(
+        data.advice_updated_at ? "评估已更新" : "评估数据已刷新"
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "更新评估失败";
+      message.error(msg);
+    } finally {
+      setRefreshing(false);
     }
   }, [userId, setEvalStats]);
 
@@ -173,13 +203,27 @@ export default function EvaluationContent() {
       ]
     : [];
 
-  const suggestion = stats
-    ? stats.total_resources === 0
-      ? "你尚未生成任何学习资源。建议先前往「AI 助手」对话，让系统为你构建学习画像并生成资源。"
-      : stats.profile_completeness < 50
-        ? `当前画像完整度为 ${stats.profile_completeness}%，建议继续与 AI 助手对话，补全学习偏好信息。`
-        : `整体表现良好，已生成 ${stats.total_resources} 个学习资源，画像完整度 ${stats.profile_completeness}%。`
-    : "";
+  const suggestion =
+    stats?.ai_advice ||
+    (stats
+      ? stats.total_resources === 0
+        ? "你尚未生成任何学习资源。建议先前往「AI 助手」对话，让系统为你构建学习画像并生成资源。"
+        : stats.profile_completeness < 50
+          ? `当前画像完整度为 ${stats.profile_completeness}%，建议继续与 AI 助手对话，补全学习偏好信息。`
+          : `整体表现良好，已生成 ${stats.total_resources} 个学习资源，画像完整度 ${stats.profile_completeness}%。`
+      : "");
+
+  const strengthsText =
+    stats?.strengths ||
+    (stats && stats.profile_completeness >= 60
+      ? "学习画像较完整，资源推荐精准度高。"
+      : "已开始学习，具备初步数据基础。");
+
+  const improvementsText =
+    stats?.improvements ||
+    (stats?.has_path
+      ? "继续按路径推进，完成更多资源学习。"
+      : "尚未生成学习路径，建议与 AI 助手对话自动规划。");
 
   if (loading) {
     return (
@@ -188,7 +232,7 @@ export default function EvaluationContent() {
       </div>
     );
   }
-  if (error) {
+  if (error && !stats) {
     return (
       <div style={{ padding: 24, maxWidth: 1060, margin: "0 auto" }}>
         <Empty description={`加载失败：${error}`}>
@@ -211,7 +255,7 @@ export default function EvaluationContent() {
             <Button icon={<ReloadOutlined />} onClick={fetchStats}>
               刷新
             </Button>
-            <Button icon={<RiseOutlined />} type="primary" onClick={() => clientNavigate("/chat")}>
+            <Button icon={<RiseOutlined />} type="primary" loading={refreshing} onClick={() => void handleRefreshEval()}>
               更新评估
             </Button>
           </Space>
@@ -285,21 +329,31 @@ export default function EvaluationContent() {
                 </Card>
               </Col>
               <Col xs={24} lg={14}>
-                <Card title="AI 学习建议" extra={<Tag color="blue">自动生成</Tag>}>
-                  <Paragraph className="lp-prose">{suggestion}</Paragraph>
+                <Card
+                  title="AI 学习建议"
+                  extra={
+                    <Space size={6}>
+                      <Tag color="blue">自动生成</Tag>
+                      {stats?.advice_updated_at ? (
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          更新于 {_formatAdviceTime(stats.advice_updated_at)}
+                        </Text>
+                      ) : null}
+                    </Space>
+                  }
+                >
+                  <Paragraph className="lp-prose" style={{ whiteSpace: "pre-wrap" }}>
+                    {suggestion}
+                  </Paragraph>
                   {stats && stats.total_resources > 0 && (
                     <>
                       <Paragraph className="lp-prose">
                         <Text strong>优势：</Text>
-                        {stats.profile_completeness >= 60
-                          ? "学习画像较完整，资源推荐精准度高。"
-                          : "已开始学习，具备初步数据基础。"}
+                        {strengthsText}
                       </Paragraph>
                       <Paragraph className="lp-prose">
                         <Text strong>待提升：</Text>
-                        {stats.has_path
-                          ? "继续按路径推进，完成更多资源学习。"
-                          : "尚未生成学习路径，建议与 AI 助手对话自动规划。"}
+                        {improvementsText}
                       </Paragraph>
                       <Divider style={{ margin: "12px 0" }} />
                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

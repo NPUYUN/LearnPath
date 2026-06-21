@@ -1,6 +1,13 @@
 import { clearAccessToken, clearAuthSession, getAccessToken, setAccessToken } from "@/store/authStore";
 import { apiUrl } from "./apiBase";
 import { decodeStreamTextPayload, parseSseBlock } from "./sseParse";
+import {
+  buildMasteryRecord,
+  formatReviewLabel,
+  loadLocalMasteryRecords,
+  recordLookupKey,
+  saveLocalMasteryRecord,
+} from "./masteryStorage";
 
 export { apiUrl };
 
@@ -20,6 +27,22 @@ async function handleResponse(res: Response): Promise<Response> {
     throw new Error("登录已过期，请重新登录");
   }
   return res;
+}
+
+async function readApiError(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const data = JSON.parse(text) as { detail?: string };
+    if (typeof data.detail === "string") {
+      if (data.detail === "Not Found" && res.status === 404) {
+        return `请求的资源不存在（404），请确认后端已更新并完成重启`;
+      }
+      return data.detail;
+    }
+  } catch {
+    /* ignore */
+  }
+  return text || `请求失败（${res.status}）`;
 }
 
 export type StudentProfile = {
@@ -872,6 +895,65 @@ export async function deleteLibrary(userId: string, libraryId: string) {
   return res.json() as Promise<{ ok: boolean }>;
 }
 
+export type GenerateReviewCardResult = {
+  card: LearningResource;
+};
+
+export async function listReviewCards(userId: string): Promise<LearningResource[]> {
+  const paths = [
+    `/api/review-cards?user_id=${encodeURIComponent(userId)}`,
+    `/api/resources/review-cards?user_id=${encodeURIComponent(userId)}`,
+  ];
+  for (const path of paths) {
+    try {
+      const res = await handleResponse(await fetch(apiUrl(path), { headers: authHeaders() }));
+      if (res.ok) {
+        return (await res.json()) as LearningResource[];
+      }
+      if (res.status !== 404) throw new Error(await readApiError(res));
+    } catch (e: unknown) {
+      if (e instanceof Error && !e.message.includes("404")) throw e;
+    }
+  }
+  return [];
+}
+
+export async function generateReviewCard(
+  userId: string,
+  topic: string,
+): Promise<GenerateReviewCardResult> {
+  const paths = ["/api/review-cards/generate", "/api/resources/review-cards/generate"];
+  let lastError = "复习卡生成失败，请确认后端已启动（stop.bat → start.bat）";
+  for (const path of paths) {
+    try {
+      const res = await fetch(apiUrl(path), {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ user_id: userId, topic: topic.trim() }),
+      });
+      if (res.status === 401) {
+        clearAccessToken();
+        clearAuthSession();
+        throw new Error("登录已过期，请重新登录");
+      }
+      if (res.ok) {
+        const card = (await res.json()) as LearningResource;
+        return { card };
+      }
+      if (res.status === 404) continue;
+      lastError = await readApiError(res);
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message.includes("登录已过期")) throw e;
+      if (e instanceof Error && e.message === "Failed to fetch") {
+        lastError = "无法连接后端，请确认已运行 start.bat 且 http://127.0.0.1:8000 可访问";
+      } else if (e instanceof Error) {
+        lastError = e.message;
+      }
+    }
+  }
+  throw new Error(lastError);
+}
+
 export async function generateResources(
   userId: string,
   topic: string,
@@ -952,13 +1034,19 @@ export async function recordResourceView(userId: string, resourceId: string) {
   );
 }
 
-export async function recordResourceComplete(userId: string, resourceId: string) {
-  await handleResponse(
+export async function recordResourceComplete(
+  userId: string,
+  resourceId: string,
+  masteryLevel?: MasteryLevel
+) {
+  const res = await handleResponse(
     await fetch(apiUrl(`/api/resources/${resourceId}/complete?user_id=${userId}`), {
       method: "POST",
       headers: authHeaders(),
+      body: JSON.stringify(masteryLevel ? { mastery_level: masteryLevel } : {}),
     })
   );
+  if (!res.ok) throw new Error(await readApiError(res));
 }
 
 export async function streamGenerateResources(
@@ -1019,17 +1107,128 @@ export async function streamGenerateResources(
 export async function updatePathStep(
   userId: string,
   stepKey: string,
-  status: "pending" | "in_progress" | "done"
+  status: "pending" | "in_progress" | "done",
+  options?: { masteryLevel?: MasteryLevel; resourceId?: string }
 ) {
+  const body: Record<string, string> = {};
+  if (options?.masteryLevel) {
+    body.mastery_level = options.masteryLevel;
+    if (options.resourceId) body.resource_id = options.resourceId;
+  } else {
+    body.status = status;
+  }
   const res = await handleResponse(
     await fetch(apiUrl(`/api/path/${userId}/steps/${encodeURIComponent(stepKey)}`), {
       method: "PATCH",
       headers: authHeaders(),
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(body),
     })
   );
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await readApiError(res));
   return res.json() as Promise<LearningPath>;
+}
+
+export type MasteryLevel = "forgot" | "fuzzy" | "mastered";
+
+export type MasteryRecord = {
+  level: MasteryLevel;
+  next_review_at: string;
+  interval_days: number;
+  streak: number;
+  step_key: string;
+  resource_id: string;
+  title: string;
+  updated_at: string;
+};
+
+export type MasteryFeedbackResponse = {
+  ok: boolean;
+  record: MasteryRecord;
+  path_updated: boolean;
+  next_review_label: string;
+};
+
+export async function submitMasteryFeedback(
+  userId: string,
+  masteryLevel: MasteryLevel,
+  options?: { resourceId?: string; stepKey?: string; title?: string }
+): Promise<MasteryFeedbackResponse> {
+  const key = recordLookupKey(options?.resourceId, options?.stepKey);
+  if (!key) throw new Error("请提供 resourceId 或 stepKey");
+
+  const localRecords = loadLocalMasteryRecords(userId);
+  const record = buildMasteryRecord(masteryLevel, options || {}, localRecords[key]);
+
+  try {
+    const res = await handleResponse(
+      await fetch(apiUrl("/api/mastery/feedback"), {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          user_id: userId,
+          mastery_level: masteryLevel,
+          resource_id: options?.resourceId || "",
+          step_key: options?.stepKey || "",
+        }),
+      })
+    );
+    if (res.ok) {
+      const data = (await res.json()) as MasteryFeedbackResponse;
+      saveLocalMasteryRecord(userId, key, data.record);
+      return data;
+    }
+  } catch {
+    /* 降级到路径接口 */
+  }
+
+  try {
+    const res = await handleResponse(
+      await fetch(apiUrl(`/api/path/${userId}/mastery-feedback`), {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          user_id: userId,
+          mastery_level: masteryLevel,
+          resource_id: options?.resourceId || "",
+          step_key: options?.stepKey || "",
+        }),
+      })
+    );
+    if (res.ok) {
+      const data = (await res.json()) as MasteryFeedbackResponse;
+      saveLocalMasteryRecord(userId, key, data.record);
+      return data;
+    }
+  } catch {
+    /* 降级到本地记录 */
+  }
+
+  saveLocalMasteryRecord(userId, key, record);
+
+  return {
+    ok: true,
+    record,
+    path_updated: false,
+    next_review_label: formatReviewLabel(record.next_review_at),
+  };
+}
+
+export async function getMasteryRecords(userId: string): Promise<{
+  user_id: string;
+  records: Record<string, MasteryRecord>;
+}> {
+  const local = loadLocalMasteryRecords(userId);
+  try {
+    const prefs = await getPreferences(userId);
+    const remote = (prefs as UserPreferences & { mastery_records?: Record<string, MasteryRecord> })
+      .mastery_records;
+    if (remote && Object.keys(remote).length) {
+      return { user_id: userId, records: { ...local, ...remote } };
+    }
+  } catch {
+    /* 使用本地缓存 */
+  }
+  return { user_id: userId, records: local };
 }
 
 export type ChatAttachment = {
@@ -1935,9 +2134,15 @@ export type EvalStats = {
   resources_by_type: Record<string, number>;
   profile_completeness: number;
   study_days: number;
+  study_streak?: number;
+  studied_today?: boolean;
   has_path: boolean;
   radar: RadarData;
   recent_events: EvalEvent[];
+  ai_advice?: string;
+  strengths?: string;
+  improvements?: string;
+  advice_updated_at?: string;
 };
 
 export type EvalSubmitResponse = {
@@ -1951,8 +2156,35 @@ export async function getEvalStats(userId: string): Promise<EvalStats> {
   const res = await handleResponse(
     await fetch(apiUrl(`/api/eval/${userId}`), { headers: authHeaders() })
   );
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await readApiError(res));
   return res.json() as Promise<EvalStats>;
+}
+
+export async function refreshEvalStats(userId: string): Promise<EvalStats> {
+  const postRes = await handleResponse(
+    await fetch(apiUrl(`/api/eval/${userId}/refresh`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (postRes.ok) {
+    return postRes.json() as Promise<EvalStats>;
+  }
+  if (postRes.status !== 404) {
+    throw new Error(await readApiError(postRes));
+  }
+
+  const getRefreshRes = await handleResponse(
+    await fetch(apiUrl(`/api/eval/${userId}?refresh=1`), { headers: authHeaders() })
+  );
+  if (getRefreshRes.ok) {
+    return getRefreshRes.json() as Promise<EvalStats>;
+  }
+  if (getRefreshRes.status !== 404 && getRefreshRes.status !== 422) {
+    throw new Error(await readApiError(getRefreshRes));
+  }
+
+  return getEvalStats(userId);
 }
 
 export async function submitEval(

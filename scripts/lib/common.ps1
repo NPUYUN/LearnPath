@@ -104,15 +104,24 @@ function Ensure-EnvFiles([string]$Root) {
 
 function Get-BackendPython([string]$Root) {
     $junction = "C:\LP"
-    $ji = Get-Item $junction -ErrorAction SilentlyContinue
-    $useJunction = ($ji -and $ji.LinkType -eq "Junction") -and
-        ((Test-Path "$junction\backend\.venv-codex\Scripts\python.exe") -or
-            (Test-Path "$junction\backend\.venv\Scripts\python.exe"))
-    if (-not $useJunction) {
+    $rootResolved = (Resolve-Path $Root).Path
+    $ji = Get-Item $junction -Force -ErrorAction SilentlyContinue
+    $junctionOk = $false
+    if ($ji -and $ji.LinkType -eq "Junction") {
+        $target = ($ji.Target | Select-Object -First 1)
+        if ($target) {
+            try {
+                $junctionOk = ((Resolve-Path $target).Path -eq $rootResolved)
+            } catch {
+                $junctionOk = $false
+            }
+        }
+    }
+    if (-not $junctionOk) {
         try {
             if (Test-Path $junction) { cmd /c "rmdir `"$junction`"" 2>$null }
-            New-Item -ItemType Junction -Path $junction -Target $Root -ErrorAction Stop | Out-Null
-            Write-Step "Junction $junction -> $Root (ASCII path for Python)"
+            New-Item -ItemType Junction -Path $junction -Target $rootResolved -ErrorAction Stop | Out-Null
+            Write-Step "Junction $junction -> $rootResolved (ASCII path for Python)"
         } catch {
             return @{
                 Python = Join-Path $Root "backend\.venv\Scripts\python.exe"
@@ -135,31 +144,123 @@ function Get-BackendPython([string]$Root) {
 
 function Stop-PortListeners([int[]]$Ports) {
     foreach ($port in $Ports) {
-        try {
-            $pids = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
-                ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
-            foreach ($pid in $pids) {
-                if ($pid) {
-                    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-                    Write-Step "Released port $port (PID $pid)"
-                }
+        for ($round = 0; $round -lt 5; $round++) {
+            $procIds = @()
+            try {
+                $procIds += @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+                    ForEach-Object { $_.OwningProcess } | Sort-Object -Unique)
+            } catch {}
+            try {
+                $procIds += @(netstat -ano | Select-String ":$port\s" | ForEach-Object {
+                    if ($_ -match 'LISTENING\s+(\d+)\s*$') { [int]$Matches[1] }
+                })
+            } catch {}
+            $procIds = @($procIds | Where-Object { $_ -and $_ -gt 0 } | Sort-Object -Unique)
+            if (-not $procIds.Count) { break }
+            foreach ($procId in $procIds) {
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                taskkill /F /PID $procId 2>$null | Out-Null
+                Write-Step "Released port $port (PID $procId)"
             }
-        } catch {}
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+
+function Get-AlivePortListenerIds([int]$Port) {
+    $procIds = @()
+    try {
+        $procIds += @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.OwningProcess })
+    } catch {}
+    try {
+        $procIds += @(netstat -ano | Select-String ":$Port\s" | ForEach-Object {
+            if ($_ -match 'LISTENING\s+(\d+)\s*$') { [int]$Matches[1] }
+        })
+    } catch {}
+    return @($procIds | Where-Object { $_ -and $_ -gt 0 } | Sort-Object -Unique | Where-Object {
+        $null -ne (Get-Process -Id $_ -ErrorAction SilentlyContinue)
+    })
+}
+
+function Stop-LearnPathPythonProcesses {
+    $killed = 0
+    try {
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.Name -eq "python.exe" -and $_.CommandLine -match "uvicorn|app\.main|spawn_main|multiprocessing-fork"
+            } |
+            ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                taskkill /F /PID $_.ProcessId 2>$null | Out-Null
+                $killed++
+            }
+    } catch {}
+    return $killed
+}
+
+function Stop-OrphanUvicornWorkers {
+    $killed = 0
+    try {
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.Name -eq "python.exe" -and $_.CommandLine -match "spawn_main|multiprocessing-fork"
+            } |
+            ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                taskkill /F /PID $_.ProcessId 2>$null | Out-Null
+                Write-Step "Stopped orphan uvicorn worker (PID $($_.ProcessId))"
+                $killed++
+            }
+    } catch {}
+    return $killed
+}
+
+function Stop-LearnPathProcessesDeep {
+    Write-Step "Releasing ports 8000/8001/3000..."
+    Stop-PortListeners -Ports @(8000, 8001, 3000, 3001, 3002)
+
+    $pyCount = Stop-LearnPathPythonProcesses
+    if ($pyCount -gt 0) {
+        Write-Step "Stopped $pyCount Python backend process(es)"
+    }
+
+    $orphanCount = Stop-OrphanUvicornWorkers
+    if ($orphanCount -eq 0) {
+        Write-Step "No orphan uvicorn reload workers found"
+    }
+
+    try {
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq "node.exe" -and $_.CommandLine -match "next" } |
+            ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+                Write-Step "Stopped frontend (PID $($_.ProcessId))"
+            }
+    } catch {}
+
+    Start-Sleep -Milliseconds 600
+
+    Write-Step "Final sweep..."
+    Stop-PortListeners -Ports @(8000, 8001, 3000, 3001, 3002)
+    Stop-LearnPathPythonProcesses | Out-Null
+    Stop-OrphanUvicornWorkers | Out-Null
+
+    $busy = @()
+    foreach ($port in @(8000, 3000)) {
+        $alive = @(Get-AlivePortListenerIds -Port $port)
+        if ($alive.Count) {
+            $busy += "$port(PID $($alive -join ','))"
+        }
+    }
+    return @{
+        OrphanWorkersStopped = $orphanCount
+        BusyPorts = $busy
     }
 }
 
 function Stop-LearnPathProcesses {
-    Stop-PortListeners -Ports @(8000, 8001, 3000, 3001, 3002)
-    try {
-        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-            Where-Object {
-                ($_.Name -eq "python.exe" -and $_.CommandLine -match "uvicorn|app\.main") -or
-                ($_.Name -eq "node.exe" -and $_.CommandLine -match "next")
-            } |
-            ForEach-Object {
-                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-            }
-    } catch {}
+    Stop-LearnPathProcessesDeep | Out-Null
 }
 
 function Wait-HttpOk {

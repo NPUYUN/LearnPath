@@ -750,12 +750,10 @@ export default function LandingContent() {
       <section id="lp-how" className="lp-section lp-container">
           <SystemLoopMapContent />
           <div className="lp-block-gap" />
-          <div className="lp-section-header lp-section-header--split">
-            <div>
-              <div className="lp-section-tag">学习闭环</div>
-              <h2 className="lp-section-title">四步完成个性化学习</h2>
-              <p className="lp-section-desc">从第一次对话到路径调整，数据在各模块间自动流转。</p>
-            </div>
+          <div className="lp-section-header lp-section-header--center">
+            <div className="lp-section-tag">学习闭环</div>
+            <h2 className="lp-section-title">四步完成个性化学习</h2>
+            <p className="lp-section-desc">从第一次对话到路径调整，数据在各模块间自动流转。</p>
           </div>
           <div className="lp-workflow-track">
             {WORKFLOW.map((item, index) => (

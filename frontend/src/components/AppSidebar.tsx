@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Avatar, Button, Flex, Tag, Tooltip, Typography } from "antd";
 import { NAV_META, pathProgress } from "@/lib/navMeta";
 import { BRAND_CN, BRAND_EN } from "@/lib/brand";
 import { useAppStore } from "@/store/appStore";
 import SidebarDailyPlan from "@/components/SidebarDailyPlan";
+import SidebarStudyStats from "@/components/SidebarStudyStats";
 import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import MenuFoldOutlined from "@ant-design/icons/MenuFoldOutlined";
 import MenuUnfoldOutlined from "@ant-design/icons/MenuUnfoldOutlined";
@@ -139,6 +140,13 @@ export default function AppSidebar({
 }: AppSidebarProps) {
   const initial = userName?.charAt(0) || "学";
   const learningPath = useAppStore((s) => s.learningPath);
+  const [dailyPlanStats, setDailyPlanStats] = useState({ done: 0, total: 0 });
+
+  const handleDailyPlanStatsChange = useCallback((done: number, total: number) => {
+    setDailyPlanStats((prev) =>
+      prev.done === done && prev.total === total ? prev : { done, total },
+    );
+  }, []);
 
   const progressPct = useMemo(
     () => pathProgress(learningPath?.steps),
@@ -199,7 +207,15 @@ export default function AppSidebar({
           ))}
         </div>
 
-        <SidebarDailyPlan collapsed={collapsed} />
+        <SidebarStudyStats
+          collapsed={collapsed}
+          dailyDone={dailyPlanStats.done}
+          dailyTotal={dailyPlanStats.total}
+        />
+        <SidebarDailyPlan
+          collapsed={collapsed}
+          onStatsChange={handleDailyPlanStatsChange}
+        />
 
         <div className="lp-nav-secondary">
           {secondaryItems.map((item) => (

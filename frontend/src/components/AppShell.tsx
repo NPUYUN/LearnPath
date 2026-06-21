@@ -381,7 +381,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   // 登录后后台静默预热各页（不切换可见内容，避免从对话页「闪跳」到画像等页面）
   useEffect(() => {
-    if (!isLoggedIn || !allModulesLoaded || !dataReady || cycleStarted.current) return;
+    if (!isLoggedIn || !allModulesLoaded || !dataReady) return;
+    if (cycleStarted.current && finishCalled.current) return;
+    if (cycleStarted.current && !finishCalled.current) {
+      cycleStarted.current = false;
+    }
+    if (cycleStarted.current) return;
     cycleStarted.current = true;
 
     let cancelled = false;
@@ -414,8 +419,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      if (!finishCalled.current) {
+        cycleStarted.current = false;
+      }
     };
-  }, [isLoggedIn, isAdminMode, allModulesLoaded, dataReady, finishInit, router]);
+  }, [isLoggedIn, isAdminMode, allModulesLoaded, dataReady, finishInit, warmRouteList]);
+
+  // 进入资源全屏子页时跳过初始化遮罩，避免预热被 router 导航打断后卡死
+  useEffect(() => {
+    if (!isLoggedIn || initDone || !isResourcesSubPath(pathname)) return;
+    finishInit();
+  }, [isLoggedIn, initDone, pathname, finishInit]);
 
   // 模块与数据就绪但预热未结束时兜底进入（避免无限加载）
   useEffect(() => {
@@ -557,7 +571,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
-      {!initDone && <InitLoadingScreen progress={initProgress} fading={initFading} />}
+      {!initDone && !isResourcesSubPath(pathname) && (
+        <InitLoadingScreen progress={initProgress} fading={initFading} />
+      )}
       {showStandaloneLoader && (
         <RouteLoadingScreen
           variant={standaloneTx?.target === "/insights" ? "insights" : "default"}

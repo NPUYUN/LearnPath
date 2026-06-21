@@ -5,6 +5,8 @@ from app.db.repository import delete_path, get_path, save_path
 from app.models.schemas import (
     LearningPath,
     LearningResource,
+    MasteryFeedbackRequest,
+    MasteryFeedbackResponse,
     PathConfirmMeta,
     PathConfirmResponse,
     PathReplanJob,
@@ -13,6 +15,7 @@ from app.models.schemas import (
     PathReplanResponse,
     PathStepStatusUpdate,
 )
+from app.services.mastery_service import list_mastery_records, submit_mastery_feedback
 from app.services.path_confirm_service import confirm_replan
 from app.services.path_replan_job_service import create_path_replan_job, get_path_replan_job
 from app.services.path_replan_service import replan_learning_path
@@ -24,6 +27,32 @@ from app.services.path_utils import (
 )
 
 router = APIRouter(prefix="/path", tags=["path"])
+
+
+@router.post("/{user_id}/mastery-feedback", response_model=MasteryFeedbackResponse)
+async def path_mastery_feedback(
+    body: MasteryFeedbackRequest,
+    user_id: str = Depends(assert_user_access),
+):
+    """掌握度反馈：写入复习计划与学习事件，不修改路径完成状态。"""
+    if body.user_id != user_id:
+        raise HTTPException(403, "无权访问该用户数据")
+    try:
+        result = await submit_mastery_feedback(
+            user_id,
+            body.mastery_level,
+            resource_id=body.resource_id,
+            step_key=body.step_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return MasteryFeedbackResponse(**result)
+
+
+@router.get("/{user_id}/mastery-records")
+async def path_mastery_records(user_id: str = Depends(assert_user_access)):
+    records = await list_mastery_records(user_id)
+    return {"user_id": user_id, "records": records}
 
 
 @router.get("/replan-jobs/{job_id}", response_model=PathReplanJob)
@@ -165,7 +194,24 @@ async def update_step_status(
         if legacy:
             step_id = legacy.get("id") or step_key
 
-    if not apply_step_status_update(steps, step_id, body.status):
+    if body.mastery_level:
+        try:
+            await submit_mastery_feedback(
+                user_id,
+                body.mastery_level,
+                resource_id=body.resource_id,
+                step_key=step_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        data = await get_path(user_id)
+        if not data:
+            raise HTTPException(404, "学习路径不存在")
+        _ensure_step_ids(data)
+        return LearningPath(**data)
+
+    status = body.status or "done"
+    if not apply_step_status_update(steps, step_id, status):
         raise HTTPException(404, "步骤不存在")
 
     await save_path(data)

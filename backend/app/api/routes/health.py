@@ -11,5 +11,5 @@ async def health():
         "status": "ok",
         "service": "learnpath-api",
         "llm": llm_runtime_status(),
-        "features": {"path_ai_v2": True},
+        "features": {"path_ai_v2": True, "review_cards": True},
     }

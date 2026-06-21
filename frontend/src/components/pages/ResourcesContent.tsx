@@ -58,6 +58,8 @@ import {
 } from "@/lib/resourceGrouping";
 import PageHeader from "@/components/PageHeader";
 import ResourceLibraryPanel from "@/components/ResourceLibraryPanel";
+import ReviewCardGenerateModal from "@/components/ReviewCardGenerateModal";
+import ReviewCardsPanel from "@/components/ReviewCardsPanel";
 import { ResourceJourneyView } from "@/components/ResourceJourneyView";
 import { useAppStore } from "@/store/appStore";
 import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
@@ -69,6 +71,9 @@ import {
 } from "@/lib/uploadFormats";
 import { useSettingsStore } from "@/store/settingsStore";
 import { downloadResourceMarkdown } from "@/lib/downloadResource";
+import { collectMajorReviewTopics } from "@/lib/reviewCardTopics";
+import { openResourceView } from "@/lib/resourceViewCache";
+import ReadOutlined from "@ant-design/icons/ReadOutlined";
 import PlusOutlined from "@ant-design/icons/PlusOutlined";
 import SearchOutlined from "@ant-design/icons/SearchOutlined";
 import BookOutlined from "@ant-design/icons/BookOutlined";
@@ -176,6 +181,7 @@ export default function ResourcesContent() {
   const [genStage, setGenStage] = useState("");
   const [genProgress, setGenProgress] = useState(0);
   const [genModalOpen, setGenModalOpen] = useState(false);
+  const [reviewCardModalOpen, setReviewCardModalOpen] = useState(false);
   const [genWizardStep, setGenWizardStep] = useState<1 | 2>(1);
   const [pageTab, setPageTab] = useState("resources");
   const [manageMode, setManageMode] = useState(false);
@@ -189,7 +195,12 @@ export default function ResourcesContent() {
       setPageTab("libraries");
       sessionStorage.removeItem("lp-resources-tab");
     }
-  }, []);
+    try {
+      localStorage.removeItem(`lp_review_cards_${userId}`);
+    } catch {
+      /* 清理旧版本本地复习卡缓存 */
+    }
+  }, [userId]);
   const [libraries, setLibraries] = useState<ResourceLibrary[]>([]);
   const [selectedLibraryId, setSelectedLibraryId] = useState<string | null>(null);
   const [genSource, setGenSource] = useState<GenSource>("");
@@ -263,8 +274,15 @@ export default function ResourcesContent() {
     setGenModalOpen(true);
   };
 
-  const openResourceById = (id: string) => {
-    router.push(`/resources/view/${encodeURIComponent(id)}`);
+  const openResourceById = (id: string, resource?: LearningResource) => {
+    if (resource) {
+      openResourceView(router, resource, userId);
+      return;
+    }
+    const hit =
+      items.find((r) => r.id === id) ??
+      cachedResources.find((r) => r.id === id);
+    openResourceView(router, hit ?? id, userId);
   };
 
   const openPreview = (r: LearningResource) => {
@@ -387,9 +405,30 @@ export default function ResourcesContent() {
     }
   };
 
+  const pathSteps = learningPath?.steps ?? [];
+
+  const learningItems = useMemo(
+    () => items.filter((r) => r.type !== "review_card"),
+    [items]
+  );
+  const reviewCards = useMemo(
+    () => items.filter((r) => r.type === "review_card"),
+    [items]
+  );
+  const topicSuggestions = useMemo(() => {
+    const sources: string[] = [];
+    flattenPathSteps(pathSteps).forEach((step) => {
+      if (step.title?.trim()) sources.push(step.title);
+    });
+    learningItems.forEach((r) => {
+      if (r.topic?.trim()) sources.push(r.topic);
+    });
+    return collectMajorReviewTopics(sources);
+  }, [learningItems, pathSteps]);
+
   const grouped = useMemo(
-    () => groupResourcesByStage(items, learningPath),
-    [items, learningPath]
+    () => groupResourcesByStage(learningItems, learningPath),
+    [learningItems, learningPath]
   );
 
   const filteredGrouped = useMemo(
@@ -397,7 +436,6 @@ export default function ResourcesContent() {
     [grouped, search, activeCategory]
   );
 
-  const pathSteps = learningPath?.steps ?? [];
   const doneSteps = pathSteps.filter((s) => s.status === "done").length;
   const activeStep = pathSteps.find((s) => s.status === "in_progress");
   const visibleCount = filteredGrouped.stages.reduce((n, s) => n + s.resourceCount, 0);
@@ -780,7 +818,17 @@ export default function ResourcesContent() {
         onClose={() => setPreviewResource(null)}
         onOpenFull={(r) => {
           setPreviewResource(null);
-          openResourceById(r.id);
+          openResourceById(r.id, r);
+        }}
+      />
+      <ReviewCardGenerateModal
+        open={reviewCardModalOpen}
+        userId={userId}
+        topicSuggestions={topicSuggestions}
+        onClose={() => setReviewCardModalOpen(false)}
+        onCreated={() => {
+          void load(true);
+          setPageTab("review_cards");
         }}
       />
       <PageHeader
@@ -802,6 +850,9 @@ export default function ResourcesContent() {
                 {manageMode ? "退出管理" : "管理资源"}
               </Button>
             )}
+            <Button icon={<ReadOutlined />} onClick={() => setReviewCardModalOpen(true)}>
+              生成复习卡
+            </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -1234,6 +1285,17 @@ export default function ResourcesContent() {
         </button>
         <button
           type="button"
+          className={`lp-resource-tab${pageTab === "review_cards" ? " lp-resource-tab--active" : ""}`}
+          onClick={() => {
+            setPageTab("review_cards");
+            setManageMode(false);
+            setSelectedIds([]);
+          }}
+        >
+          复习卡
+        </button>
+        <button
+          type="button"
           className={`lp-resource-tab${pageTab === "libraries" ? " lp-resource-tab--active" : ""}`}
           onClick={() => {
             setPageTab("libraries");
@@ -1252,6 +1314,17 @@ export default function ResourcesContent() {
               setSelectedLibraryId(id);
               if (id) setGenSource("existing_library");
             }}
+          />
+        ) : pageTab === "review_cards" ? (
+          <ReviewCardsPanel
+            userId={userId}
+            cards={reviewCards}
+            loading={loading}
+            onRefresh={() => void load(true)}
+            onPreview={openPreview}
+            onOpenFull={(r) => openResourceById(r.id, r)}
+            onDelete={handleDeleteResource}
+            onGenerate={() => setReviewCardModalOpen(true)}
           />
         ) : (
           <>

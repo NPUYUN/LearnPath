@@ -20,7 +20,10 @@ from app.models.schemas import (
     ResourceRegenerateRequest,
     ResourceGenerationJob,
     ResourceRecommendation,
+    ResourceCompleteRequest,
+    GenerateReviewCardRequest,
 )
+from app.services.mastery_service import submit_mastery_feedback
 from app.services.path_resource_regen_service import regen_path_resources
 from app.services.recommendation_service import get_recommendations
 from app.services.resource_service import (
@@ -32,8 +35,33 @@ from app.services.resource_service import (
 )
 from app.services.resource_metadata_service import with_resource_metadata
 from app.services.resource_job_service import create_resource_generation_job, get_resource_generation_job
+from app.services.review_card_service import generate_review_card, list_review_cards
 
 router = APIRouter(prefix="/resources", tags=["resources"])
+
+
+@router.get("/review-cards", response_model=list[LearningResource])
+async def read_review_cards(
+    user_id: str = "demo",
+    current_user_id: str = Depends(get_current_user_id),
+) -> list[LearningResource]:
+    """列出用户生成的专属复习卡。"""
+    ensure_same_user(user_id, current_user_id)
+    rows = await list_review_cards(user_id)
+    return [LearningResource(**with_resource_metadata(row)) for row in rows]
+
+
+@router.post("/review-cards/generate", response_model=LearningResource)
+async def create_review_card(
+    req: GenerateReviewCardRequest,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ensure_same_user(req.user_id, current_user_id)
+    try:
+        row = await generate_review_card(req.user_id, req.topic)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return LearningResource(**with_resource_metadata(row))
 
 
 @router.post("/generate", response_model=list[LearningResource])
@@ -191,12 +219,23 @@ async def resource_view(
 @router.post("/{resource_id}/complete")
 async def resource_complete(
     resource_id: str,
+    body: ResourceCompleteRequest | None = None,
     user_id: str = "demo",
     current_user_id: str = Depends(get_current_user_id),
 ):
     ensure_same_user(user_id, current_user_id)
     if not await get_resource(user_id, resource_id):
         raise HTTPException(404, "资源不存在")
+    if body and body.mastery_level:
+        try:
+            await submit_mastery_feedback(
+                user_id,
+                body.mastery_level,
+                resource_id=resource_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True}
     await record_event(user_id, "resource_complete", resource_id=resource_id)
     return {"ok": True}
 
