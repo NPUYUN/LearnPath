@@ -18,6 +18,7 @@ import {
 } from "@ant-design/icons";
 import type { EChartsOption } from "echarts";
 import {
+  createPathReplanJob,
   getProfile,
   getProfileSignals,
   getRealtimeState,
@@ -232,11 +233,14 @@ export default function ProfileContent() {
   const userId = useAppStore((s) => s.userId);
   const storeProfile = useAppStore((s) => s.profile);
   const setProfile = useAppStore((s) => s.setProfile);
+  const setPathReplanJob = useAppStore((s) => s.setPathReplanJob);
+  const setPathReplanPanelMode = useAppStore((s) => s.setPathReplanPanelMode);
   const [profile, setLocal] = useState<StudentProfile | null>(storeProfile);
   const [realtimeState, setRealtimeState] = useState<RealtimeLearningState | null>(null);
   const [profileView, setProfileView] = useState<ProfileView>("realtime");
   const [loading, setLoading] = useState(!storeProfile);
   const [refreshing, setRefreshing] = useState(false);
+  const [weakPathTopic, setWeakPathTopic] = useState<string | null>(null);
   const [refreshMeta, setRefreshMeta] = useState<ProfileRefreshResult["sources"] | null>(null);
 
   const loadProfile = useCallback(async () => {
@@ -286,6 +290,44 @@ export default function ProfileContent() {
   };
 
   const dimensions = useMemo(() => (profile ? buildDimensions(profile) : []), [profile]);
+  const weakTopics = useMemo(() => {
+    if (!profile) return [];
+    const merged = [
+      ...(profile.error_prone_topics || []),
+      ...(realtimeState?.stuck_topics || []),
+      ...(refreshMeta?.topics || []),
+    ]
+      .map((item) => String(item || "").trim())
+      .filter(Boolean);
+    const unique = Array.from(new Set(merged)).slice(0, 5);
+    return unique.map((topic, index) => ({
+      topic,
+      score: Math.max(38, 88 - index * 12),
+      status: index === 0 ? "优先补强" : index < 3 ? "建议尽快复习" : "建议顺手巩固",
+    }));
+  }, [profile, realtimeState?.stuck_topics, refreshMeta?.topics]);
+
+  const handleGenerateWeakPath = useCallback(
+    async (topic: string) => {
+      setWeakPathTopic(topic);
+      try {
+        const job = await createPathReplanJob(userId, {
+          learningGoal: `优先补强薄弱点：${topic}`,
+          planningMode: "detailed",
+          planningRequirement: `请围绕薄弱点「${topic}」优先安排讲解、例题、小测和复习资源，并把该主题放在路径前段。`,
+        });
+        setPathReplanJob(job);
+        setPathReplanPanelMode("open");
+        message.success(`已开始为「${topic}」生成补弱路径`);
+        clientNavigate("/path");
+      } catch (e: unknown) {
+        message.error(e instanceof Error ? e.message : "启动补弱路径失败");
+      } finally {
+        setWeakPathTopic(null);
+      }
+    },
+    [userId, setPathReplanJob, setPathReplanPanelMode],
+  );
 
   const chartOption: EChartsOption | null = useMemo(() => {
     if (!dimensions.length) return null;
@@ -488,6 +530,52 @@ export default function ProfileContent() {
                         )}
                       </div>
                     </div>
+
+                    <div className="lp-profile-summary-surface">
+                      <div className="lp-profile-panel-head">
+                        <h3>薄弱知识点 Top 5</h3>
+                        <span>{weakTopics.length ? "按当前画像排序" : "暂无足够数据"}</span>
+                      </div>
+                      {weakTopics.length ? (
+                        <div style={{ display: "grid", gap: 12 }}>
+                          {weakTopics.map((item) => (
+                            <article
+                              key={`realtime-${item.topic}`}
+                              className="lp-profile-dim-row"
+                              style={{ "--dim-color": "#f59e0b" } as CSSProperties}
+                            >
+                              <div className="lp-profile-dim-row-main">
+                                <div className="lp-profile-dim-row-head">
+                                  <strong>{item.topic}</strong>
+                                  <em>{item.score} 分风险</em>
+                                </div>
+                                <Progress
+                                  percent={item.score}
+                                  showInfo={false}
+                                  strokeColor="#f59e0b"
+                                  trailColor={isDarkTheme() ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)"}
+                                  size="small"
+                                />
+                                <p>{item.status}</p>
+                              </div>
+                              <Button
+                                type="primary"
+                                ghost
+                                loading={weakPathTopic === item.topic}
+                                onClick={() => void handleGenerateWeakPath(item.topic)}
+                              >
+                                生成补弱路径
+                              </Button>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <Empty
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description="继续对话、学习资源和小测后，这里会显示更准确的薄弱点"
+                        />
+                      )}
+                    </div>
                   </>
                 ) : (
                   <Empty
@@ -556,6 +644,48 @@ export default function ProfileContent() {
                       </article>
                     );
                   })}
+                </div>
+
+                <div className="lp-profile-summary-surface">
+                  <div className="lp-profile-panel-head">
+                    <h3>薄弱知识点 Top 5</h3>
+                    <span>{weakTopics.length ? "按当前画像排序" : "暂无足够数据"}</span>
+                  </div>
+                  {weakTopics.length ? (
+                    <div style={{ display: "grid", gap: 12 }}>
+                      {weakTopics.map((item) => (
+                        <article key={item.topic} className="lp-profile-dim-row" style={{ "--dim-color": "#f59e0b" } as CSSProperties}>
+                          <div className="lp-profile-dim-row-main">
+                            <div className="lp-profile-dim-row-head">
+                              <strong>{item.topic}</strong>
+                              <em>{item.score} 分风险</em>
+                            </div>
+                            <Progress
+                              percent={item.score}
+                              showInfo={false}
+                              strokeColor="#f59e0b"
+                              trailColor={isDarkTheme() ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.06)"}
+                              size="small"
+                            />
+                            <p>{item.status}</p>
+                          </div>
+                          <Button
+                            type="primary"
+                            ghost
+                            loading={weakPathTopic === item.topic}
+                            onClick={() => void handleGenerateWeakPath(item.topic)}
+                          >
+                            生成补弱路径
+                          </Button>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description="继续对话、学习资源和小测后，这里会显示更准确的薄弱点"
+                    />
+                  )}
                 </div>
               </section>
             )}

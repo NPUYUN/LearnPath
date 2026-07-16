@@ -178,6 +178,9 @@ export type ClassroomSlide = {
   key_points?: string[];
   bullets?: string[];
   teacher_note?: string;
+  intuition?: string;
+  worked_example?: string;
+  quick_check?: string;
   layout?: "cover" | "problem" | "concept" | "timeline" | "example" | "mistake" | "quiz" | "summary" | string;
   visual_theme?: string;
   accent_color?: "blue" | "teal" | "amber" | "indigo" | "green" | "rose" | "violet" | "cyan" | string;
@@ -761,6 +764,29 @@ export type ResourceGenerationJob = {
   updated_at: string;
 };
 
+export type ResourceTemplateInfo = {
+  id: string;
+  title: string;
+  subtitle: string;
+  topic: string;
+  tags: string[];
+  resource_count: number;
+  estimated_minutes: number;
+  icon: string;
+  color: string;
+};
+
+export type CreateFromTemplateResult = {
+  template_id: string;
+  resources: LearningResource[];
+  message: string;
+};
+
+export type CreateFromTemplateOptions = {
+  copyTitle?: string;
+  topicOverride?: string;
+};
+
 function generateResourcePayload(userId: string, topic: string, options?: GenerateResourceOptions) {
   return {
     user_id: userId,
@@ -787,6 +813,37 @@ export async function listLibraries(userId: string) {
   );
   if (!res.ok) throw new Error(await res.text());
   return res.json() as Promise<ResourceLibrary[]>;
+}
+
+export async function listResourceTemplates(userId: string) {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/resources/templates?user_id=${encodeURIComponent(userId)}`), {
+      headers: authHeaders(),
+    }),
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<ResourceTemplateInfo[]>;
+}
+
+export async function createFromTemplate(
+  userId: string,
+  templateId: string,
+  options?: CreateFromTemplateOptions,
+) {
+  const res = await handleResponse(
+    await fetch(apiUrl("/api/resources/templates/create"), {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        user_id: userId,
+        template_id: templateId,
+        copy_title: options?.copyTitle?.trim() || "",
+        topic_override: options?.topicOverride?.trim() || "",
+      }),
+    }),
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<CreateFromTemplateResult>;
 }
 
 export async function createLibrary(
@@ -1139,6 +1196,7 @@ export type MasteryRecord = {
   resource_id: string;
   title: string;
   updated_at: string;
+  due_now?: boolean;
 };
 
 export type MasteryFeedbackResponse = {
@@ -1394,6 +1452,7 @@ export type UserPreferences = {
   starred_resource_ids: string[];
   account_patch: Record<string, string>;
   daily_plan?: import("@/lib/dailyPlan").DailyPlan;
+  mastery_records?: Record<string, MasteryRecord>;
 };
 
 export async function getPreferences(userId: string) {
@@ -1409,6 +1468,7 @@ export async function patchPreferences(
   patch: {
     starred_resource_ids?: string[];
     daily_plan?: import("@/lib/dailyPlan").DailyPlan;
+    mastery_records?: Record<string, MasteryRecord>;
   }
 ) {
   const res = await handleResponse(
@@ -2129,6 +2189,20 @@ export type EvalEvent = {
   date: string;
 };
 
+export type TrendPoint = {
+  label: string;
+  value: number;
+};
+
+export type PressureBalance = {
+  mode: "review_heavy" | "balanced" | "new_learning";
+  due_today: number;
+  due_soon: number;
+  recommended_review_minutes: number;
+  recommended_new_minutes: number;
+  summary: string;
+};
+
 export type EvalStats = {
   total_resources: number;
   resources_by_type: Record<string, number>;
@@ -2139,10 +2213,20 @@ export type EvalStats = {
   has_path: boolean;
   radar: RadarData;
   recent_events: EvalEvent[];
+  forgetting_risk?: TrendPoint[];
+  review_pressure?: TrendPoint[];
+  retention_curve?: TrendPoint[];
+  pressure_balance?: PressureBalance;
   ai_advice?: string;
   strengths?: string;
   improvements?: string;
   advice_updated_at?: string;
+};
+
+export type WeeklyReviewResult = {
+  resource: LearningResource;
+  markdown: string;
+  message: string;
 };
 
 export type EvalSubmitResponse = {
@@ -2204,6 +2288,17 @@ export async function submitEval(
 }
 
 // ── User account ──────────────────────────────────────────────────────────────
+
+export async function generateWeeklyReview(userId: string): Promise<WeeklyReviewResult> {
+  const res = await handleResponse(
+    await fetch(apiUrl(`/api/eval/${userId}/weekly-review`), {
+      method: "POST",
+      headers: authHeaders(),
+    })
+  );
+  if (!res.ok) throw new Error(await readApiError(res));
+  return res.json() as Promise<WeeklyReviewResult>;
+}
 
 export type UserAccount = {
   user_id: string;

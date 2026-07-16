@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Typography, message } from "antd";
+import { Button, Typography } from "antd";
 import CheckCircleOutlined from "@ant-design/icons/CheckCircleOutlined";
 import ApartmentOutlined from "@ant-design/icons/ApartmentOutlined";
 import ReadOutlined from "@ant-design/icons/ReadOutlined";
@@ -12,6 +12,7 @@ import type { LearningPath, LearningResource } from "@/lib/api";
 import { buildDailyMinimumTasks, type DailyMinimumTask } from "@/lib/dailyMinimumTasks";
 import { clientNavigate } from "@/lib/clientNav";
 import { openResourceView } from "@/lib/resourceViewCache";
+import { useAppStore } from "@/store/appStore";
 
 const { Text } = Typography;
 
@@ -47,7 +48,12 @@ function TaskRow({
       return;
     }
     if (task.key === "quiz") {
-      message.info("小测验功能即将上线，敬请期待");
+      if (task.resourceId) {
+        const resource = resources.find((r) => r.id === task.resourceId);
+        openResourceView(router, resource ?? task.resourceId, userId);
+        return;
+      }
+      clientNavigate("/resources");
       return;
     }
     if (task.key === "review") {
@@ -95,8 +101,10 @@ export default function PathDailyMinimumCard({
   onFocusStep,
 }: PathDailyMinimumCardProps) {
   const router = useRouter();
-  const tasks = useMemo(() => buildDailyMinimumTasks(path, resources), [path, resources]);
+  const evalStats = useAppStore((s) => s.evalStats);
+  const tasks = useMemo(() => buildDailyMinimumTasks(path, resources, evalStats), [path, resources, evalStats]);
   const doneCount = tasks.filter((t) => t.done).length;
+  const pressureSummary = evalStats?.pressure_balance?.summary;
 
   return (
     <section className="lp-daily-min-card" aria-label="今日最小任务">
@@ -107,7 +115,7 @@ export default function PathDailyMinimumCard({
           </Text>
           <div>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              1 个路径步骤 · 1 份复习 · 1 组小测
+              {pressureSummary || "1 个路径步骤 · 1 份复习 · 1 组小测"}
             </Text>
           </div>
         </div>

@@ -256,6 +256,8 @@ class ResourceTemplateInfo(BaseModel):
 class CreateFromTemplateRequest(BaseModel):
     user_id: str = "demo"
     template_id: str
+    copy_title: str = ""
+    topic_override: str = ""
 
 
 class CreateFromTemplateResponse(BaseModel):
@@ -427,6 +429,9 @@ class ClassroomSlide(BaseModel):
     body: str
     board: list[str] = Field(default_factory=list)
     teacher_note: str = ""
+    intuition: str = ""
+    worked_example: str = ""
+    quick_check: str = ""
     layout: str = "concept"
     visual_theme: str = ""
     accent_color: str = "teal"
@@ -818,6 +823,20 @@ class EvalEvent(BaseModel):
     date: str
 
 
+class TrendPoint(BaseModel):
+    label: str
+    value: int
+
+
+class PressureBalance(BaseModel):
+    mode: Literal["review_heavy", "balanced", "new_learning"]
+    due_today: int = 0
+    due_soon: int = 0
+    recommended_review_minutes: int = 0
+    recommended_new_minutes: int = 0
+    summary: str = ""
+
+
 class EvalStats(BaseModel):
     total_resources: int
     resources_by_type: dict[str, int]
@@ -828,10 +847,22 @@ class EvalStats(BaseModel):
     has_path: bool
     radar: RadarData
     recent_events: list[EvalEvent]
+    forgetting_risk: list[TrendPoint] = Field(default_factory=list)
+    review_pressure: list[TrendPoint] = Field(default_factory=list)
+    retention_curve: list[TrendPoint] = Field(default_factory=list)
+    pressure_balance: PressureBalance = Field(
+        default_factory=lambda: PressureBalance(mode="balanced")
+    )
     ai_advice: str = ""
     strengths: str = ""
     improvements: str = ""
     advice_updated_at: str = ""
+
+
+class WeeklyReviewResponse(BaseModel):
+    resource: LearningResource
+    markdown: str = ""
+    message: str = ""
 
 
 MasteryLevel = Literal["forgot", "fuzzy", "mastered"]
@@ -900,6 +931,7 @@ class UserPreferences(BaseModel):
     account_patch: dict = Field(default_factory=dict)
     daily_plan: DailyPlanState = Field(default_factory=DailyPlanState)
     mastery_records: dict[str, Any] = Field(default_factory=dict)
+    eval_cache: dict[str, Any] = Field(default_factory=dict)
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -907,6 +939,7 @@ class UserPreferencesUpdate(BaseModel):
     account_patch: dict | None = None
     daily_plan: DailyPlanState | None = None
     mastery_records: dict[str, Any] | None = None
+    eval_cache: dict[str, Any] | None = None
 
 
 class ChatConversationSummary(BaseModel):

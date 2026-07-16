@@ -10,6 +10,8 @@ from sse_starlette.sse import EventSourceResponse
 from app.api.deps import assert_user_access, ensure_same_user, get_current_user_id
 from app.db.repository import delete_resource, delete_unstarred_resources, get_resource, record_event
 from app.models.schemas import (
+    CreateFromTemplateRequest,
+    CreateFromTemplateResponse,
     GenerateResourcesRequest,
     LearningPath,
     LearningResource,
@@ -19,6 +21,7 @@ from app.models.schemas import (
     PathResourceRegenStageMeta,
     ResourceRegenerateRequest,
     ResourceGenerationJob,
+    ResourceTemplateInfo,
     ResourceRecommendation,
     ResourceCompleteRequest,
     GenerateReviewCardRequest,
@@ -36,8 +39,39 @@ from app.services.resource_service import (
 from app.services.resource_metadata_service import with_resource_metadata
 from app.services.resource_job_service import create_resource_generation_job, get_resource_generation_job
 from app.services.review_card_service import generate_review_card, list_review_cards
+from app.services.resource_template_service import (
+    create_resources_from_template,
+    list_resource_templates,
+)
 
 router = APIRouter(prefix="/resources", tags=["resources"])
+
+
+@router.get("/templates", response_model=list[ResourceTemplateInfo])
+async def read_templates(
+    user_id: str = "demo",
+    current_user_id: str = Depends(get_current_user_id),
+) -> list[ResourceTemplateInfo]:
+    ensure_same_user(user_id, current_user_id)
+    return list_resource_templates()
+
+
+@router.post("/templates/create", response_model=CreateFromTemplateResponse)
+async def create_from_template(
+    req: CreateFromTemplateRequest,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ensure_same_user(req.user_id, current_user_id)
+    try:
+        # 保留原资源生成接口不变，新增模板中心专用入口，方便前端渐进接入。
+        return await create_resources_from_template(
+            req.user_id,
+            req.template_id,
+            copy_title=req.copy_title,
+            topic_override=req.topic_override,
+        )
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.get("/review-cards", response_model=list[LearningResource])

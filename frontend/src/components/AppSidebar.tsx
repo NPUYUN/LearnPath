@@ -6,6 +6,7 @@ import { NAV_META, pathProgress } from "@/lib/navMeta";
 import { BRAND_CN, BRAND_EN } from "@/lib/brand";
 import { useAppStore } from "@/store/appStore";
 import SidebarDailyPlan from "@/components/SidebarDailyPlan";
+import SidebarReviewQueue from "@/components/SidebarReviewQueue";
 import SidebarStudyStats from "@/components/SidebarStudyStats";
 import BulbOutlined from "@ant-design/icons/BulbOutlined";
 import MenuFoldOutlined from "@ant-design/icons/MenuFoldOutlined";
@@ -212,6 +213,7 @@ export default function AppSidebar({
           dailyDone={dailyPlanStats.done}
           dailyTotal={dailyPlanStats.total}
         />
+        <SidebarReviewQueue collapsed={collapsed} />
         <SidebarDailyPlan
           collapsed={collapsed}
           onStatsChange={handleDailyPlanStatsChange}

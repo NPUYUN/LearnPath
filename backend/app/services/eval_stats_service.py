@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from app.core.llm.router import get_primary_llm
@@ -14,9 +15,130 @@ from app.db.repository import (
     list_events,
     list_resources_with_meta,
     record_event,
+    save_resources,
     set_preferences,
 )
-from app.models.schemas import EvalEvent, EvalStats, RadarData
+from app.models.schemas import EvalEvent, EvalStats, PressureBalance, RadarData, TrendPoint
+from app.services.resource_metadata_service import build_resource_metadata
+
+
+def _parse_iso_dt(raw: str) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _estimate_minutes(resource: dict) -> int:
+    metadata = resource.get("metadata") or {}
+    value = metadata.get("estimated_minutes") or resource.get("estimated_minutes") or 8
+    try:
+        return max(4, min(30, int(value)))
+    except Exception:
+        return 8
+
+
+def _next_seven_labels() -> list[str]:
+    today = date.today()
+    labels: list[str] = []
+    for offset in range(7):
+        current = today + timedelta(days=offset)
+        if offset == 0:
+            labels.append("今天")
+        elif offset == 1:
+            labels.append("明天")
+        else:
+            labels.append(f"{current.month}/{current.day}")
+    return labels
+
+
+def _build_review_trends(resources: list[dict], prefs: dict | None) -> tuple[list[TrendPoint], list[TrendPoint], list[TrendPoint], PressureBalance]:
+    resource_minutes = {row.get("id"): _estimate_minutes(row) for row in resources}
+    mastery_records = prefs.get("mastery_records") if isinstance(prefs, dict) else {}
+    records = list(mastery_records.values()) if isinstance(mastery_records, dict) else []
+    today = date.today()
+    labels = _next_seven_labels()
+    risk_rows: list[TrendPoint] = []
+    pressure_rows: list[TrendPoint] = []
+    retention_rows: list[TrendPoint] = []
+    total_records = max(1, len(records))
+
+    for offset, label in enumerate(labels):
+        current_day = today + timedelta(days=offset)
+        due_weight = 0
+        due_minutes = 0
+        retention_values: list[int] = []
+        for record in records:
+            next_review = _parse_iso_dt(str(record.get("next_review_at") or ""))
+            updated_at = _parse_iso_dt(str(record.get("updated_at") or "")) or datetime.now(timezone.utc)
+            resource_id = str(record.get("resource_id") or "")
+            interval_days = max(1, int(record.get("interval_days") or 3))
+            level = str(record.get("level") or "fuzzy")
+            level_score = {"forgot": 42, "fuzzy": 66, "mastered": 86}.get(level, 60)
+            if next_review and next_review.date() <= current_day:
+                due_weight += 1
+            if next_review and next_review.date() == current_day:
+                due_minutes += resource_minutes.get(resource_id, 8)
+
+            elapsed = max(0, (datetime.combine(current_day, datetime.min.time(), tzinfo=timezone.utc) - updated_at).days)
+            decay = min(40, int(elapsed / interval_days * (16 if level == "forgot" else 10 if level == "fuzzy" else 7)))
+            if next_review and next_review.date() < current_day:
+                decay += 6
+            retention_values.append(max(28, min(96, level_score - decay)))
+
+        risk_rows.append(
+            TrendPoint(label=label, value=min(100, int(due_weight / total_records * 100)))
+        )
+        pressure_rows.append(TrendPoint(label=label, value=min(90, due_minutes)))
+        retention_rows.append(
+            TrendPoint(
+                label=label,
+                value=int(sum(retention_values) / len(retention_values)) if retention_values else 65,
+            )
+        )
+
+    due_today = records and sum(
+        1 for record in records if (_parse_iso_dt(str(record.get("next_review_at") or "")) or datetime.max.replace(tzinfo=timezone.utc)).date() <= today
+    ) or 0
+    due_soon = records and sum(
+        1
+        for record in records
+        if (_parse_iso_dt(str(record.get("next_review_at") or "")) or datetime.max.replace(tzinfo=timezone.utc)).date()
+        <= (today + timedelta(days=2))
+    ) or 0
+    today_pressure = pressure_rows[0].value if pressure_rows else 0
+    if due_today >= 3 or today_pressure >= 24:
+        mode = "review_heavy"
+        summary = "今日待复习较多，建议先清复习队列，再开启新内容。"
+        review_minutes = max(18, today_pressure or 18)
+        new_minutes = 8
+    elif due_today == 0 and due_soon <= 1:
+        mode = "new_learning"
+        summary = "今日复习压力较轻，可以把更多时间放在新内容推进。"
+        review_minutes = 6
+        new_minutes = 18
+    else:
+        mode = "balanced"
+        summary = "今日节奏较均衡，建议复习与新学并行推进。"
+        review_minutes = max(10, min(16, today_pressure or 10))
+        new_minutes = 12
+
+    return (
+        risk_rows,
+        pressure_rows,
+        retention_rows,
+        PressureBalance(
+            mode=mode,
+            due_today=due_today,
+            due_soon=due_soon,
+            recommended_review_minutes=review_minutes,
+            recommended_new_minutes=new_minutes,
+            summary=summary,
+        ),
+    )
 
 def _collect_study_dates(events: list, resources: list) -> set[str]:
     dates: set[str] = set()
@@ -284,6 +406,10 @@ async def build_eval_stats(user_id: str) -> EvalStats:
     last_quiz = await get_last_quiz_attempt(user_id)
     radar = _compute_radar(profile or {}, resources, path, last_quiz, events)
     recent_events = _compute_events(resources, profile, last_quiz, events)
+    forgetting_risk, review_pressure, retention_curve, pressure_balance = _build_review_trends(
+        resources,
+        prefs,
+    )
 
     stats = EvalStats(
         total_resources=total,
@@ -295,6 +421,10 @@ async def build_eval_stats(user_id: str) -> EvalStats:
         has_path=bool(path and path.get("steps")),
         radar=radar,
         recent_events=recent_events,
+        forgetting_risk=forgetting_risk,
+        review_pressure=review_pressure,
+        retention_curve=retention_curve,
+        pressure_balance=pressure_balance,
     )
     summary, strengths, improvements = _rule_based_advice(stats, profile)
     stats = stats.model_copy(
@@ -311,6 +441,7 @@ async def refresh_eval_stats(user_id: str) -> EvalStats:
     profile = await get_profile(user_id) or {"user_id": user_id}
     resources = list_resources_with_meta(user_id)
     path = await get_path(user_id)
+    prefs = await get_preferences(user_id)
 
     total = len(resources)
     by_type: dict[str, int] = {}
@@ -325,6 +456,10 @@ async def refresh_eval_stats(user_id: str) -> EvalStats:
     last_quiz = await get_last_quiz_attempt(user_id)
     radar = _compute_radar(profile, resources, path, last_quiz, events)
     recent_events = _compute_events(resources, profile, last_quiz, events)
+    forgetting_risk, review_pressure, retention_curve, pressure_balance = _build_review_trends(
+        resources,
+        prefs,
+    )
 
     stats = EvalStats(
         total_resources=total,
@@ -336,6 +471,10 @@ async def refresh_eval_stats(user_id: str) -> EvalStats:
         has_path=bool(path and path.get("steps")),
         radar=radar,
         recent_events=recent_events,
+        forgetting_risk=forgetting_risk,
+        review_pressure=review_pressure,
+        retention_curve=retention_curve,
+        pressure_balance=pressure_balance,
     )
 
     summary, strengths, improvements = _rule_based_advice(stats, profile)
@@ -373,3 +512,152 @@ async def refresh_eval_stats(user_id: str) -> EvalStats:
             "advice_updated_at": now,
         }
     )
+
+
+def _flatten_steps(steps: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for step in steps:
+        out.append(step)
+        out.extend(_flatten_steps(step.get("substeps") or []))
+    return out
+
+
+def _weekly_review_markdown(
+    *,
+    user_id: str,
+    stats: EvalStats,
+    profile: dict,
+    path: dict | None,
+    resources: list[dict],
+    events: list[dict],
+) -> str:
+    today = datetime.now(timezone.utc)
+    week_start = (today - timedelta(days=6)).date().isoformat()
+    week_end = today.date().isoformat()
+    flat_steps = _flatten_steps((path or {}).get("steps") or [])
+    done_steps = [step for step in flat_steps if step.get("status") == "done"]
+    in_progress = [step for step in flat_steps if step.get("status") == "in_progress"]
+    recent_resources = resources[-5:] if len(resources) > 5 else resources
+    recent_resources = list(reversed(recent_resources))
+    weak_topics = list(profile.get("error_prone_topics") or [])[:5]
+    quiz_topics: list[str] = []
+    for event in events:
+        meta = event.get("meta") or {}
+        if event.get("event_type") == "quiz_submit":
+            quiz_topics.extend(meta.get("wrong_topics") or meta.get("knowledge_points") or [])
+    wrong_topics = list(dict.fromkeys([*quiz_topics, *weak_topics]))[:5]
+
+    progress_line = (
+        f"- 路径状态：已完成 {len(done_steps)} / {len(flat_steps)} 个学习节点"
+        if flat_steps
+        else "- 路径状态：本周尚未生成正式学习路径"
+    )
+    active_line = (
+        f"- 当前进行中：{'、'.join(str(step.get('title') or '未命名节点') for step in in_progress[:3])}"
+        if in_progress
+        else "- 当前进行中：暂无明确进行中的节点"
+    )
+
+    resource_lines = (
+        "\n".join(
+            f"- {row.get('title', '未命名资源')}（{row.get('type', 'doc')} · {str(row.get('created_at') or '')[:10]}）"
+            for row in recent_resources
+        )
+        if recent_resources
+        else "- 本周暂无新增学习资源"
+    )
+    event_lines = (
+        "\n".join(
+            f"- {event.get('event_type', 'study')}：{(event.get('meta') or {}).get('title') or (event.get('meta') or {}).get('summary') or '已记录学习行为'}"
+            for event in events[:6]
+        )
+        if events
+        else "- 本周暂无可汇总的学习记录"
+    )
+    wrong_topic_line = "、".join(wrong_topics) if wrong_topics else "暂无明显错题主题，建议继续通过测验暴露薄弱点"
+    next_week = [
+        f"继续保持连续学习，目标至少完成 {max(1, min(3, len(in_progress) or 2))} 个节点。",
+        f"优先回看：{wrong_topics[0]}" if wrong_topics else "优先完成 1 次讲解 + 1 次小测 + 1 次复习卡回顾。",
+        "每次学习后记录掌握度，确保待复习队列能形成闭环。",
+    ]
+
+    return (
+        f"# 本周学习复盘\n\n"
+        f"> 用户：{user_id}  \n"
+        f"> 周期：{week_start} ~ {week_end}\n\n"
+        f"## 路径进度\n"
+        f"{progress_line}\n"
+        f"{active_line}\n"
+        f"- 累计学习天数：{stats.study_days} 天\n"
+        f"- 当前连续学习：{stats.study_streak} 天\n\n"
+        f"## 本周完成资源\n"
+        f"{resource_lines}\n\n"
+        f"## 学习行为摘要\n"
+        f"{event_lines}\n\n"
+        f"## 错题与薄弱主题\n"
+        f"- 优先关注：{wrong_topic_line}\n"
+        f"- 画像提示：{profile.get('recent_progress') or '继续保持学习输入，让画像变得更准确。'}\n\n"
+        f"## AI 建议\n"
+        f"- 总结：{stats.ai_advice or '继续沿路径推进，并通过测验检验掌握度。'}\n"
+        f"- 优势：{stats.strengths or '学习数据正在积累。'}\n"
+        f"- 待提升：{stats.improvements or '建议补充更多练习与复习反馈。'}\n\n"
+        f"## 下周建议\n"
+        + "\n".join(f"- {item}" for item in next_week)
+        + "\n"
+    )
+
+
+async def generate_weekly_review(user_id: str) -> dict:
+    profile = await get_profile(user_id) or {"user_id": user_id}
+    path = await get_path(user_id)
+    resources = list_resources_with_meta(user_id)
+    events = list_events(user_id, limit=30)
+    stats = await build_eval_stats(user_id)
+    markdown = _weekly_review_markdown(
+        user_id=user_id,
+        stats=stats,
+        profile=profile,
+        path=path,
+        resources=resources,
+        events=events,
+    )
+    title = f"本周学习复盘 · {datetime.now(timezone.utc).date().isoformat()}"
+    row = {
+        "id": uuid.uuid4().hex[:12],
+        "type": "doc",
+        "title": title,
+        "topic": "学习复盘",
+        "content": markdown,
+        "sources": ["评估页自动生成"],
+        "generation_mode": "weekly_review",
+        "status": "published",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "metadata": {
+            "learning_purpose": "review",
+            "used_for": ["weekly_review", "reflection"],
+            "recommended_stage": "每周复盘",
+            "estimated_minutes": 8,
+            "knowledge_points": list(profile.get("error_prone_topics") or [])[:5],
+            "quality_tags": ["周复盘", "学习总结"],
+            "quality_score": 8.4,
+            "summary": "汇总本周路径进度、完成资源、薄弱点和下周建议。",
+            "learning_before_tip": "先回看这周学过什么，再阅读 AI 总结。",
+            "learning_after_check": "根据下周建议补 1 个薄弱点。",
+            "next_step": "从复盘里的薄弱点生成补弱路径或复习卡。",
+        },
+    }
+    row["metadata"] = build_resource_metadata(
+        row,
+        generation_context={
+            "requirements": "生成本周学习复盘 Markdown 文档",
+            "topic": "学习复盘",
+        },
+    )
+    await save_resources(user_id, [row])
+    await record_event(
+        user_id,
+        "weekly_review_generate",
+        resource_id=row["id"],
+        meta={"title": title, "study_streak": stats.study_streak, "study_days": stats.study_days},
+    )
+    return {"resource": row, "markdown": markdown, "message": "已生成本周学习复盘"}

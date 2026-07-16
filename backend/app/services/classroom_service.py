@@ -182,6 +182,30 @@ def _default_visual_blocks(slide: ClassroomSlide, course_title: str, objective: 
     ]
 
 
+def _build_teaching_triplet(
+    title: str,
+    body: str,
+    board: list[str],
+    teacher_note: str,
+) -> dict[str, str]:
+    points = [item for item in board if item]
+    intuition = _short(body or (points[0] if points else title), 72)
+    example_focus = points[0] if points else title
+    example = (
+        f"最小例子：围绕「{example_focus}」找一个具体场景，依次说明输入、处理规则和结果。"
+    )
+    quick_check = (
+        f"随堂练习：请用一句话解释「{title}」解决什么问题，再指出一个适用条件。"
+    )
+    if teacher_note:
+        intuition = _short(f"{intuition} {teacher_note}", 72)
+    return {
+        "intuition": intuition,
+        "worked_example": _short(example, 96),
+        "quick_check": _short(quick_check, 96),
+    }
+
+
 def _normalize_visual_blocks(
     value: Any,
     fallback: list[dict[str, Any]],
@@ -1189,6 +1213,12 @@ def _fallback_session(
             body=f"这节课先明确学习目标：{objective}。参考资料会围绕“{material_line}”展开，而不是泛泛讲概念。",
             board=["本节目标是什么", "为什么现在要学它", "最后要能独立说清一个例子"],
             teacher_note="先把课程目标说清楚，再把学生带入一个具体问题场景。",
+            **_build_teaching_triplet(
+                title,
+                f"这节课先明确学习目标：{objective}。",
+                ["本节目标是什么", "为什么现在要学它", "最后要能独立说清一个例子"],
+                "先把课程目标说清楚，再把学生带入一个具体问题场景。",
+            ),
             layout="cover",
             visual_theme="清爽科技课堂封面",
             accent_color="blue",
@@ -1200,6 +1230,12 @@ def _fallback_session(
             body="先不背定义，先看它试图处理的现实困难：信息太多、关系不明显、判断标准不稳定，需要一种可复用的方法。",
             board=["先识别输入和输出", "再判断困难来自哪里", "最后说明方法为什么必要"],
             teacher_note="这一页不要急着给公式，重点是让学生知道学习动机。",
+            **_build_teaching_triplet(
+                f"{main_topic}要解决什么问题",
+                "先看它试图处理的现实困难，再理解为什么需要这个方法。",
+                ["先识别输入和输出", "再判断困难来自哪里", "最后说明方法为什么必要"],
+                "重点是让学生知道学习动机。",
+            ),
             layout="problem",
             visual_theme="问题拆解与场景引入",
             accent_color="amber",
@@ -1211,6 +1247,12 @@ def _fallback_session(
             body=f"把“{title}”压缩成一句话：它是一套把问题拆成可观察对象、可判断规则和可验证结果的学习过程。",
             board=["对象：我们观察什么", "规则：我们如何判断", "结果：我们如何验证"],
             teacher_note="用一句话定义，再用三个关键词帮助学生建立稳定抓手。",
+            **_build_teaching_triplet(
+                "核心概念的直觉定义",
+                f"把“{title}”压缩成一句话理解。",
+                ["对象：我们观察什么", "规则：我们如何判断", "结果：我们如何验证"],
+                "用一句话定义，再用三个关键词帮助学生建立稳定抓手。",
+            ),
             layout="concept",
             visual_theme="核心概念卡与三关键词",
             accent_color="teal",
@@ -1222,6 +1264,12 @@ def _fallback_session(
             body="课堂讲义按照“背景问题 -> 核心概念 -> 最小例子 -> 易错点 -> 检查题”的顺序展开，降低认知负荷。",
             board=["背景问题先行", "概念只保留必要定义", "例子负责验证理解"],
             teacher_note="如果学生困惑，优先回到这一页的五段结构。",
+            **_build_teaching_triplet(
+                "讲义主线：从材料到结论",
+                "课堂按背景问题、概念、例子、检查的顺序推进。",
+                ["背景问题先行", "概念只保留必要定义", "例子负责验证理解"],
+                "如果学生困惑，优先回到这一页的五段结构。",
+            ),
             layout="timeline",
             visual_theme="五段式课堂路径",
             accent_color="indigo",
@@ -1233,6 +1281,12 @@ def _fallback_session(
             body="选择一个足够小的案例，把输入、处理过程和输出都摆出来，让学生看到概念如何真正工作。",
             board=["给出一个具体场景", "指出需要判断的目标", "解释每一步为什么这样做"],
             teacher_note="例子必须短，不要引入第二个新概念。",
+            **_build_teaching_triplet(
+                "用一个最小例子跑一遍",
+                "先用最小案例把概念真正跑通。",
+                ["给出一个具体场景", "指出需要判断的目标", "解释每一步为什么这样做"],
+                "例子必须短，不要引入第二个新概念。",
+            ),
             layout="example",
             visual_theme="案例演示与输入输出",
             accent_color="green",
@@ -1244,6 +1298,12 @@ def _fallback_session(
             body="学生常见卡点不是不知道术语，而是不清楚概念边界、适用条件和结果判断方式。",
             board=["不要把定义当作结论", "不要跳过适用条件", "不要只看结果不看依据"],
             teacher_note="把易错点讲成提醒，而不是批评。",
+            **_build_teaching_triplet(
+                "最容易混淆的地方",
+                "真正的卡点通常是边界、条件和判断依据。",
+                ["不要把定义当作结论", "不要跳过适用条件", "不要只看结果不看依据"],
+                "把易错点讲成提醒，而不是批评。",
+            ),
             layout="mistake",
             visual_theme="易错点对照表",
             accent_color="rose",
@@ -1255,6 +1315,12 @@ def _fallback_session(
             body="用一道最小问题确认学生是否能迁移：换一个场景，仍然能指出输入、规则和输出。",
             board=["请先一句话复述", "再指出一个输入", "最后说明结果怎么判断"],
             teacher_note="如果学生答不上来，转入慢速模式，不继续推进新内容。",
+            **_build_teaching_triplet(
+                "课堂中途检查",
+                "通过一道最小问题检查能否迁移。",
+                ["请先一句话复述", "再指出一个输入", "最后说明结果怎么判断"],
+                "如果学生答不上来，转入慢速模式。",
+            ),
             layout="quiz",
             visual_theme="课堂检查题",
             accent_color="violet",
@@ -1266,6 +1332,12 @@ def _fallback_session(
             body="课后任务不追求数量，而是让学生把本节概念重新组织成自己的语言，并完成一个小迁移。",
             board=["整理 3 句话讲义", "完成 1 道迁移题", "记录 1 个仍卡住的问题"],
             teacher_note="结尾强调低负担复盘，给学生留下可完成的动作。",
+            **_build_teaching_triplet(
+                "课后如何巩固",
+                "课后重点是低负担复盘，而不是继续堆内容。",
+                ["整理 3 句话讲义", "完成 1 道迁移题", "记录 1 个仍卡住的问题"],
+                "结尾强调低负担复盘。",
+            ),
             layout="summary",
             visual_theme="总结与行动清单",
             accent_color="cyan",
@@ -1373,6 +1445,12 @@ def _normalize_llm_session(
                 body=body,
                 board=board,
                 teacher_note=teacher_note,
+                intuition=_clean_text(item.get("intuition"))
+                or _build_teaching_triplet(title, body, board, teacher_note)["intuition"],
+                worked_example=_clean_text(item.get("worked_example"))
+                or _build_teaching_triplet(title, body, board, teacher_note)["worked_example"],
+                quick_check=_clean_text(item.get("quick_check"))
+                or _build_teaching_triplet(title, body, board, teacher_note)["quick_check"],
                 layout=_clean_text(item.get("layout")) or fallback_slide.layout,
                 visual_theme=_clean_text(item.get("visual_theme")) or fallback_slide.visual_theme,
                 accent_color=_clean_text(item.get("accent_color")) or fallback_slide.accent_color,
@@ -1541,7 +1619,7 @@ async def generate_classroom_session(
         "如果用户上传或选择了资料，PPT 和讲义都要体现这些资料中的核心概念、例子或易错点。\n"
         "只输出 JSON，不要输出 Markdown、解释或代码块。\n"
         "JSON 字段：title, objective, slides, handout, teacher_scripts, check_question, homework, prompt_summary。\n"
-        "slides 为 8-12 页，像真正 PPT：每页包含 kicker/title/body/board/teacher_note。"
+        "slides 为 8-12 页，像真正 PPT：每页包含 kicker/title/body/board/teacher_note/intuition/worked_example/quick_check。"
         "每页还必须包含 layout/visual_theme/accent_color/visual_prompt/visual_blocks。"
         "layout 只能从 cover/problem/concept/timeline/example/mistake/quiz/summary 中选择，"
         "accent_color 只能从 blue/teal/amber/indigo/green/rose/violet/cyan 中选择。"
@@ -1552,6 +1630,7 @@ async def generate_classroom_session(
         "整套 slides 至少包含 2 个表格、2 个例题或示例、2 个课堂练习/检查题、1 个流程图、1 个概念对照或公式解释。"
         "这些内容要优先来自 selected_resources/local_materials，并服务于教学理解，不要为了填满页面而堆砌空话。"
         "board 必须是 3-5 条完整短句，禁止输出单字、空字符串或把一个词拆成多个字。"
+        "每页必须固定包含三段式教学节奏：一句直觉（intuition）、一个最小例题（worked_example）、一道随堂练习（quick_check）。"
         "body 必须能独立讲清这一页，不要只写标题。teacher_note 是 AI 老师逐页讲稿。"
         "handout 为 6-10 个讲义小节，每节包含 heading/content，content 要是学生课后能复习的完整内容。"
         "teacher_scripts 包含 normal/confused/slow/example/practice，分别对应标准讲法、听不懂、讲慢点、换例子、来道题。"
@@ -1563,6 +1642,7 @@ async def generate_classroom_session(
         "输出语言必须是简体中文。除必要的代码、公式、英文专有名词外，标题、正文、讲义、题目、解析、作业都必须使用中文。\n"
         "PPT 必须是一套可供学生自学的正式教学课件，不是装饰性大纲。主题需要深度时生成 14-18 页。\n"
         "每一页都必须有一个具体可学习对象：定义、定理、公式、完整例题、误区对照表、方法流程或分层练习。\n"
+        "每一页都要能落回“直觉 -> 例题 -> 随堂练习”的三段式，不允许只有概念没有例子，也不允许只有例子没有检查题。\n"
         "数学类主题必须在 visual_blocks 中用 latex/formula/expression 提供公式；公式解释要说明每个符号的含义。\n"
         "例题和练习必须包含 question、steps、answer、explanation、difficulty，并给出可检查的最终结果。\n"
         "整套课件至少包含 3 个完整例题和 3 个递进练习，其中至少有 1 个定义法例题、1 个迁移练习、1 个常见误区对照表。\n"

@@ -244,6 +244,53 @@ async def _generate_types_for_stage(
     return reviewed, warnings
 
 
+async def _prepare_stage_generation_inputs(
+    *,
+    stages: list[dict[str, Any]],
+    learner_brief: str,
+    shared_gen_ctx: dict[str, Any],
+    library_id: str | None,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    """并行准备各阶段的规划结果与资料检索上下文，缩短整条重生成链路的前置等待。"""
+
+    async def prepare_one(idx: int, stage: dict[str, Any]) -> dict[str, Any]:
+        step_id = str(stage.get("id") or stage.get("order") or idx + 1)
+        title = str(stage.get("title") or f"阶段 {idx + 1}")
+        objective = str(stage.get("objective") or "按阶段完成学习与练习")
+
+        plan_task = asyncio.create_task(
+            _plan_stage_bundle_with_llm(
+                stage_title=title,
+                stage_objective=objective,
+                learner_brief=learner_brief,
+            )
+        )
+        context_task = asyncio.create_task(
+            _overlay_stage_library_context(
+                shared_gen_ctx,
+                stage_title=title,
+                library_id=library_id,
+                user_id=user_id,
+            )
+        )
+        (types_to_gen, resource_titles), gen_ctx = await asyncio.gather(plan_task, context_task)
+        return {
+            "index": idx,
+            "step_id": step_id,
+            "title": title,
+            "objective": objective,
+            "types_to_gen": types_to_gen,
+            "resource_titles": resource_titles,
+            "gen_ctx": gen_ctx,
+        }
+
+    prepared = await asyncio.gather(
+        *(prepare_one(idx, stage) for idx, stage in enumerate(stages))
+    )
+    return sorted(prepared, key=lambda item: int(item["index"]))
+
+
 async def regen_path_resources(
     user_id: str,
     *,
@@ -293,16 +340,28 @@ async def regen_path_resources(
         library_name or "none",
     )
 
+    prepared_stages = await _prepare_stage_generation_inputs(
+        stages=stages,
+        learner_brief=learner_brief,
+        shared_gen_ctx=shared_gen_ctx,
+        library_id=library_id,
+        user_id=user_id,
+    )
+
     generated_total = 0
     generated_rows: list[dict[str, Any]] = []
     stages_processed: list[dict[str, Any]] = []
     type_counter: dict[str, int] = {}
     fallback_warnings: list[str] = []
 
-    for idx, stage in enumerate(stages):
-        step_id = str(stage.get("id") or stage.get("order") or idx + 1)
-        title = str(stage.get("title") or f"阶段 {idx + 1}")
-        objective = str(stage.get("objective") or "按阶段完成学习与练习")
+    for idx, prepared in enumerate(prepared_stages):
+        stage = stages[idx]
+        step_id = str(prepared["step_id"])
+        title = str(prepared["title"])
+        objective = str(prepared["objective"])
+        types_to_gen = list(prepared["types_to_gen"])
+        resource_titles = dict(prepared["resource_titles"])
+        gen_ctx = dict(prepared["gen_ctx"])
 
         logger.info("regen stage %s/%s id=%s title=%s", idx + 1, len(stages), step_id, title[:40])
 
@@ -310,19 +369,6 @@ async def regen_path_resources(
             cb = on_stage_progress(idx, len(stages), title)
             if asyncio.iscoroutine(cb):
                 await cb
-
-        types_to_gen, resource_titles = await _plan_stage_bundle_with_llm(
-            stage_title=title,
-            stage_objective=objective,
-            learner_brief=learner_brief,
-        )
-
-        gen_ctx = await _overlay_stage_library_context(
-            shared_gen_ctx,
-            stage_title=title,
-            library_id=library_id,
-            user_id=user_id,
-        )
 
         new_items, stage_warnings = await _generate_types_for_stage(
             base,

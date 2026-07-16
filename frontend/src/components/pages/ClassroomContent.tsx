@@ -823,6 +823,22 @@ function buildSlideOutcomes(slide: ClassroomSlide): string[] {
   ]).slice(0, 3);
 }
 
+function buildTeachingTriplet(slide: ClassroomSlide) {
+  const points = unique([...(slide.board || []), ...(slide.key_points || [])]).slice(0, 4);
+  return {
+    intuition:
+      slide.intuition ||
+      slide.body ||
+      `先抓住「${slide.title}」要解决的问题，再进入细节。`,
+    workedExample:
+      slide.worked_example ||
+      `最小例题：围绕「${points[0] || slide.title}」找一个具体场景，依次说明输入、规则和结果。`,
+    quickCheck:
+      slide.quick_check ||
+      `随堂练习：请用一句话解释「${slide.title}」，并指出一个适用条件。`,
+  };
+}
+
 function buildTeacherRecommendation(args: {
   phase: ClassroomPhase;
   mode: ClassroomMode;
@@ -1242,6 +1258,7 @@ export default function ClassroomContent() {
     FALLBACK_SCRIPT[mode];
   const adaptiveGuidance = buildAdaptiveGuidance(classroomSignals);
   const slideOutcomes = buildSlideOutcomes(slide);
+  const teachingTriplet = buildTeachingTriplet(slide);
   const teacherRecommendation = buildTeacherRecommendation({
     phase: currentPhase,
     mode,
@@ -2496,6 +2513,22 @@ export default function ClassroomContent() {
                   {hasMasteredCurrentKnowledgePoint ? "当前知识点已掌握" : `当前进度：第 ${slideIndex + 1} 页 / 共 ${slides.length} 页`}
                 </Tag>
               </div>
+              {currentPhase !== "summary" && (
+                <div className="lp-classroom-triplet">
+                  <article>
+                    <span>一句直觉</span>
+                    <strong>{teachingTriplet.intuition}</strong>
+                  </article>
+                  <article>
+                    <span>一个例题</span>
+                    <strong>{teachingTriplet.workedExample}</strong>
+                  </article>
+                  <article>
+                    <span>一道随堂练习</span>
+                    <strong>{teachingTriplet.quickCheck}</strong>
+                  </article>
+                </div>
+              )}
               {currentPhase !== "summary" && (
                 <div className="lp-classroom-outcomes">
                   <strong>学完本页你应该能：</strong>

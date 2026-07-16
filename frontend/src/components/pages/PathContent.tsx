@@ -29,6 +29,8 @@ import TrophyOutlined from "@ant-design/icons/TrophyOutlined";
 import BranchesOutlined from "@ant-design/icons/BranchesOutlined";
 import LoadingOutlined from "@ant-design/icons/LoadingOutlined";
 import VideoCameraOutlined from "@ant-design/icons/VideoCameraOutlined";
+import AppstoreOutlined from "@ant-design/icons/AppstoreOutlined";
+import UnorderedListOutlined from "@ant-design/icons/UnorderedListOutlined";
 import { getStepClassroomButtonPhase, persistActiveClassroom } from "@/lib/classroomActive";
 import PageHeader from "@/components/PageHeader";
 import {
@@ -134,6 +136,14 @@ type PathStepCardProps = {
   onMarkDone: (stepKey: string, e: React.MouseEvent) => void;
   onStartClassroom: (step: PathStep, e: React.MouseEvent) => void;
 };
+
+type BoardStepItem = {
+  step: PathStep;
+  depth: number;
+  parentTitle: string;
+};
+
+type PathViewMode = "timeline" | "board";
 
 function PathStepCard({
   userId,
@@ -361,6 +371,13 @@ function PathStepCard({
   );
 }
 
+function flattenBoardSteps(steps: PathStep[], depth = 0, parentTitle = ""): BoardStepItem[] {
+  return steps.flatMap((step) => [
+    { step, depth, parentTitle },
+    ...flattenBoardSteps(step.substeps ?? [], depth + 1, step.title),
+  ]);
+}
+
 export default function PathContent() {
   const userId = useAppStore((s) => s.userId);
   const courseName = useAppStore((s) => s.courseName);
@@ -401,6 +418,7 @@ export default function PathContent() {
   const [replanPlanningRequirement, setReplanPlanningRequirement] = useState("");
   const [replanContext, setReplanContext] = useState<ReplanContext | null>(null);
   const [replanContextLoading, setReplanContextLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<PathViewMode>("timeline");
   const replanContextReqSeq = useRef(0);
 
   const loadClassroomLibrary = useCallback(async () => {
@@ -606,7 +624,13 @@ export default function PathContent() {
 
   const steps = path?.steps || [];
   const flatSteps = flattenPathSteps(steps);
+  const boardSteps = flattenBoardSteps(steps);
   const overallProgress = pathProgressPercent(steps);
+  const boardColumns = {
+    pending: boardSteps.filter((item) => mapStatus(item.step.status) === "pending"),
+    in_progress: boardSteps.filter((item) => mapStatus(item.step.status) === "in_progress"),
+    done: boardSteps.filter((item) => mapStatus(item.step.status) === "done"),
+  };
   const readyLibraries = replanLibraries.filter(
     (l) => l.status === "ready" && (l.chunk_count ?? 0) > 0,
   );
@@ -886,6 +910,22 @@ export default function PathContent() {
         icon={<ApartmentOutlined />}
         extra={
           <Space wrap>
+            <Space.Compact>
+              <Button
+                icon={<UnorderedListOutlined />}
+                type={viewMode === "timeline" ? "primary" : "default"}
+                onClick={() => setViewMode("timeline")}
+              >
+                时间线
+              </Button>
+              <Button
+                icon={<AppstoreOutlined />}
+                type={viewMode === "board" ? "primary" : "default"}
+                onClick={() => setViewMode("board")}
+              >
+                阶段看板
+              </Button>
+            </Space.Compact>
             <Button icon={<VideoCameraOutlined />} onClick={() => setManageOpen(true)}>
               管理课堂
             </Button>
@@ -962,22 +1002,101 @@ export default function PathContent() {
           </div>
         </Card>
 
-        <div className="lp-path-step-list">
-          {steps.map((step) => (
-            <PathStepCard
-              key={getStepKey(step)}
-              userId={userId}
-              step={step}
-              resourceTitles={resourceTitles}
-              expanded={expanded}
-              markingKey={markingKey}
-              classroomLibrary={classroomLibrary}
-              onToggle={(key) => setExpanded((prev) => (prev === key ? "" : key))}
-              onMarkDone={handleMarkDone}
-              onStartClassroom={handleStartClassroom}
-            />
-          ))}
-        </div>
+        {viewMode === "timeline" ? (
+          <div className="lp-path-step-list">
+            {steps.map((step) => (
+              <PathStepCard
+                key={getStepKey(step)}
+                userId={userId}
+                step={step}
+                resourceTitles={resourceTitles}
+                expanded={expanded}
+                markingKey={markingKey}
+                classroomLibrary={classroomLibrary}
+                onToggle={(key) => setExpanded((prev) => (prev === key ? "" : key))}
+                onMarkDone={handleMarkDone}
+                onStartClassroom={handleStartClassroom}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="lp-path-board">
+            {(["pending", "in_progress", "done"] as const).map((columnKey) => {
+              const column = boardColumns[columnKey];
+              const cfg = STATUS_CONFIG[columnKey];
+              return (
+                <section key={columnKey} className={`lp-path-board-column is-${columnKey}`}>
+                  <div className="lp-path-board-column-head">
+                    <div>
+                      <strong>{cfg.label}</strong>
+                      <span>{column.length} 个节点</span>
+                    </div>
+                    <Tag color={cfg.color}>{cfg.label}</Tag>
+                  </div>
+                  <div className="lp-path-board-cards">
+                    {column.length ? (
+                      column.map(({ step, depth, parentTitle }) => {
+                        const stepKey = getStepKey(step);
+                        const resourceCount = countStepResources(step);
+                        return (
+                          <article key={stepKey} className="lp-path-board-card">
+                            <div className="lp-path-board-card-head">
+                              <div>
+                                <strong>{step.title}</strong>
+                                <span>
+                                  {depth > 0 && parentTitle ? `子步骤 · ${parentTitle}` : "主阶段"}
+                                </span>
+                              </div>
+                              <Tag color={cfg.color}>{step.estimated_minutes} 分钟</Tag>
+                            </div>
+                            <p>{step.objective || "围绕当前节点完成讲解、练习与复习。"}</p>
+                            <div className="lp-path-board-card-meta">
+                              <span>{resourceCount} 个资源</span>
+                              {step.substeps?.length ? <span>{step.substeps.length} 个子步骤</span> : null}
+                            </div>
+                            <div className="lp-path-board-card-actions">
+                              <Button
+                                size="small"
+                                onClick={() => {
+                                  setViewMode("timeline");
+                                  setExpanded(stepKey);
+                                  window.setTimeout(() => {
+                                    document.getElementById(`path-step-${stepKey}`)?.scrollIntoView({
+                                      behavior: "smooth",
+                                      block: "center",
+                                    });
+                                  }, 80);
+                                }}
+                              >
+                                查看详情
+                              </Button>
+                              {mapStatus(step.status) !== "done" ? (
+                                <Button
+                                  size="small"
+                                  loading={markingKey === stepKey}
+                                  onClick={(e) => void handleMarkDone(stepKey, e)}
+                                >
+                                  标记完成
+                                </Button>
+                              ) : null}
+                              {depth > 0 ? (
+                                <Button size="small" type="primary" onClick={(e) => handleStartClassroom(step, e)}>
+                                  AI 课堂
+                                </Button>
+                              ) : null}
+                            </div>
+                          </article>
+                        );
+                      })
+                    ) : (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前列暂无节点" />
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
     </>

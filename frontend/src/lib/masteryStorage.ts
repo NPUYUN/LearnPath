@@ -40,6 +40,12 @@ export function formatReviewLabel(iso: string): string {
   return `${dt.getMonth() + 1}月${dt.getDate()}日`;
 }
 
+export function isReviewDue(iso: string): boolean {
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return false;
+  return dt.getTime() <= Date.now();
+}
+
 export function recordLookupKey(resourceId?: string, stepKey?: string) {
   if (resourceId) return resourceId;
   if (stepKey) return `step:${stepKey}`;

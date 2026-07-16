@@ -12,7 +12,7 @@ import {
   type MasteryLevel,
   type MasteryRecord,
 } from "@/lib/api";
-import { recordLookupKey } from "@/lib/masteryStorage";
+import { isReviewDue, recordLookupKey } from "@/lib/masteryStorage";
 
 const { Text } = Typography;
 
@@ -25,31 +25,31 @@ const LEVELS: {
 }[] = [
   {
     key: "forgot",
-    label: "一般",
-    hint: "1 天后复习",
+    label: "忘了",
+    hint: "明天回顾",
     icon: <CloseCircleOutlined />,
     className: "lp-mastery-btn--forgot",
   },
   {
     key: "fuzzy",
-    label: "较好",
-    hint: "3 天后复习",
+    label: "模糊",
+    hint: "2-3 天回顾",
     icon: <QuestionCircleOutlined />,
     className: "lp-mastery-btn--fuzzy",
   },
   {
     key: "mastered",
-    label: "很好",
-    hint: "7 天后复习",
+    label: "会了",
+    hint: "拉长间隔",
     icon: <CheckCircleOutlined />,
     className: "lp-mastery-btn--mastered",
   },
 ];
 
 const LEVEL_LABELS: Record<MasteryLevel, string> = {
-  forgot: "一般",
-  fuzzy: "较好",
-  mastered: "很好",
+  forgot: "忘了",
+  fuzzy: "模糊",
+  mastered: "会了",
 };
 
 export type MasteryFeedbackBarProps = {
@@ -78,6 +78,7 @@ export default function MasteryFeedbackBar({
   const [current, setCurrent] = useState<MasteryRecord | null>(null);
   const [loadingLevel, setLoadingLevel] = useState<MasteryLevel | null>(null);
   const [nextReviewLabel, setNextReviewLabel] = useState("");
+  const [reviewDue, setReviewDue] = useState(false);
 
   const lookupKeyValue = lookupKey(resourceId, stepKey);
 
@@ -88,6 +89,7 @@ export default function MasteryFeedbackBar({
       const record = data.records[lookupKeyValue];
       if (record) {
         setCurrent(record);
+        setReviewDue(Boolean(record.next_review_at && isReviewDue(record.next_review_at)));
         if (record.next_review_at) {
           const dt = new Date(record.next_review_at);
           if (!Number.isNaN(dt.getTime())) {
@@ -117,6 +119,7 @@ export default function MasteryFeedbackBar({
       });
       setCurrent(res.record);
       setNextReviewLabel(res.next_review_label);
+      setReviewDue(Boolean(res.record.next_review_at && isReviewDue(res.record.next_review_at)));
       message.success(`已记录「${LEVEL_LABELS[level]}」，建议 ${res.next_review_label} 复习`);
       onSubmitted?.(res.record, {
         path_updated: res.path_updated,
@@ -177,7 +180,7 @@ export default function MasteryFeedbackBar({
             {current ? (
               <>
                 当前掌握度：<Text strong>{LEVEL_LABELS[current.level]}</Text>
-                {nextReviewLabel ? ` · 建议 ${nextReviewLabel} 复习` : null}
+                {reviewDue ? " · 已到复习时间" : nextReviewLabel ? ` · 建议 ${nextReviewLabel} 复习` : null}
               </>
             ) : (
               nextReviewLabel ? `建议 ${nextReviewLabel} 复习` : null

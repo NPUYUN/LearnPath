@@ -756,14 +756,13 @@ async def stream_generate_resources(
     if reviewed:
         yield _resource_progress_event("saving", stage_index, stage_total)
         stage_index += 1
-        await save_resources(req.user_id, reviewed)
-        await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), reviewed)
         yield _resource_progress_event("path_sync", stage_index, stage_total)
         stage_index += 1
         if req.attach_to_path:
             reviewed = await _attach_resources_to_path(req.user_id, reviewed)
-            await save_resources(req.user_id, reviewed)
-            await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), reviewed)
+        # 保留原有保存/索引更新能力，但把路径挂载后的二次落库合并掉，减少一次完整 I/O。
+        await save_resources(req.user_id, reviewed)
+        await _update_library_resource_index(req.user_id, gen_ctx.get("library_id", ""), reviewed)
         summaries = [
             {"id": r.get("id", ""), "type": r.get("type", ""), "title": r.get("title", "")}
             for r in reviewed

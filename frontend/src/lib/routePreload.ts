@@ -3,6 +3,22 @@ import { prewarmEchartsEngine, preloadEcharts } from "@/lib/useEcharts";
 import type { StandaloneRoute } from "@/hooks/navRoutes";
 import { useAppStore } from "@/store/appStore";
 
+function scheduleIdleTask(task: () => void, timeout = 1200): void {
+  if (typeof globalThis === "undefined" || typeof window === "undefined") {
+    task();
+    return;
+  }
+  const runner = () => task();
+  const maybeIdleCallback = (window as typeof window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+  }).requestIdleCallback;
+  if (typeof maybeIdleCallback === "function") {
+    maybeIdleCallback(runner, { timeout });
+    return;
+  }
+  globalThis.setTimeout(runner, 180);
+}
+
 /** 独立页预加载任务 */
 export async function preloadStandaloneRoute(route: StandaloneRoute): Promise<void> {
   switch (route) {
@@ -73,6 +89,13 @@ export async function preloadLoggedInExtras(): Promise<void> {
     preloadStandaloneRoute("/classroom"),
     preloadAccountIfNeeded(),
   ]);
+}
+
+/** 登录后非关键模块改为空闲期预热，避免阻塞主应用首轮进入。 */
+export function preloadLoggedInExtrasInBackground(): void {
+  scheduleIdleTask(() => {
+    void preloadLoggedInExtras().catch(() => {});
+  });
 }
 
 async function preloadAccountIfNeeded(): Promise<void> {

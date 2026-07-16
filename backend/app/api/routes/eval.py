@@ -3,9 +3,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.deps import assert_user_access, ensure_same_user, get_current_user_id
-from app.models.schemas import EvalStats, EvalSubmitRequest, EvalSubmitResponse
+from app.models.schemas import EvalStats, EvalSubmitRequest, EvalSubmitResponse, WeeklyReviewResponse, LearningResource
 from app.services.eval_service import submit_quiz
-from app.services.eval_stats_service import build_eval_stats, refresh_eval_stats
+from app.services.eval_stats_service import build_eval_stats, generate_weekly_review, refresh_eval_stats
 
 router = APIRouter(prefix="/eval", tags=["eval"])
 
@@ -37,3 +37,13 @@ async def get_eval_stats(
     if refresh:
         return await refresh_eval_stats(user_id)
     return await build_eval_stats(user_id)
+
+
+@router.post("/{user_id}/weekly-review", response_model=WeeklyReviewResponse)
+async def create_weekly_review(user_id: str = Depends(assert_user_access)) -> WeeklyReviewResponse:
+    payload = await generate_weekly_review(user_id)
+    return WeeklyReviewResponse(
+        resource=LearningResource(**payload["resource"]),
+        markdown=payload["markdown"],
+        message=payload["message"],
+    )

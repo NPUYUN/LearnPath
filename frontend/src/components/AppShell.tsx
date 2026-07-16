@@ -48,7 +48,11 @@ import ClassroomGenerationFloat from "@/components/ClassroomGenerationFloat";
 import ResourceRegenerationFloat from "@/components/ResourceRegenerationFloat";
 import ResourceGenerationFloat from "@/components/ResourceGenerationFloat";
 import PathReplanJobManager from "@/components/PathReplanJobManager";
-import { preloadAdminConsole, preloadLoggedInExtras, preloadStandaloneRoute } from "@/lib/routePreload";
+import {
+  preloadAdminConsole,
+  preloadLoggedInExtrasInBackground,
+  preloadStandaloneRoute,
+} from "@/lib/routePreload";
 
 const LoginContent = dynamic(() => import("@/components/LoginContent"), { ssr: false });
 const LandingContent = dynamic(() => import("@/components/LandingContent"), { ssr: false });
@@ -361,11 +365,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         );
         tasks.push(
           import("@/components/MarkdownPreview").then(() => {}).catch(() => {}),
-          preloadEcharts().then(() => prewarmEchartsEngine()).catch(() => {}),
-          preloadLoggedInExtras().catch(() => {})
+          preloadEcharts().then(() => prewarmEchartsEngine()).catch(() => {})
         );
         await Promise.all(tasks);
-        if (!cancelled) setDataReady(true);
+        if (!cancelled) {
+          setDataReady(true);
+          preloadLoggedInExtrasInBackground();
+        }
       })();
     }
 

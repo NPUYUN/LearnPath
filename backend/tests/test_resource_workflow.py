@@ -9,9 +9,53 @@ from app.models.schemas import ClassroomGenerateRequest, ClassroomInteractionReq
 from app.services import resource_job_service
 from app.services.classroom_service import _fallback_interaction, _resolve_selected_resources
 from app.services.resource_service import _attach_resources_to_path, update_library_resource_manifest
+from app.services.resource_template_service import (
+    create_resources_from_template,
+    list_resource_templates,
+)
 
 
 class ResourceWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    async def test_template_center_lists_builtin_templates(self) -> None:
+        templates = list_resource_templates()
+        ids = {template.id for template in templates}
+        self.assertIn("ml-core-concepts", ids)
+        self.assertIn("python-basic-syntax", ids)
+
+    async def test_create_from_template_persists_resources(self) -> None:
+        saved = AsyncMock()
+        recorded = AsyncMock()
+        with patch("app.services.resource_template_service.save_resources", saved), patch(
+            "app.services.resource_template_service.record_event",
+            recorded,
+        ):
+            result = await create_resources_from_template("u1", "ml-core-concepts")
+        self.assertEqual(result.template_id, "ml-core-concepts")
+        self.assertEqual(len(result.resources), 4)
+        self.assertTrue(all(resource.generation_mode == "template" for resource in result.resources))
+        saved.assert_awaited_once()
+        recorded.assert_awaited_once()
+
+    async def test_create_from_template_supports_copy_before_edit(self) -> None:
+        saved = AsyncMock()
+        recorded = AsyncMock()
+        with patch("app.services.resource_template_service.save_resources", saved), patch(
+            "app.services.resource_template_service.record_event",
+            recorded,
+        ):
+            result = await create_resources_from_template(
+                "u1",
+                "ml-core-concepts",
+                copy_title="机器学习期末冲刺",
+                topic_override="监督学习核心概念",
+            )
+        self.assertTrue(all("机器学习期末冲刺" in resource.title for resource in result.resources))
+        self.assertTrue(all(resource.topic == "监督学习核心概念" for resource in result.resources))
+        recorded.assert_awaited_once()
+        event_kwargs = recorded.await_args.kwargs
+        self.assertEqual(event_kwargs["meta"]["template_title"], "机器学习期末冲刺")
+        self.assertEqual(event_kwargs["meta"]["topic_override"], "监督学习核心概念")
+
     async def test_classroom_quick_question_stays_on_current_slide(self) -> None:
         result = _fallback_interaction(
             ClassroomInteractionRequest(

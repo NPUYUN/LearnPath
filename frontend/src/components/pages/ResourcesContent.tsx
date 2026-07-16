@@ -29,12 +29,16 @@ import {
   createResourceGenerationJob,
   listLibraries,
   createLibrary,
+  createFromTemplate,
   uploadLibraryFiles,
+  type CreateFromTemplateOptions,
   type LearningResource,
   type ResourceRecommendation,
   type ResourceLibrary,
+  type ResourceTemplateInfo,
   type PathStep,
   type GenerateResourceOptions,
+  listResourceTemplates,
 } from "@/lib/api";
 import {
   GENERATABLE_RESOURCE_TYPES,
@@ -60,6 +64,7 @@ import PageHeader from "@/components/PageHeader";
 import ResourceLibraryPanel from "@/components/ResourceLibraryPanel";
 import ReviewCardGenerateModal from "@/components/ReviewCardGenerateModal";
 import ReviewCardsPanel from "@/components/ReviewCardsPanel";
+import ResourceTemplateCenter from "@/components/ResourceTemplateCenter";
 import { ResourceJourneyView } from "@/components/ResourceJourneyView";
 import { useAppStore } from "@/store/appStore";
 import { useSupportedUploadFormats } from "@/hooks/useSupportedUploadFormats";
@@ -188,6 +193,9 @@ export default function ResourcesContent() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [recommendations, setRecommendations] = useState<ResourceRecommendation[]>([]);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
+  const [templates, setTemplates] = useState<ResourceTemplateInfo[]>([]);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof sessionStorage === "undefined") return;
@@ -311,6 +319,38 @@ export default function ResourcesContent() {
     }
   };
 
+  const loadTemplates = async (background = false) => {
+    if (!background) setTemplateLoading(true);
+    try {
+      const list = await listResourceTemplates(userId);
+      setTemplates(list);
+    } catch {
+      setTemplates([]);
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const handleCreateFromTemplate = async (
+    templateId: string,
+    options?: CreateFromTemplateOptions,
+  ) => {
+    setCreatingTemplateId(templateId);
+    try {
+      const result = await createFromTemplate(userId, templateId, options);
+      message.success(result.message || "模板资源已创建");
+      // 保留原资源列表刷新逻辑，只在模板创建后复用同一套同步流程。
+      await load(true);
+      void loadRecommendations(true);
+      setPageTab("resources");
+    } catch (e: unknown) {
+      message.error(e instanceof Error ? e.message : "从模板创建失败");
+      throw e;
+    } finally {
+      setCreatingTemplateId(null);
+    }
+  };
+
   const handleDeleteResource = (r: LearningResource) => {
     Modal.confirm({
       title: `删除「${r.title}」？`,
@@ -378,6 +418,12 @@ export default function ResourcesContent() {
     void loadRecommendations(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, pageTab, items.length]);
+
+  useEffect(() => {
+    if (pageTab !== "resources") return;
+    void loadTemplates(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, pageTab]);
 
   useEffect(() => {
     if (!pendingPreviewId) return;
@@ -1427,6 +1473,15 @@ export default function ResourcesContent() {
               </div>
             )}
           </section>
+        )}
+
+        {!manageMode && (
+          <ResourceTemplateCenter
+            loading={templateLoading}
+            creatingId={creatingTemplateId}
+            templates={templates}
+            onCreate={handleCreateFromTemplate}
+          />
         )}
 
         <div className="lp-resource-filters">

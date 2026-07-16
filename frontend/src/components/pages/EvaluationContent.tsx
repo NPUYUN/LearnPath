@@ -29,7 +29,7 @@ import type { EChartsOption } from "echarts";
 import { useEcharts } from "@/lib/useEcharts";
 import { getChartPalette, isDarkTheme } from "@/lib/chartTheme";
 import PageHeader from "@/components/PageHeader";
-import { getEvalStats, refreshEvalStats, type EvalStats } from "@/lib/api";
+import { generateWeeklyReview, getEvalStats, refreshEvalStats, type EvalStats } from "@/lib/api";
 import { useAppStore } from "@/store/appStore";
 import BarChartOutlined from "@ant-design/icons/BarChartOutlined";
 
@@ -68,6 +68,7 @@ export default function EvaluationContent() {
   const [stats, setStats] = useState<EvalStats | null>(storeStats);
   const [loading, setLoading] = useState(!storeStats);
   const [refreshing, setRefreshing] = useState(false);
+  const [reviewGenerating, setReviewGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
 
@@ -109,6 +110,21 @@ export default function EvaluationContent() {
       setRefreshing(false);
     }
   }, [userId, setEvalStats]);
+
+  const handleGenerateWeeklyReview = useCallback(async () => {
+    setReviewGenerating(true);
+    try {
+      const result = await generateWeeklyReview(userId);
+      message.success(result.message || "已生成本周学习复盘");
+      if (typeof window !== "undefined") {
+        window.location.assign(`/resources/view/${encodeURIComponent(result.resource.id)}`);
+      }
+    } catch (err: unknown) {
+      message.error(err instanceof Error ? err.message : "生成本周复盘失败");
+    } finally {
+      setReviewGenerating(false);
+    }
+  }, [userId]);
 
   useEffect(() => {
     if (storeStats) {
@@ -188,6 +204,83 @@ export default function EvaluationContent() {
 
   const radarRef = useEcharts(radarOption, [stats, isDark]);
   const barRef = useEcharts(barOption, [stats, isDark]);
+  const forgettingRiskOption: EChartsOption = stats
+    ? {
+        grid: { top: 20, bottom: 28, left: 36, right: 12 },
+        xAxis: {
+          type: "category",
+          data: (stats.forgetting_risk || []).map((item) => item.label),
+          axisLabel: { color: palette.text, fontSize: 11 },
+        },
+        yAxis: {
+          type: "value",
+          max: 100,
+          axisLabel: { color: palette.text, formatter: "{value}%" },
+        },
+        series: [
+          {
+            type: "line",
+            smooth: true,
+            data: (stats.forgetting_risk || []).map((item) => item.value),
+            areaStyle: { color: isDark ? "rgba(250,173,20,0.18)" : "rgba(250,173,20,0.12)" },
+            lineStyle: { color: "#faad14", width: 3 },
+            itemStyle: { color: "#faad14" },
+          },
+        ],
+        tooltip: { trigger: "axis" },
+      }
+    : {};
+  const reviewPressureOption: EChartsOption = stats
+    ? {
+        grid: { top: 20, bottom: 28, left: 36, right: 12 },
+        xAxis: {
+          type: "category",
+          data: (stats.review_pressure || []).map((item) => item.label),
+          axisLabel: { color: palette.text, fontSize: 11 },
+        },
+        yAxis: {
+          type: "value",
+          axisLabel: { color: palette.text, formatter: "{value}m" },
+        },
+        series: [
+          {
+            type: "bar",
+            data: (stats.review_pressure || []).map((item) => item.value),
+            itemStyle: { color: "#722ed1", borderRadius: [6, 6, 0, 0] },
+          },
+        ],
+        tooltip: { trigger: "axis" },
+      }
+    : {};
+  const retentionCurveOption: EChartsOption = stats
+    ? {
+        grid: { top: 20, bottom: 28, left: 36, right: 12 },
+        xAxis: {
+          type: "category",
+          data: (stats.retention_curve || []).map((item) => item.label),
+          axisLabel: { color: palette.text, fontSize: 11 },
+        },
+        yAxis: {
+          type: "value",
+          min: 0,
+          max: 100,
+          axisLabel: { color: palette.text, formatter: "{value}%" },
+        },
+        series: [
+          {
+            type: "line",
+            smooth: true,
+            data: (stats.retention_curve || []).map((item) => item.value),
+            lineStyle: { color: "#13c2c2", width: 3 },
+            itemStyle: { color: "#13c2c2" },
+          },
+        ],
+        tooltip: { trigger: "axis" },
+      }
+    : {};
+  const forgettingRiskRef = useEcharts(forgettingRiskOption, [stats, isDark]);
+  const reviewPressureRef = useEcharts(reviewPressureOption, [stats, isDark]);
+  const retentionCurveRef = useEcharts(retentionCurveOption, [stats, isDark]);
 
   const statCards = stats
     ? [
@@ -254,6 +347,9 @@ export default function EvaluationContent() {
           <Space>
             <Button icon={<ReloadOutlined />} onClick={fetchStats}>
               刷新
+            </Button>
+            <Button loading={reviewGenerating} onClick={() => void handleGenerateWeeklyReview()}>
+              生成本周复盘
             </Button>
             <Button icon={<RiseOutlined />} type="primary" loading={refreshing} onClick={() => void handleRefreshEval()}>
               更新评估
@@ -328,6 +424,21 @@ export default function EvaluationContent() {
                   )}
                 </Card>
               </Col>
+              <Col xs={24} lg={8}>
+                <Card title="未来 7 天遗忘风险">
+                  <div ref={forgettingRiskRef} style={{ height: 220 }} />
+                </Card>
+              </Col>
+              <Col xs={24} lg={8}>
+                <Card title="未来 7 天复习压力">
+                  <div ref={reviewPressureRef} style={{ height: 220 }} />
+                </Card>
+              </Col>
+              <Col xs={24} lg={8}>
+                <Card title="记忆持久度趋势">
+                  <div ref={retentionCurveRef} style={{ height: 220 }} />
+                </Card>
+              </Col>
               <Col xs={24} lg={14}>
                 <Card
                   title="AI 学习建议"
@@ -347,6 +458,20 @@ export default function EvaluationContent() {
                   </Paragraph>
                   {stats && stats.total_resources > 0 && (
                     <>
+                      {stats.pressure_balance ? (
+                        <>
+                          <Paragraph className="lp-prose">
+                            <Text strong>今日学习压力：</Text>
+                            {stats.pressure_balance.summary}
+                          </Paragraph>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                            <Tag color="orange">今日待复习 {stats.pressure_balance.due_today} 项</Tag>
+                            <Tag color="purple">近 3 天待复习 {stats.pressure_balance.due_soon} 项</Tag>
+                            <Tag color="blue">建议复习 {stats.pressure_balance.recommended_review_minutes} 分钟</Tag>
+                            <Tag color="green">建议新学 {stats.pressure_balance.recommended_new_minutes} 分钟</Tag>
+                          </div>
+                        </>
+                      ) : null}
                       <Paragraph className="lp-prose">
                         <Text strong>优势：</Text>
                         {strengthsText}

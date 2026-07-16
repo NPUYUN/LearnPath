@@ -15,6 +15,13 @@ import HistoryOutlined from "@ant-design/icons/HistoryOutlined";
 import PlusOutlined from "@ant-design/icons/PlusOutlined";
 import DeleteOutlined from "@ant-design/icons/DeleteOutlined";
 import CopyOutlined from "@ant-design/icons/CopyOutlined";
+import DownOutlined from "@ant-design/icons/DownOutlined";
+import UpOutlined from "@ant-design/icons/UpOutlined";
+import FireOutlined from "@ant-design/icons/FireOutlined";
+import ClockCircleOutlined from "@ant-design/icons/ClockCircleOutlined";
+import ApartmentOutlined from "@ant-design/icons/ApartmentOutlined";
+import ReadOutlined from "@ant-design/icons/ReadOutlined";
+import FormOutlined from "@ant-design/icons/FormOutlined";
 import { usePageActive } from "@/contexts/PageVisibilityContext";
 import { loadActiveChatConversation, persistActiveChatConversation } from "@/lib/chatActive";
 import PageHeader from "@/components/PageHeader";
@@ -46,6 +53,7 @@ import {
   type ResourceSummary,
 } from "@/lib/api";
 import { apiUrl } from "@/lib/apiBase";
+import { buildDailyMinimumTasks, type DailyMinimumTask } from "@/lib/dailyMinimumTasks";
 import {
   groupConversationsByDate,
 } from "@/lib/chatHistoryUtils";
@@ -62,6 +70,7 @@ import {
   buildUploadAccept,
   isAllowedUploadFile,
 } from "@/lib/uploadFormats";
+import { clientNavigate } from "@/lib/clientNav";
 
 interface Message {
   id: string;
@@ -310,6 +319,12 @@ const WAIT_STAGE_LABELS: Record<string, string> = {
   running: "正在处理请求",
 };
 
+const HUB_TASK_ICONS = {
+  path: <ApartmentOutlined />,
+  review: <ReadOutlined />,
+  quiz: <FormOutlined />,
+};
+
 const WELCOME_MSG: Message = {
   id: "welcome",
   role: "assistant",
@@ -339,6 +354,9 @@ export default function ChatContent() {
   const router = useRouter();
   const pageActive = usePageActive();
   const userId = useAppStore((s) => s.userId);
+  const resources = useAppStore((s) => s.resources);
+  const learningPath = useAppStore((s) => s.learningPath);
+  const evalStats = useAppStore((s) => s.evalStats);
   const quickActions = isDemoUser(userId) ? DEMO_QUICK_ACTIONS : REAL_QUICK_ACTIONS;
   const setProfile = useAppStore((s) => s.setProfile);
   const setResources = useAppStore((s) => s.setResources);
@@ -375,6 +393,7 @@ export default function ChatContent() {
   const [llmRouting, setLlmRouting] = useState("");
   const [stageLabel, setStageLabel] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [todayHubExpanded, setTodayHubExpanded] = useState(false);
   const [activeUserMessageId, setActiveUserMessageId] = useState<string | null>(null);
   const [regeneratingUserId, setRegeneratingUserId] = useState<string | null>(null);
   const [liveStreamText, setLiveStreamText] = useState("");
@@ -520,6 +539,26 @@ export default function ChatContent() {
     [router, userId]
   );
 
+  const todayHubTasks = useMemo(
+    () => buildDailyMinimumTasks(learningPath, resources, evalStats),
+    [learningPath, resources, evalStats]
+  );
+
+  const handleHubTaskClick = useCallback(
+    (task: DailyMinimumTask) => {
+      if (task.key === "path") {
+        clientNavigate("/path");
+        return;
+      }
+      if (task.resourceId) {
+        handleResourceClick(task.resourceId);
+        return;
+      }
+      clientNavigate(task.fallbackRoute || "/path");
+    },
+    [handleResourceClick]
+  );
+
   const syncAfterChat = useCallback(async () => {
     try {
       const [list, p, evalS, pathData] = await Promise.all([
@@ -568,6 +607,10 @@ export default function ChatContent() {
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, [isNearBottom]);
+
+  useEffect(() => {
+    void syncAfterChat();
+  }, [syncAfterChat]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1270,39 +1313,107 @@ export default function ChatContent() {
 
       <div className="lp-chat-main">
         <div className="lp-chat-column">
-          <div className="lp-chat-recommendations">
-            <span className="lp-muted-text lp-chat-recommendations-title">
-              今日推荐
-            </span>
-            <Tooltip title="刷新推荐">
-              <Button
-                aria-label="刷新今日推荐"
-                className="lp-chat-recommendations-refresh"
-                icon={<ReloadOutlined spin={refreshingRecommendations} />}
-                loading={refreshingRecommendations}
-                size="small"
-                type="text"
-                onClick={() => void loadRecommendations(true)}
-              />
-            </Tooltip>
-            {recommendations.length > 0 ? (
-              recommendations.map((rec) => (
-                <Tooltip key={rec.id} title={rec.reason || rec.topic || undefined}>
-                  <Tag
-                    className="lp-quick-tag"
-                    color="processing"
-                    onClick={() => handleResourceClick(rec.id)}
-                  >
-                    {rec.title}
-                  </Tag>
-                </Tooltip>
-              ))
-            ) : (
-              <span className="lp-muted-text lp-chat-recommendations-empty">
-                暂无推荐
-              </span>
-            )}
-          </div>
+          <section className="lp-chat-today-hub" aria-label="今日学习中枢">
+            <div className="lp-chat-today-hub-head">
+              <div className="lp-chat-today-hub-head-main">
+                <strong>今日学习中枢</strong>
+                <span>{evalStats?.pressure_balance?.summary || "把今天的最小动作先完成，再决定是否继续扩展学习。"}</span>
+              </div>
+              <div className="lp-chat-today-hub-head-actions">
+                <Button size="small" type="link" onClick={() => clientNavigate("/evaluation")}>
+                  查看评估
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  className="lp-chat-today-hub-toggle"
+                  icon={todayHubExpanded ? <UpOutlined /> : <DownOutlined />}
+                  onClick={() => setTodayHubExpanded((value) => !value)}
+                >
+                  {todayHubExpanded ? "收起" : "展开"}
+                </Button>
+              </div>
+            </div>
+            {todayHubExpanded ? (
+              <>
+                <div className="lp-chat-today-hub-metrics">
+                  <div className="lp-chat-today-hub-metric">
+                    <span><FireOutlined /> 连续学习</span>
+                    <strong>{evalStats?.study_streak ?? 0} 天</strong>
+                  </div>
+                  <div className="lp-chat-today-hub-metric">
+                    <span><ClockCircleOutlined /> 今日待复习</span>
+                    <strong>{evalStats?.pressure_balance?.due_today ?? 0} 项</strong>
+                  </div>
+                  <div className="lp-chat-today-hub-metric">
+                    <span><ReadOutlined /> 建议复习</span>
+                    <strong>{evalStats?.pressure_balance?.recommended_review_minutes ?? 10} 分钟</strong>
+                  </div>
+                  <div className="lp-chat-today-hub-metric">
+                    <span><ApartmentOutlined /> 建议新学</span>
+                    <strong>{evalStats?.pressure_balance?.recommended_new_minutes ?? 12} 分钟</strong>
+                  </div>
+                </div>
+                <div className="lp-chat-today-hub-tasks">
+                  {todayHubTasks.map((task) => (
+                    <button
+                      key={task.key}
+                      type="button"
+                      className={`lp-chat-today-hub-task lp-chat-today-hub-task--${task.key}`}
+                      onClick={() => handleHubTaskClick(task)}
+                    >
+                      <span className="lp-chat-today-hub-task-icon">{HUB_TASK_ICONS[task.key]}</span>
+                      <span className="lp-chat-today-hub-task-copy">
+                        <strong>{task.label}</strong>
+                        <em>{task.title}</em>
+                        <span>{task.subtitle}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <div className="lp-chat-today-hub-actions">
+                  <Button type="primary" onClick={() => handleHubTaskClick(todayHubTasks[0])}>
+                    开始今天第一步
+                  </Button>
+                  <Button onClick={() => clientNavigate("/path")}>打开学习路径</Button>
+                  <Button onClick={() => clientNavigate("/resources")}>打开资源库</Button>
+                </div>
+                <div className="lp-chat-recommendations">
+                  <span className="lp-muted-text lp-chat-recommendations-title">
+                    今日推荐
+                  </span>
+                  <Tooltip title="刷新推荐">
+                    <Button
+                      aria-label="刷新今日推荐"
+                      className="lp-chat-recommendations-refresh"
+                      icon={<ReloadOutlined spin={refreshingRecommendations} />}
+                      loading={refreshingRecommendations}
+                      size="small"
+                      type="text"
+                      onClick={() => void loadRecommendations(true)}
+                    />
+                  </Tooltip>
+                  {recommendations.length > 0 ? (
+                    recommendations.map((rec) => (
+                      <Tooltip key={rec.id} title={rec.reason || rec.topic || undefined}>
+                        <Tag
+                          className="lp-quick-tag"
+                          color="processing"
+                          onClick={() => handleResourceClick(rec.id)}
+                        >
+                          {rec.title}
+                        </Tag>
+                      </Tooltip>
+                    ))
+                  ) : (
+                    <span className="lp-muted-text lp-chat-recommendations-empty">
+                      暂无推荐
+                    </span>
+                  )}
+                </div>
+              </>
+            ) : null}
+          </section>
 
           <div className="lp-chat-messages" ref={messagesContainerRef}>
             {messages.map((msg) => (
