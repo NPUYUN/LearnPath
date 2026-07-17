@@ -87,19 +87,20 @@ export default function SettingsContent() {
   };
 
   return (
-    <div>
+    <div className="lp-settings-page">
       <PageHeader
         title="设置"
         subtitle="主题、语音与交互偏好 · 本地保存"
         icon={<SettingOutlined />}
         extra={
-          <Button onClick={handleReset}>恢复默认</Button>
+          <Button icon={<ReloadOutlined />} onClick={handleReset}>恢复默认</Button>
         }
       />
       <div className="lp-page-body">
         <Row gutter={[20, 20]}>
           <Col xs={24} lg={12}>
             <Card
+              className="lp-settings-card"
               title={
                 <span>
                   <BgColorsOutlined style={{ marginRight: 8 }} />
@@ -144,6 +145,7 @@ export default function SettingsContent() {
 
           <Col xs={24} lg={12}>
             <Card
+              className="lp-settings-card"
               title={
                 <span>
                   <SoundOutlined style={{ marginRight: 8 }} />
@@ -180,6 +182,7 @@ export default function SettingsContent() {
 
           <Col xs={24}>
             <Card
+              className="lp-settings-card"
               title={
                 <span>
                   <ThunderboltOutlined style={{ marginRight: 8 }} />
@@ -221,6 +224,7 @@ export default function SettingsContent() {
           {demoMode && (
             <Col xs={24}>
               <Card
+                className="lp-settings-card lp-settings-card--danger"
                 title={
                   <span>
                     <DeleteOutlined style={{ marginRight: 8 }} />
@@ -235,7 +239,7 @@ export default function SettingsContent() {
                   <Button danger icon={<DeleteOutlined />} onClick={handleDemoClear}>
                     清空全部数据
                   </Button>
-                  <Button type="primary" icon={<ReloadOutlined />} onClick={handleDemoReset}>
+                  <Button icon={<ReloadOutlined />} onClick={handleDemoReset}>
                     重置为默认数据
                   </Button>
                 </Space>

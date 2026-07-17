@@ -16,6 +16,7 @@ export type ResourceCategoryGroup = {
 
 export type ResourceStageGroup = {
   id: string;
+  kind: "path" | "topic" | "archive";
   order: number;
   title: string;
   objective: string;
@@ -78,23 +79,24 @@ function topicMatchesStep(topic: string, step: PathStep): boolean {
   return title.includes(t) || t.includes(title.slice(0, 4)) || objective.includes(t);
 }
 
-function buildStageGroup(step: PathStep, resources: LearningResource[]): ResourceStageGroup {
-  const idSet = new Set(
+function collectStepResourceIds(step: PathStep): Set<string> {
+  return new Set(
     [
       ...(step.resource_ids ?? []),
-      ...(step.substeps ?? []).flatMap((s) => [
-        ...(s.resource_ids ?? []),
-        ...(s.substeps ?? []).flatMap((x) => x.resource_ids ?? []),
+      ...(step.substeps ?? []).flatMap((substep) => [
+        ...(substep.resource_ids ?? []),
+        ...(substep.substeps ?? []).flatMap((nested) => nested.resource_ids ?? []),
       ]),
     ].filter(Boolean)
   );
-  const matched = resources.filter(
-    (r) => idSet.has(r.id) || topicMatchesStep(r.topic, step)
-  );
-  const unique = Array.from(new Map(matched.map((r) => [r.id, r])).values());
+}
+
+function buildStageGroup(step: PathStep, resources: LearningResource[]): ResourceStageGroup {
+  const unique = Array.from(new Map(resources.map((resource) => [resource.id, resource])).values());
 
   return {
     id: `step-${step.id ?? step.order}`,
+    kind: "path",
     order: step.order,
     title: step.title,
     objective: step.objective,
@@ -116,6 +118,7 @@ function synthesizeStagesFromTopics(resources: LearningResource[]): ResourceStag
 
   return Array.from(byTopic.entries()).map(([topic, list], idx) => ({
     id: `topic-${idx}`,
+    kind: "topic" as const,
     order: idx + 1,
     title: topic,
     objective: "按主题自动归类的学习资源",
@@ -135,32 +138,39 @@ export function groupResourcesByStage(
     return { stages: [], unassigned: [] };
   }
 
-  const assignedIds = new Set<string>();
   let stages: ResourceStageGroup[] = [];
+  let unassigned: LearningResource[] = [];
 
   if (learningPath?.steps?.length) {
-    stages = learningPath.steps.map((step) => {
-      const group = buildStageGroup(step, resources);
-      group.categories.forEach((cat) =>
-        cat.resources.forEach((r) => assignedIds.add(r.id))
-      );
-      return group;
-    });
+    const steps = learningPath.steps;
+    const explicitIds = steps.map(collectStepResourceIds);
+    const stageResources = steps.map(() => [] as LearningResource[]);
+
+    for (const resource of resources) {
+      let stageIndex = explicitIds.findIndex((ids) => ids.has(resource.id));
+      if (stageIndex < 0) {
+        stageIndex = steps.findIndex((step) => topicMatchesStep(resource.topic, step));
+      }
+      if (stageIndex >= 0) {
+        stageResources[stageIndex].push(resource);
+      } else {
+        unassigned.push(resource);
+      }
+    }
+
+    stages = steps.map((step, index) => buildStageGroup(step, stageResources[index]));
   } else {
     stages = synthesizeStagesFromTopics(resources);
-    stages.forEach((s) =>
-      s.categories.forEach((cat) => cat.resources.forEach((r) => assignedIds.add(r.id)))
-    );
+    unassigned = [];
   }
-
-  const unassigned = resources.filter((r) => !assignedIds.has(r.id));
 
   if (unassigned.length && learningPath?.steps?.length) {
     stages.push({
       id: "unassigned",
-      order: stages.length + 1,
-      title: "历史资源 / 待复用资源",
-      objective: "这些资源保留在资源库中，但暂未关联到当前学习路径",
+      kind: "archive",
+      order: 0,
+      title: "历史资源",
+      objective: "保留在资源库中，但尚未关联到当前学习路径",
       status: "pending",
       estimatedMinutes: 0,
       categories: buildCategoryGroups(unassigned),

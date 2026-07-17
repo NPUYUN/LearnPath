@@ -5,6 +5,7 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   EyeOutlined,
+  FolderOpenOutlined,
   ReloadOutlined,
   RightOutlined,
   StarFilled,
@@ -243,6 +244,7 @@ export function ResourceStageSection({
   onToggleSelect,
 }: ResourceStageSectionProps) {
   const statusMeta = STAGE_STATUS_META[stage.status];
+  const isArchive = stage.kind === "archive";
   const relationLabel =
     stage.id === "unassigned"
       ? "历史资源"
@@ -274,7 +276,9 @@ export function ResourceStageSection({
         }}
       >
         <div className="lp-resource-stage-node">
-          <span className="lp-resource-stage-order">{stage.order}</span>
+          <span className="lp-resource-stage-order">
+            {isArchive ? <FolderOpenOutlined /> : stage.order}
+          </span>
         </div>
         <div className="lp-resource-stage-meta">
           <div className="lp-resource-stage-title-row">
@@ -283,7 +287,7 @@ export function ResourceStageSection({
               className="lp-resource-stage-status"
               style={{ color: statusMeta.color, borderColor: `${statusMeta.color}44` }}
             >
-              {statusMeta.label}
+              {isArchive ? "未关联路径" : statusMeta.label}
             </Tag>
             <span className="lp-resource-stage-count">{stage.resourceCount} 项资源</span>
           </div>
@@ -299,7 +303,7 @@ export function ResourceStageSection({
         <button
           type="button"
           className="lp-resource-stage-toggle"
-          aria-label={expanded ? "折叠阶段" : "展开阶段"}
+          aria-label={expanded ? `折叠${isArchive ? "资源组" : "阶段"}` : `展开${isArchive ? "资源组" : "阶段"}`}
           onClick={(e) => {
             e.stopPropagation();
             onToggle();

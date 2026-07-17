@@ -389,6 +389,15 @@ export default function ProfileContent() {
   const avgScore = Math.round(
     dimensions.reduce((s, d) => s + d.score, 0) / Math.max(dimensions.length, 1)
   );
+  const profileClarityLabel =
+    avgScore >= 80 ? "信息较完整" : avgScore >= 55 ? "已可用于推荐" : "仍需补充信息";
+  const priorityDimension = dimensions.reduce((lowest, item) =>
+    item.score < lowest.score ? item : lowest
+  );
+  const currentProfileSummary = realtimeState
+    ? realtimeSummaryText(realtimeState)
+    : `当前画像已覆盖 ${dimensions.length} 个学习维度，可以继续通过对话补充近期状态。`;
+
   return (
     <div className="lp-profile-page">
       <header className="lp-profile-hero">
@@ -400,18 +409,19 @@ export default function ProfileContent() {
             <p className="lp-profile-hero-sub">
               综合智能体对话、资源库浏览与测验表现，六维刻画你的学习特征
             </p>
-            {refreshMeta && (
+            {refreshMeta?.topics?.length ? (
               <p className="lp-profile-hero-meta">
-                本次依据 {refreshMeta.chat_turns ?? 0} 轮对话、{refreshMeta.resource_views ?? 0}{" "}
-                次资源浏览更新
-                {refreshMeta.topics?.length ? ` · 关注 ${refreshMeta.topics.join("、")}` : ""}
+                当前关注：{refreshMeta.topics.join("、")}
               </p>
-            )}
+            ) : null}
           </div>
           <div className="lp-profile-hero-actions">
             <div className="lp-profile-hero-score">
-              <span className="lp-profile-hero-score-num">{avgScore}</span>
-              <span className="lp-profile-hero-score-label">综合指数</span>
+              <span className="lp-profile-hero-score-num">
+                {avgScore}<small>/100</small>
+              </span>
+              <span className="lp-profile-hero-score-label">画像清晰度</span>
+              <strong className="lp-profile-hero-score-status">{profileClarityLabel}</strong>
             </div>
             <Button
               type="primary"
@@ -425,21 +435,41 @@ export default function ProfileContent() {
             </Button>
           </div>
         </div>
-        <div className="lp-profile-stat-row">
+
+        <div className="lp-profile-hero-insights">
+          <article className="lp-profile-hero-insight lp-profile-hero-insight--primary">
+            <span>当前结论</span>
+            <strong>{currentProfileSummary}</strong>
+          </article>
+          <article className="lp-profile-hero-insight lp-profile-hero-insight--priority">
+            <div>
+              <span>优先补全</span>
+              <strong>{priorityDimension.label}</strong>
+              <p>{priorityDimension.detail}</p>
+            </div>
+            <Button
+              type="link"
+              icon={<ArrowRightOutlined />}
+              onClick={() => clientNavigate("/chat")}
+            >
+              继续对话补全
+            </Button>
+          </article>
+        </div>
+
+        <div className="lp-profile-stat-row" aria-label="画像依据">
+          <span className="lp-profile-stat-row-label">画像依据</span>
           <div className="lp-profile-stat">
             <MessageOutlined />
-            <span>{refreshMeta?.chat_turns ?? "—"}</span>
-            <em>对话轮次</em>
+            <span><strong>{refreshMeta?.chat_turns ?? "—"}</strong> 轮对话</span>
           </div>
           <div className="lp-profile-stat">
             <FolderOpenOutlined />
-            <span>{refreshMeta?.resource_views ?? "—"}</span>
-            <em>资源浏览</em>
+            <span><strong>{refreshMeta?.resource_views ?? "—"}</strong> 次资源浏览</span>
           </div>
           <div className="lp-profile-stat">
             <BookOutlined />
-            <span>{refreshMeta?.resources_owned ?? "—"}</span>
-            <em>拥有资源</em>
+            <span><strong>{refreshMeta?.resources_owned ?? "—"}</strong> 个已有资源</span>
           </div>
         </div>
       </header>
@@ -485,11 +515,8 @@ export default function ProfileContent() {
               <section className="lp-profile-realtime-panel" aria-label="实时画像">
                 {realtimeState ? (
                   <>
-                    <div className="lp-profile-realtime-hero">
-                      <div className="lp-profile-realtime-copy">
-                        <span className="lp-profile-realtime-kicker">本轮状态感知</span>
-                        <h3>{realtimeSummaryText(realtimeState)}</h3>
-                      </div>
+                    <div className="lp-profile-realtime-signal-row">
+                      <span className="lp-profile-realtime-kicker">本轮信号</span>
                       <div className="lp-profile-realtime-tags">
                         <Tag color="blue">
                           {EMOTION_LABEL[realtimeState.emotion]} · {realtimeState.implicit_emotion || "平稳专注"}

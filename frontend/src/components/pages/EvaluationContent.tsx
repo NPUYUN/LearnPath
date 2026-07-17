@@ -6,9 +6,7 @@ import {
   Button,
   Card,
   Col,
-  Divider,
   Empty,
-  Progress,
   Row,
   Skeleton,
   Space,
@@ -18,7 +16,9 @@ import {
   message,
 } from "antd";
 import {
+  ArrowRightOutlined,
   BookOutlined,
+  BulbOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   FireOutlined,
@@ -286,7 +286,7 @@ export default function EvaluationContent() {
     ? [
         { title: "累计学习天数", value: stats.study_days, suffix: "天", ...STAT_VARIANTS[0] },
         { title: "已生成资源", value: stats.total_resources, suffix: "个", ...STAT_VARIANTS[1] },
-        { title: "画像完整度", value: stats.profile_completeness, suffix: "%", ...STAT_VARIANTS[2] },
+        { title: "画像字段覆盖", value: stats.profile_completeness, suffix: "%", ...STAT_VARIANTS[2] },
         {
           title: "学习路径",
           value: stats.has_path ? "已规划" : "待生成",
@@ -302,14 +302,14 @@ export default function EvaluationContent() {
       ? stats.total_resources === 0
         ? "你尚未生成任何学习资源。建议先前往「AI 助手」对话，让系统为你构建学习画像并生成资源。"
         : stats.profile_completeness < 50
-          ? `当前画像完整度为 ${stats.profile_completeness}%，建议继续与 AI 助手对话，补全学习偏好信息。`
-          : `整体表现良好，已生成 ${stats.total_resources} 个学习资源，画像完整度 ${stats.profile_completeness}%。`
+          ? `当前画像字段覆盖率为 ${stats.profile_completeness}%，建议继续与 AI 助手对话，补全学习偏好信息。`
+          : `整体表现良好，已生成 ${stats.total_resources} 个学习资源，画像字段覆盖率 ${stats.profile_completeness}%。`
       : "");
 
   const strengthsText =
     stats?.strengths ||
     (stats && stats.profile_completeness >= 60
-      ? "学习画像较完整，资源推荐精准度高。"
+      ? "学习画像字段覆盖较完整，已具备个性化推荐的数据基础。"
       : "已开始学习，具备初步数据基础。");
 
   const improvementsText =
@@ -336,6 +336,10 @@ export default function EvaluationContent() {
   }
 
   const hasData = stats && (stats.total_resources > 0 || stats.profile_completeness > 0);
+  const pressureBalance = stats?.pressure_balance;
+  const hasReviewDue = (pressureBalance?.due_today ?? 0) > 0;
+  const primaryActionLabel = hasReviewDue ? "查看今日复习" : "继续当前路径";
+  const primaryActionRoute = hasReviewDue ? "/resources" : "/path";
 
   return (
     <div>
@@ -344,12 +348,13 @@ export default function EvaluationContent() {
         subtitle="数据实时来自你的学习记录"
         icon={<BarChartOutlined />}
         extra={
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={fetchStats}>
-              刷新
+          <Space wrap className="lp-eval-header-actions">
+            <Button className="lp-eval-header-refresh" aria-label="刷新评估数据" icon={<ReloadOutlined />} onClick={fetchStats}>
+              <span className="lp-eval-refresh-label">刷新</span>
             </Button>
             <Button loading={reviewGenerating} onClick={() => void handleGenerateWeeklyReview()}>
-              生成本周复盘
+              <span className="lp-eval-action-label--desktop">生成本周复盘</span>
+              <span className="lp-eval-action-label--mobile">本周复盘</span>
             </Button>
             <Button icon={<RiseOutlined />} type="primary" loading={refreshing} onClick={() => void handleRefreshEval()}>
               更新评估
@@ -374,40 +379,103 @@ export default function EvaluationContent() {
           </Empty>
         ) : (
           <>
-            <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
+            <section className="lp-eval-overview" aria-labelledby="lp-eval-overview-title">
+              <div className="lp-eval-overview__main">
+                <div className="lp-eval-overview__eyebrow">
+                  <BulbOutlined />
+                  本次学习结论
+                </div>
+                <h2 id="lp-eval-overview-title">先看结论，再决定下一步</h2>
+                <Paragraph className="lp-eval-overview__summary">{suggestion}</Paragraph>
+                <div className="lp-eval-focus-grid">
+                  <div className="lp-eval-focus-item lp-eval-focus-item--strength">
+                    <span>当前优势</span>
+                    <p>{strengthsText}</p>
+                  </div>
+                  <div className="lp-eval-focus-item lp-eval-focus-item--improve">
+                    <span>优先提升</span>
+                    <p>{improvementsText}</p>
+                  </div>
+                </div>
+              </div>
+
+              <aside className="lp-eval-today" aria-label="今日学习建议">
+                <div className="lp-eval-today__header">
+                  <strong>今日学习建议</strong>
+                  {stats?.advice_updated_at ? (
+                    <Text type="secondary">更新于 {_formatAdviceTime(stats.advice_updated_at)}</Text>
+                  ) : null}
+                </div>
+                <p className="lp-eval-today__summary">
+                  {pressureBalance?.summary || "继续按当前路径推进，完成一个清晰的小目标。"}
+                </p>
+                <div className="lp-eval-today__metrics">
+                  <div>
+                    <span>今日待复习</span>
+                    <strong>{pressureBalance?.due_today ?? 0} 项</strong>
+                  </div>
+                  <div>
+                    <span>建议复习</span>
+                    <strong>{pressureBalance?.recommended_review_minutes ?? 0} 分钟</strong>
+                  </div>
+                  <div>
+                    <span>建议新学</span>
+                    <strong>{pressureBalance?.recommended_new_minutes ?? 0} 分钟</strong>
+                  </div>
+                </div>
+                <Button
+                  type="primary"
+                  size="large"
+                  icon={<ArrowRightOutlined />}
+                  onClick={() => clientNavigate(primaryActionRoute)}
+                >
+                  {primaryActionLabel}
+                </Button>
+              </aside>
+            </section>
+
+            <section className="lp-eval-metrics" aria-label="学习数据概览">
               {statCards.map((s, idx) => {
                 const Icon = STAT_VARIANTS[idx].icon;
                 return (
-                  <Col xs={12} sm={6} key={s.title}>
-                    <Card
-                      className={`lp-stat-card lp-stat-card--${s.variant}`}
-                      styles={{ body: { padding: "16px 20px" } }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ fontSize: 24, color: s.accent }}>
-                          <Icon />
-                        </div>
-                        <div>
-                          <div className="lp-stat-card__value">
-                            {s.value}
-                            {s.suffix}
-                          </div>
-                          <div className="lp-stat-card__label">{s.title}</div>
-                        </div>
-                      </div>
-                    </Card>
-                  </Col>
+                  <div className="lp-eval-metric" key={s.title}>
+                    <span className="lp-eval-metric__icon" style={{ color: s.accent }}>
+                      <Icon />
+                    </span>
+                    <div>
+                      <strong>
+                        {s.value}
+                        {s.suffix}
+                      </strong>
+                      <span>{s.title}</span>
+                    </div>
+                  </div>
                 );
               })}
-            </Row>
+            </section>
+
+            <div className="lp-eval-section-heading">
+              <div>
+                <h2>未来一周学习趋势</h2>
+                <p>先判断复习压力，再安排新内容。</p>
+              </div>
+            </div>
 
             <Row gutter={[16, 16]}>
-              <Col xs={24} lg={12}>
+              <Col span={24} className="lp-eval-order-detail-heading">
+                <div className="lp-eval-section-heading lp-eval-section-heading--compact">
+                  <div>
+                    <h2>能力与学习投入</h2>
+                    <p>这些图表用于解释学习结论，不单独代表学习成果。</p>
+                  </div>
+                </div>
+              </Col>
+              <Col xs={24} lg={12} className="lp-eval-order-detail">
                 <Card title="能力成长对比雷达图">
                   <div ref={radarRef} style={{ height: 280 }} />
                 </Card>
               </Col>
-              <Col xs={24} lg={12}>
+              <Col xs={24} lg={12} className="lp-eval-order-detail">
                 <Card title="资源类型分布">
                   {stats && Object.keys(stats.resources_by_type).length > 0 ? (
                     <div ref={barRef} style={{ height: 280 }} />
@@ -424,86 +492,22 @@ export default function EvaluationContent() {
                   )}
                 </Card>
               </Col>
-              <Col xs={24} lg={8}>
+              <Col xs={24} lg={8} className="lp-eval-order-trend">
                 <Card title="未来 7 天遗忘风险">
                   <div ref={forgettingRiskRef} style={{ height: 220 }} />
                 </Card>
               </Col>
-              <Col xs={24} lg={8}>
+              <Col xs={24} lg={8} className="lp-eval-order-trend">
                 <Card title="未来 7 天复习压力">
                   <div ref={reviewPressureRef} style={{ height: 220 }} />
                 </Card>
               </Col>
-              <Col xs={24} lg={8}>
+              <Col xs={24} lg={8} className="lp-eval-order-trend">
                 <Card title="记忆持久度趋势">
                   <div ref={retentionCurveRef} style={{ height: 220 }} />
                 </Card>
               </Col>
-              <Col xs={24} lg={14}>
-                <Card
-                  title="AI 学习建议"
-                  extra={
-                    <Space size={6}>
-                      <Tag color="blue">自动生成</Tag>
-                      {stats?.advice_updated_at ? (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          更新于 {_formatAdviceTime(stats.advice_updated_at)}
-                        </Text>
-                      ) : null}
-                    </Space>
-                  }
-                >
-                  <Paragraph className="lp-prose" style={{ whiteSpace: "pre-wrap" }}>
-                    {suggestion}
-                  </Paragraph>
-                  {stats && stats.total_resources > 0 && (
-                    <>
-                      {stats.pressure_balance ? (
-                        <>
-                          <Paragraph className="lp-prose">
-                            <Text strong>今日学习压力：</Text>
-                            {stats.pressure_balance.summary}
-                          </Paragraph>
-                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-                            <Tag color="orange">今日待复习 {stats.pressure_balance.due_today} 项</Tag>
-                            <Tag color="purple">近 3 天待复习 {stats.pressure_balance.due_soon} 项</Tag>
-                            <Tag color="blue">建议复习 {stats.pressure_balance.recommended_review_minutes} 分钟</Tag>
-                            <Tag color="green">建议新学 {stats.pressure_balance.recommended_new_minutes} 分钟</Tag>
-                          </div>
-                        </>
-                      ) : null}
-                      <Paragraph className="lp-prose">
-                        <Text strong>优势：</Text>
-                        {strengthsText}
-                      </Paragraph>
-                      <Paragraph className="lp-prose">
-                        <Text strong>待提升：</Text>
-                        {improvementsText}
-                      </Paragraph>
-                      <Divider style={{ margin: "12px 0" }} />
-                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        {stats.radar.dimensions.map((dim, i) => (
-                          <div key={dim} style={{ minWidth: 160 }}>
-                            <div className="lp-muted-text" style={{ fontSize: 12, marginBottom: 4 }}>
-                              {dim}{" "}
-                              <Text strong style={{ color: palette.primary }}>
-                                +{stats.radar.after[i] - stats.radar.before[i]}分
-                              </Text>
-                            </div>
-                            <Progress
-                              percent={stats.radar.after[i]}
-                              strokeColor={palette.primary}
-                              size="small"
-                              showInfo={false}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </Card>
-              </Col>
-              <Col xs={24} lg={10}>
+              <Col span={24} className="lp-eval-order-events">
                 <Card title="近期学习记录">
                   {stats && stats.recent_events.length > 0 ? (
                     <Timeline

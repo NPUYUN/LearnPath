@@ -120,7 +120,7 @@ export default function PathDailyMinimumCard({
           </div>
         </div>
         <Text type="secondary" className="lp-daily-min-count">
-          {doneCount}/{tasks.length}
+          今日 {doneCount}/{tasks.length}
         </Text>
       </div>
       <div className="lp-daily-min-list">

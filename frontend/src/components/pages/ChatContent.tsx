@@ -1279,9 +1279,10 @@ export default function ChatContent() {
         icon={<RobotOutlined />}
         status={<span className={`lp-status-dot ${statusClass}`}>{statusText}</span>}
         extra={
-          <Space size={4} className="lp-chat-header-actions">
+          <Space size={6} className="lp-chat-header-actions" aria-label="对话操作">
             <Tooltip title="历史对话">
               <Button
+                aria-label="历史对话"
                 icon={<HistoryOutlined />}
                 size="small"
                 onClick={() => setHistoryOpen(true)}
@@ -1289,13 +1290,19 @@ export default function ChatContent() {
             </Tooltip>
             <Tooltip title="新对话">
               <Button
+                aria-label="新对话"
                 icon={<PlusOutlined />}
                 size="small"
                 onClick={() => void handleNewConversation()}
               />
             </Tooltip>
             <Tooltip title="清空当前对话">
-              <Button icon={<ReloadOutlined />} size="small" onClick={handleClearChat} />
+              <Button
+                aria-label="清空当前对话"
+                icon={<DeleteOutlined />}
+                size="small"
+                onClick={handleClearChat}
+              />
             </Tooltip>
           </Space>
         }
@@ -1473,49 +1480,9 @@ export default function ChatContent() {
                 ))}
               </div>
             )}
-            <div className="lp-chat-composer-toolbar">
-              <Tooltip title="开启后推理更完整，响应略慢">
-                <Switch
-                  size="small"
-                  checked={deepThinking}
-                  onChange={(v) => setSettings({ deepThinking: v })}
-                  checkedChildren={<BulbOutlined />}
-                  unCheckedChildren={<BulbOutlined />}
-                />
-              </Tooltip>
-              <span className="lp-muted-text" style={{ fontSize: 12 }}>
-                深度思考
-              </span>
-              <Tooltip title="结合全网检索补充最新资料（响应较慢）">
-                <Switch
-                  size="small"
-                  checked={webSearch}
-                  onChange={(v) => setSettings({ webSearch: v })}
-                  checkedChildren={<GlobalOutlined />}
-                  unCheckedChildren={<GlobalOutlined />}
-                />
-              </Tooltip>
-              <span className="lp-muted-text" style={{ fontSize: 12 }}>
-                联网思考
-              </span>
-              <Upload
-                multiple
-                showUploadList={false}
-                beforeUpload={handleUpload}
-                accept={buildUploadAccept(uploadExtensions, { includeImages: true })}
-              >
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<PaperClipOutlined />}
-                  loading={uploading}
-                >
-                  上传
-                </Button>
-              </Upload>
-            </div>
             <div className="lp-chat-composer">
               <Input.TextArea
+                className="lp-chat-composer-input"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onPressEnter={(e) => {
@@ -1524,27 +1491,67 @@ export default function ChatContent() {
                     send();
                   }
                 }}
-                placeholder="输入消息，或上传图片/文档后发送"
+                placeholder="输入问题，或上传图片/文档"
                 autoSize={{ minRows: 1, maxRows: 5 }}
-                style={{ borderRadius: 10, fontSize: 14, resize: "none", flex: 1 }}
                 disabled={loading}
               />
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                onClick={() => send()}
-                loading={loading}
-                disabled={!input.trim() && !pendingAttachments.length}
-                style={{
-                  height: 38,
-                  borderRadius: 10,
-                  paddingLeft: 16,
-                  paddingRight: 16,
-                  flexShrink: 0,
-                }}
-              >
-                发送
-              </Button>
+              <div className="lp-chat-composer-footer">
+                <div className="lp-chat-composer-toolbar">
+                  <Tooltip title="开启后推理更完整，响应略慢">
+                    <span className="lp-chat-mode-control">
+                      <Switch
+                        aria-label="深度思考"
+                        size="small"
+                        checked={deepThinking}
+                        onChange={(v) => setSettings({ deepThinking: v })}
+                        checkedChildren={<BulbOutlined />}
+                        unCheckedChildren={<BulbOutlined />}
+                      />
+                      <span>深度思考</span>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="结合全网检索补充最新资料（响应较慢）">
+                    <span className="lp-chat-mode-control">
+                      <Switch
+                        aria-label="联网思考"
+                        size="small"
+                        checked={webSearch}
+                        onChange={(v) => setSettings({ webSearch: v })}
+                        checkedChildren={<GlobalOutlined />}
+                        unCheckedChildren={<GlobalOutlined />}
+                      />
+                      <span>联网思考</span>
+                    </span>
+                  </Tooltip>
+                  <Upload
+                    multiple
+                    showUploadList={false}
+                    beforeUpload={handleUpload}
+                    accept={buildUploadAccept(uploadExtensions, { includeImages: true })}
+                  >
+                    <Tooltip title="上传图片或文档">
+                      <Button
+                        aria-label="上传图片或文档"
+                        className="lp-chat-upload-btn"
+                        type="text"
+                        icon={<PaperClipOutlined />}
+                        loading={uploading}
+                      />
+                    </Tooltip>
+                  </Upload>
+                </div>
+                <Tooltip title="发送">
+                  <Button
+                    aria-label="发送"
+                    className="lp-chat-send-btn"
+                    type="primary"
+                    icon={<SendOutlined />}
+                    onClick={() => send()}
+                    loading={loading}
+                    disabled={!input.trim() && !pendingAttachments.length}
+                  />
+                </Tooltip>
+              </div>
             </div>
           </div>
         </div>

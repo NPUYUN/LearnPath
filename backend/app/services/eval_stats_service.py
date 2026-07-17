@@ -191,6 +191,58 @@ def _profile_completeness(p: dict) -> int:
     return min(100, int(filled / len(_PROFILE_DEFAULTS) * 85) + bonus)
 
 
+def _path_progress_summary(path: dict | None) -> str:
+    steps = (path or {}).get("steps") or []
+    if not steps:
+        return ""
+    done = sum(1 for step in steps if step.get("status") == "done")
+    active = next((step for step in steps if step.get("status") == "in_progress"), None)
+    if active:
+        return f"当前路径已完成 {done}/{len(steps)} 个阶段，正在学习「{active.get('title') or '当前阶段'}」。"
+    if done == len(steps):
+        return f"当前路径 {len(steps)} 个阶段已全部完成。"
+    return f"当前路径已完成 {done}/{len(steps)} 个阶段，下一阶段尚未开始。"
+
+
+def _advice_context_key(
+    profile: dict | None,
+    resources: list[dict],
+    path: dict | None,
+    last_quiz: dict | None,
+) -> str:
+    profile_data = profile or {}
+    profile_marker = tuple(
+        str(profile_data.get(key) or "")
+        for key in (*_PROFILE_DEFAULTS.keys(), "updated_at")
+    )
+    resource_marker = tuple(
+        sorted(
+            (
+                str(resource.get("id") or ""),
+                str(resource.get("status") or ""),
+                str(resource.get("updated_at") or resource.get("created_at") or ""),
+            )
+            for resource in resources
+        )
+    )
+    path_marker = tuple(
+        (
+            str(step.get("id") or step.get("order") or ""),
+            str(step.get("title") or ""),
+            str(step.get("status") or ""),
+        )
+        for step in (path or {}).get("steps", [])
+    )
+    quiz_marker = (
+        str((last_quiz or {}).get("id") or ""),
+        str((last_quiz or {}).get("score") or ""),
+        str((last_quiz or {}).get("total") or ""),
+        str((last_quiz or {}).get("created_at") or ""),
+    )
+    raw = repr((profile_marker, resource_marker, path_marker, quiz_marker))
+    return uuid.uuid5(uuid.NAMESPACE_URL, raw).hex
+
+
 def _compute_radar(
     p: dict,
     resources: list[dict],
@@ -261,6 +313,13 @@ def _compute_events(
             "eval_refresh": ("评估", "geekblue"),
             "review_card_generate": ("复习卡", "purple"),
         }
+        content_map = {
+            "resource_view": "浏览学习资源",
+            "resource_complete": "完成学习资源",
+            "chat": "与智能学习助手对话",
+            "quiz_submit": "提交学习测验",
+            "review_card_generate": "生成复习卡",
+        }
         lbl, color = label_map.get(e.get("event_type", ""), ("学习", "default"))
         meta = e.get("meta") or {}
         if e.get("event_type") == "mastery_feedback":
@@ -272,7 +331,7 @@ def _compute_events(
         elif e.get("event_type") == "eval_refresh":
             content = meta.get("summary") or "更新学习效果评估"
         else:
-            content = meta.get("title") or e.get("event_type", "学习行为")
+            content = meta.get("title") or content_map.get(e.get("event_type", ""), "记录学习行为")
         events.append(
             EvalEvent(
                 label=lbl,
@@ -315,23 +374,27 @@ def _compute_events(
     return events
 
 
-def _rule_based_advice(stats: EvalStats, profile: dict | None) -> tuple[str, str, str]:
+def _rule_based_advice(
+    stats: EvalStats,
+    profile: dict | None,
+    path: dict | None,
+) -> tuple[str, str, str]:
     p = profile or {}
     if stats.total_resources == 0:
         summary = "你尚未生成任何学习资源。建议先与 AI 助手对话，构建学习画像并生成首批资源。"
     elif stats.profile_completeness < 50:
         summary = (
-            f"当前画像完整度为 {stats.profile_completeness}%，"
+            f"当前画像字段覆盖率为 {stats.profile_completeness}%，"
             "建议继续补充学习目标、认知风格与时间投入等信息，以便获得更精准的评估。"
         )
     else:
         summary = (
             f"整体表现良好，已生成 {stats.total_resources} 个学习资源，"
-            f"画像完整度 {stats.profile_completeness}%，累计学习 {stats.study_days} 天。"
+            f"画像字段覆盖率 {stats.profile_completeness}%，累计学习 {stats.study_days} 天。"
         )
 
     strengths = (
-        "学习画像较完整，资源推荐精准度高。"
+        "学习画像字段覆盖较完整，已具备个性化推荐的数据基础。"
         if stats.profile_completeness >= 60
         else "已开始学习，具备初步数据基础。"
     )
@@ -345,24 +408,32 @@ def _rule_based_advice(stats: EvalStats, profile: dict | None) -> tuple[str, str
     if weak:
         improvements += f" 建议重点巩固：{'、'.join(weak[:3])}。"
 
-    recent = p.get("recent_progress") or ""
-    if recent and recent != _PROFILE_DEFAULTS["recent_progress"]:
-        summary += f" {recent}"
+    path_summary = _path_progress_summary(path)
+    if path_summary:
+        summary += f" {path_summary}"
 
     return summary, strengths, improvements
 
 
-async def _generate_ai_advice(profile: dict, last_quiz: dict | None) -> str:
+async def _generate_ai_advice(
+    profile: dict,
+    last_quiz: dict | None,
+    path: dict | None,
+) -> str:
     llm = get_primary_llm()
     if llm.use_mock:
         return ""
     try:
+        advice_profile = dict(profile)
+        path_summary = _path_progress_summary(path)
+        if path_summary:
+            advice_profile["recent_progress"] = path_summary
         advice = await llm.chat(
             [
                 {"role": "system", "content": eval_advice_system(deep=False)},
                 {
                     "role": "user",
-                    "content": eval_advice_user_payload(profile=profile, last_quiz=last_quiz),
+                    "content": eval_advice_user_payload(profile=advice_profile, last_quiz=last_quiz),
                 },
             ],
             temperature=0.55,
@@ -373,8 +444,12 @@ async def _generate_ai_advice(profile: dict, last_quiz: dict | None) -> str:
         return ""
 
 
-def _attach_cached_advice(stats: EvalStats, cache: dict | None) -> EvalStats:
-    if not cache:
+def _attach_cached_advice(
+    stats: EvalStats,
+    cache: dict | None,
+    context_key: str,
+) -> EvalStats:
+    if not cache or cache.get("context_key") != context_key:
         return stats
     return stats.model_copy(
         update={
@@ -404,6 +479,7 @@ async def build_eval_stats(user_id: str) -> EvalStats:
     study_days, study_streak, studied_today = _study_metrics(events, resources)
 
     last_quiz = await get_last_quiz_attempt(user_id)
+    context_key = _advice_context_key(profile, resources, path, last_quiz)
     radar = _compute_radar(profile or {}, resources, path, last_quiz, events)
     recent_events = _compute_events(resources, profile, last_quiz, events)
     forgetting_risk, review_pressure, retention_curve, pressure_balance = _build_review_trends(
@@ -426,7 +502,7 @@ async def build_eval_stats(user_id: str) -> EvalStats:
         retention_curve=retention_curve,
         pressure_balance=pressure_balance,
     )
-    summary, strengths, improvements = _rule_based_advice(stats, profile)
+    summary, strengths, improvements = _rule_based_advice(stats, profile, path)
     stats = stats.model_copy(
         update={
             "ai_advice": summary,
@@ -434,7 +510,7 @@ async def build_eval_stats(user_id: str) -> EvalStats:
             "improvements": improvements,
         }
     )
-    return _attach_cached_advice(stats, cache)
+    return _attach_cached_advice(stats, cache, context_key)
 
 
 async def refresh_eval_stats(user_id: str) -> EvalStats:
@@ -454,6 +530,7 @@ async def refresh_eval_stats(user_id: str) -> EvalStats:
     study_days, study_streak, studied_today = _study_metrics(events, resources)
 
     last_quiz = await get_last_quiz_attempt(user_id)
+    context_key = _advice_context_key(profile, resources, path, last_quiz)
     radar = _compute_radar(profile, resources, path, last_quiz, events)
     recent_events = _compute_events(resources, profile, last_quiz, events)
     forgetting_risk, review_pressure, retention_curve, pressure_balance = _build_review_trends(
@@ -477,8 +554,8 @@ async def refresh_eval_stats(user_id: str) -> EvalStats:
         pressure_balance=pressure_balance,
     )
 
-    summary, strengths, improvements = _rule_based_advice(stats, profile)
-    ai_advice = await _generate_ai_advice(profile, last_quiz)
+    summary, strengths, improvements = _rule_based_advice(stats, profile, path)
+    ai_advice = await _generate_ai_advice(profile, last_quiz, path)
     if not ai_advice:
         ai_advice = summary
 
@@ -491,6 +568,7 @@ async def refresh_eval_stats(user_id: str) -> EvalStats:
                 "strengths": strengths,
                 "improvements": improvements,
                 "updated_at": now,
+                "context_key": context_key,
             }
         },
     )
@@ -498,7 +576,7 @@ async def refresh_eval_stats(user_id: str) -> EvalStats:
         user_id,
         "eval_refresh",
         meta={
-            "summary": f"画像完整度 {completeness}% · 资源 {total} 个",
+            "summary": f"画像字段覆盖率 {completeness}% · 资源 {total} 个",
             "profile_completeness": completeness,
             "total_resources": total,
         },

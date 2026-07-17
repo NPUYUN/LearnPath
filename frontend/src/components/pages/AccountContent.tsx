@@ -134,7 +134,7 @@ export default function AccountContent() {
   const initial = account?.display_name?.charAt(0) || userName?.charAt(0) || "学";
 
   return (
-    <div>
+    <div className="lp-account-page">
       <PageHeader
         title="个人主页"
         subtitle="账号资料与学习身份 · 与学习画像（AI 抽取）区分"
@@ -155,7 +155,7 @@ export default function AccountContent() {
         }
       />
       <div className="lp-page-body">
-        <Row gutter={[20, 20]}>
+        <Row gutter={[16, 16]} className="lp-account-grid">
           <Col span={24}>
             <button
               type="button"
@@ -171,7 +171,7 @@ export default function AccountContent() {
                   <Title level={5} style={{ margin: 0, color: "inherit" }}>
                     学习成就馆
                   </Title>
-                  <Text style={{ color: "rgba(255,255,255,0.82)", fontSize: 13 }}>
+                  <Text className="lp-account-insights-entry-subtitle">
                     查看学力等级、成就徽章与可视化成长数据
                   </Text>
                 </div>
@@ -187,7 +187,7 @@ export default function AccountContent() {
             </button>
           </Col>
           <Col xs={24} lg={8}>
-            <Card loading={loading}>
+            <Card loading={loading} className="lp-account-profile-card">
               <div className="lp-account-hero">
                 <Avatar size={72} className="learnpath-user-avatar">
                   {initial}
@@ -211,7 +211,7 @@ export default function AccountContent() {
 
           <Col xs={24} lg={16}>
             {editing ? (
-              <Card title="编辑个人信息">
+              <Card title="编辑个人信息" className="lp-account-details-card">
                 <Form form={form} layout="vertical">
                   <Row gutter={16}>
                     <Col xs={24} sm={12}>
@@ -247,7 +247,7 @@ export default function AccountContent() {
                 </Form>
               </Card>
             ) : (
-              <Card title="基本信息" loading={loading}>
+              <Card title="基本信息" loading={loading} className="lp-account-details-card">
                 <Descriptions column={1} bordered size="middle">
                   <Descriptions.Item label="用户 ID">
                     <Text copyable>{account?.user_id ?? userId}</Text>

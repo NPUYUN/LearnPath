@@ -95,6 +95,8 @@ import StarOutlined from "@ant-design/icons/StarOutlined";
 import DatabaseOutlined from "@ant-design/icons/DatabaseOutlined";
 import FolderAddOutlined from "@ant-design/icons/FolderAddOutlined";
 import ThunderboltOutlined from "@ant-design/icons/ThunderboltOutlined";
+import DownOutlined from "@ant-design/icons/DownOutlined";
+import UpOutlined from "@ant-design/icons/UpOutlined";
 
 const { Text } = Typography;
 
@@ -193,6 +195,7 @@ export default function ResourcesContent() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [recommendations, setRecommendations] = useState<ResourceRecommendation[]>([]);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
+  const [recommendationsExpanded, setRecommendationsExpanded] = useState(false);
   const [templates, setTemplates] = useState<ResourceTemplateInfo[]>([]);
   const [templateLoading, setTemplateLoading] = useState(false);
   const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(null);
@@ -484,7 +487,6 @@ export default function ResourcesContent() {
 
   const doneSteps = pathSteps.filter((s) => s.status === "done").length;
   const activeStep = pathSteps.find((s) => s.status === "in_progress");
-  const visibleCount = filteredGrouped.stages.reduce((n, s) => n + s.resourceCount, 0);
   const visibleResources = useMemo(() => {
     const resourceMap = new Map<string, LearningResource>();
     filteredGrouped.stages.forEach((stage) => {
@@ -496,6 +498,7 @@ export default function ResourcesContent() {
     });
     return Array.from(resourceMap.values());
   }, [filteredGrouped]);
+  const visibleCount = visibleResources.length;
   const selectedResources = useMemo(() => {
     const idSet = new Set(selectedIds);
     return items.filter((resource) => idSet.has(resource.id));
@@ -513,6 +516,8 @@ export default function ResourcesContent() {
       }),
     [items, recommendations]
   );
+  const primaryRecommendation = recommendationCards[0];
+  const additionalRecommendations = recommendationCards.slice(1);
   const selectedCount = selectedResources.length;
   const allVisibleSelected =
     visibleResources.length > 0 &&
@@ -881,8 +886,8 @@ export default function ResourcesContent() {
         title="学习资源库"
         subtitle={
           pathSteps.length
-            ? `${items.length} 项资源 · ${pathSteps.length} 个学习阶段 · 按阶段与类型浏览`
-            : `${items.length} 项资源 · 按主题阶段与类型浏览`
+            ? `${learningItems.length} 项学习资源 · ${pathSteps.length} 个路径阶段 · 按阶段与类型浏览`
+            : `${learningItems.length} 项学习资源 · 按主题与类型浏览`
         }
         icon={<BookOutlined />}
         extra={
@@ -1374,115 +1379,144 @@ export default function ResourcesContent() {
           />
         ) : (
           <>
-        {pathSteps.length > 0 && (
-          <div className="lp-resource-summary">
-            <div className="lp-resource-summary-icon">
-              <CompassOutlined />
-            </div>
-            <div className="lp-resource-summary-main">
-              <Text strong className="lp-resource-summary-title">
-                学习路径进度
-              </Text>
-              <Text type="secondary" className="lp-resource-summary-desc">
-                {activeStep
-                  ? `当前阶段：${activeStep.title}`
-                  : doneSteps === pathSteps.length
-                    ? "全部阶段已完成"
-                    : "按路径阶段组织你的学习资源"}
-              </Text>
-              <div className="lp-resource-summary-track">
-                {pathSteps.map((step) => {
-                  const meta = STAGE_STATUS_META[
-                    step.status === "done"
-                      ? "done"
-                      : step.status === "in_progress"
-                        ? "in_progress"
-                        : "pending"
-                  ];
-                  return (
-                    <div
-                      key={step.order}
-                      className={`lp-resource-summary-step lp-resource-summary-step--${step.status}`}
-                      style={{ "--step-color": meta.color } as React.CSSProperties}
-                      title={step.title}
-                    >
-                      <span className="lp-resource-summary-step-num">{step.order}</span>
-                      <span className="lp-resource-summary-step-label">{step.title}</span>
-                    </div>
-                  );
-                })}
+        {!manageMode &&
+          (pathSteps.length > 0 || recommendationLoading || recommendationCards.length > 0) && (
+            <section className="lp-resource-focus-panel" aria-labelledby="lp-resource-focus-title">
+              <div className="lp-resource-focus-head">
+                <div className="lp-resource-focus-heading">
+                  <span className="lp-resource-focus-heading-icon">
+                    <CompassOutlined />
+                  </span>
+                  <div>
+                    <Text strong id="lp-resource-focus-title">继续学习</Text>
+                    <Text type="secondary">沿当前路径直接进入最值得学习的资源</Text>
+                  </div>
+                </div>
+                <Button
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={recommendationLoading}
+                  onClick={() => void loadRecommendations(false)}
+                >
+                  刷新推荐
+                </Button>
               </div>
-            </div>
-            <div className="lp-resource-summary-stats">
-              <span className="lp-resource-summary-stat">
-                <strong>{doneSteps}</strong>/{pathSteps.length} 阶段
-              </span>
-              <span className="lp-resource-summary-stat">
-                显示 <strong>{visibleCount}</strong> 项
-              </span>
-            </div>
-          </div>
-        )}
 
-        {!manageMode && (recommendationLoading || recommendationCards.length > 0) && (
-          <section className="lp-resource-recommend-panel">
-            <div className="lp-resource-recommend-head">
-              <div className="lp-resource-recommend-title">
-                <span className="lp-resource-recommend-bulb">
-                  <BulbOutlined />
-                </span>
-                <div>
-                  <Text strong>当前推荐</Text>
-                  <Text type="secondary">此刻优先看这几项</Text>
+              <div className="lp-resource-focus-body">
+                {pathSteps.length > 0 && (
+                  <div className="lp-resource-focus-path">
+                    <span className="lp-resource-focus-label">当前路径</span>
+                    <strong>
+                      {activeStep
+                        ? activeStep.title
+                        : doneSteps === pathSteps.length
+                          ? "全部阶段已完成"
+                          : "准备开始学习"}
+                    </strong>
+                    <div className="lp-resource-summary-track">
+                      {pathSteps.map((step) => {
+                        const meta = STAGE_STATUS_META[
+                          step.status === "done"
+                            ? "done"
+                            : step.status === "in_progress"
+                              ? "in_progress"
+                              : "pending"
+                        ];
+                        return (
+                          <div
+                            key={step.order}
+                            className={`lp-resource-summary-step lp-resource-summary-step--${step.status}`}
+                            style={{ "--step-color": meta.color } as React.CSSProperties}
+                            title={step.title}
+                          >
+                            <span className="lp-resource-summary-step-num">{step.order}</span>
+                            <span className="lp-resource-summary-step-label">{step.title}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="lp-resource-focus-path-meta">
+                      <span><strong>{doneSteps}</strong>/{pathSteps.length} 阶段完成</span>
+                      <span>当前显示 <strong>{visibleCount}</strong> 项资源</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="lp-resource-focus-recommendation">
+                  <span className="lp-resource-focus-label">
+                    <BulbOutlined /> 首选资源
+                  </span>
+                  {recommendationLoading && !primaryRecommendation ? (
+                    <div className="lp-resource-focus-loading">
+                      <Spin size="small" />
+                      <Text type="secondary">正在匹配当前学习状态</Text>
+                    </div>
+                  ) : primaryRecommendation ? (
+                    <button
+                      type="button"
+                      className="lp-resource-focus-primary"
+                      style={{ "--rec-accent": primaryRecommendation.cfg.color } as React.CSSProperties}
+                      onClick={() => openResourceById(primaryRecommendation.rec.id)}
+                    >
+                      <span className="lp-resource-recommend-icon">{primaryRecommendation.cfg.icon}</span>
+                      <span className="lp-resource-recommend-copy">
+                        <span className="lp-resource-recommend-name">{primaryRecommendation.rec.title}</span>
+                        <span className="lp-resource-recommend-reason">
+                          {primaryRecommendation.rec.reason ||
+                            primaryRecommendation.resource?.topic ||
+                            primaryRecommendation.rec.topic ||
+                            "适合当前阶段"}
+                        </span>
+                      </span>
+                      <span className="lp-resource-focus-action">
+                        开始学习 <ArrowRightOutlined />
+                      </span>
+                    </button>
+                  ) : (
+                    <Text type="secondary">当前路径暂无可推荐资源</Text>
+                  )}
                 </div>
               </div>
-              <Button
-                size="small"
-                icon={<ReloadOutlined />}
-                loading={recommendationLoading}
-                onClick={() => void loadRecommendations(false)}
-              >
-                刷新
-              </Button>
-            </div>
-            {recommendationLoading && recommendationCards.length === 0 ? (
-              <div className="lp-resource-recommend-loading">
-                <Spin size="small" />
-              </div>
-            ) : (
-              <div className="lp-resource-recommend-grid">
-                {recommendationCards.map(({ rec, resource, cfg }, index) => (
-                  <button
-                    key={rec.id}
-                    type="button"
-                    className="lp-resource-recommend-card"
-                    style={{ "--rec-accent": cfg.color } as React.CSSProperties}
-                    onClick={() => openResourceById(rec.id)}
-                  >
-                    <span className="lp-resource-recommend-rank">{index + 1}</span>
-                    <span className="lp-resource-recommend-icon">{cfg.icon}</span>
-                    <span className="lp-resource-recommend-copy">
-                      <span className="lp-resource-recommend-name">{rec.title}</span>
-                      <span className="lp-resource-recommend-reason">
-                        {rec.reason || resource?.topic || rec.topic || "适合当前阶段"}
-                      </span>
-                    </span>
-                    <ArrowRightOutlined className="lp-resource-recommend-arrow" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
 
-        {!manageMode && (
-          <ResourceTemplateCenter
-            loading={templateLoading}
-            creatingId={creatingTemplateId}
-            templates={templates}
-            onCreate={handleCreateFromTemplate}
-          />
-        )}
+              {additionalRecommendations.length > 0 && (
+                <div className="lp-resource-focus-more">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={recommendationsExpanded ? <UpOutlined /> : <DownOutlined />}
+                    onClick={() => setRecommendationsExpanded((value) => !value)}
+                  >
+                    {recommendationsExpanded
+                      ? "收起备选推荐"
+                      : `查看另外 ${additionalRecommendations.length} 项推荐`}
+                  </Button>
+                  {recommendationsExpanded && (
+                    <div className="lp-resource-recommend-grid">
+                      {additionalRecommendations.map(({ rec, resource, cfg }, index) => (
+                        <button
+                          key={rec.id}
+                          type="button"
+                          className="lp-resource-recommend-card"
+                          style={{ "--rec-accent": cfg.color } as React.CSSProperties}
+                          onClick={() => openResourceById(rec.id)}
+                        >
+                          <span className="lp-resource-recommend-rank">{index + 2}</span>
+                          <span className="lp-resource-recommend-icon">{cfg.icon}</span>
+                          <span className="lp-resource-recommend-copy">
+                            <span className="lp-resource-recommend-name">{rec.title}</span>
+                            <span className="lp-resource-recommend-reason">
+                              {rec.reason || resource?.topic || rec.topic || "适合当前阶段"}
+                            </span>
+                          </span>
+                          <ArrowRightOutlined className="lp-resource-recommend-arrow" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
 
         <div className="lp-resource-filters">
           <span className="lp-resource-filters-label">资源类型</span>
@@ -1610,6 +1644,17 @@ export default function ResourcesContent() {
             selectedIds={selectedIds}
             onToggleSelect={toggleResourceSelection}
           />
+        )}
+
+        {!manageMode && (
+          <div className="lp-resource-template-lower">
+            <ResourceTemplateCenter
+              loading={templateLoading}
+              creatingId={creatingTemplateId}
+              templates={templates}
+              onCreate={handleCreateFromTemplate}
+            />
+          </div>
         )}
 
         </>

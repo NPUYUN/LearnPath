@@ -20,7 +20,9 @@ import {
   Radio,
   Input,
   Alert,
+  Dropdown,
 } from "antd";
+import type { MenuProps } from "antd";
 import CheckCircleOutlined from "@ant-design/icons/CheckCircleOutlined";
 import PlayCircleOutlined from "@ant-design/icons/PlayCircleOutlined";
 import LockOutlined from "@ant-design/icons/LockOutlined";
@@ -31,6 +33,7 @@ import LoadingOutlined from "@ant-design/icons/LoadingOutlined";
 import VideoCameraOutlined from "@ant-design/icons/VideoCameraOutlined";
 import AppstoreOutlined from "@ant-design/icons/AppstoreOutlined";
 import UnorderedListOutlined from "@ant-design/icons/UnorderedListOutlined";
+import MoreOutlined from "@ant-design/icons/MoreOutlined";
 import { getStepClassroomButtonPhase, persistActiveClassroom } from "@/lib/classroomActive";
 import PageHeader from "@/components/PageHeader";
 import {
@@ -634,6 +637,30 @@ export default function PathContent() {
   const readyLibraries = replanLibraries.filter(
     (l) => l.status === "ready" && (l.chunk_count ?? 0) > 0,
   );
+  const pathActionItems = [
+    {
+      key: "classroom",
+      icon: <VideoCameraOutlined />,
+      label: "管理课堂",
+    },
+    { type: "divider" as const },
+    {
+      key: "replan",
+      icon: <FireOutlined />,
+      label: "重新规划学习路径",
+      danger: true,
+      disabled: isReplanRunning,
+    },
+  ] satisfies MenuProps["items"];
+  const handlePathAction: MenuProps["onClick"] = ({ key }) => {
+    if (key === "classroom") {
+      setManageOpen(true);
+      return;
+    }
+    if (key === "replan") {
+      void openReplanModal();
+    }
+  };
   const submitReplan = () => {
     const trimmedGoal = replanGoalInput.trim();
     if (replanGenSource === "library" && !replanLibraryId) {
@@ -909,11 +936,14 @@ export default function PathContent() {
         subtitle={`${steps.length} 个主阶段 · ${flatSteps.length} 个学习节点 · ${courseLabel}`}
         icon={<ApartmentOutlined />}
         extra={
-          <Space wrap>
-            <Space.Compact>
+          <div className="lp-path-header-actions">
+            <div className="lp-path-view-switch" aria-label="路径视图">
+              <Text type="secondary">视图</Text>
+              <Space.Compact>
               <Button
                 icon={<UnorderedListOutlined />}
                 type={viewMode === "timeline" ? "primary" : "default"}
+                aria-pressed={viewMode === "timeline"}
                 onClick={() => setViewMode("timeline")}
               >
                 时间线
@@ -921,18 +951,23 @@ export default function PathContent() {
               <Button
                 icon={<AppstoreOutlined />}
                 type={viewMode === "board" ? "primary" : "default"}
+                aria-pressed={viewMode === "board"}
                 onClick={() => setViewMode("board")}
               >
                 阶段看板
               </Button>
-            </Space.Compact>
-            <Button icon={<VideoCameraOutlined />} onClick={() => setManageOpen(true)}>
-              管理课堂
-            </Button>
-            <Button icon={<FireOutlined />} type="primary" loading={isReplanRunning} onClick={openReplanModal}>
-              重新规划
-            </Button>
-          </Space>
+              </Space.Compact>
+            </div>
+            <Dropdown
+              menu={{ items: pathActionItems, onClick: handlePathAction }}
+              trigger={["click"]}
+              disabled={isReplanRunning}
+            >
+              <Button icon={<MoreOutlined />} loading={isReplanRunning}>
+                路径操作
+              </Button>
+            </Dropdown>
+          </div>
         }
       />
       <div className="lp-page-body lp-path-page">

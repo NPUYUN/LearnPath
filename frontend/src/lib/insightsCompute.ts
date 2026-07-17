@@ -111,7 +111,7 @@ export function computeInsights(input: {
     {
       id: "profile_seed",
       title: "画像初成",
-      desc: "学习画像完整度达 30%",
+      desc: "学习画像字段覆盖率达 30%",
       emoji: "🌱",
       unlocked: profilePct >= 30,
       tier: "bronze",
@@ -119,7 +119,7 @@ export function computeInsights(input: {
     {
       id: "profile_master",
       title: "画像达人",
-      desc: "学习画像完整度达 80%",
+      desc: "学习画像字段覆盖率达 80%",
       emoji: "🎯",
       unlocked: profilePct >= 80,
       tier: "gold",
